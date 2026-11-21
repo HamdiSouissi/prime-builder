@@ -212,6 +212,85 @@ final class DocumentTest extends TestCase
         }
     }
 
+    /** @param array<string, mixed> $settings */
+    private function renderBasicWidget(string $type, array $settings): string
+    {
+        $node = $this->element($type, 'widget');
+        $node['settings'] = $settings;
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        return (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+    }
+
+    public function testIconRendersAnAccessibleOrDecorativeSymbol(): void
+    {
+        $html = $this->renderBasicWidget('icon', ['icon' => 'heart', 'accessible_label' => 'Favori']);
+        self::assertStringContainsString('<span role="img" aria-label="Favori">♥</span>', $html);
+        self::assertStringContainsString('<span aria-hidden="true">★</span>', $this->renderBasicWidget('icon', ['icon' => 'star']));
+        $node = $this->element('icon');
+        $node['settings'] = ['icon' => '<script>'];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+    }
+
+    public function testIconListRendersEscapedItemsWithDecorativeIcons(): void
+    {
+        $html = $this->renderBasicWidget('icon_list', ['icon' => 'check', 'items' => "Premier\nDeuxième <script>alert(1)</script>"]);
+        self::assertStringContainsString('<ul><li><span aria-hidden="true">✓</span> Premier</li>', $html);
+        self::assertStringContainsString('Deuxième', $html);
+        self::assertStringNotContainsString('<script>', $html);
+    }
+
+    public function testImageBoxRendersSafeImageDimensionsContentAndLink(): void
+    {
+        $html = $this->renderBasicWidget('image_box', ['image_url' => '/uploads/image.jpg', 'alt' => 'Paysage', 'width' => 640, 'height' => 480, 'title' => 'Une boîte', 'text' => '<p>Texte <strong>utile</strong></p>', 'url' => '/suite', 'button_text' => 'Suite']);
+        self::assertStringContainsString('src="/uploads/image.jpg" alt="Paysage" width="640" height="480" loading="lazy"', $html);
+        self::assertStringContainsString('<h3>Une boîte</h3>', $html);
+        self::assertStringContainsString('<strong>utile</strong>', $html);
+        self::assertStringContainsString('href="/suite">Suite</a>', $html);
+        $node = $this->element('image_box');
+        $node['settings'] = ['image_url' => 'javascript:alert(1)'];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+    }
+
+    public function testTestimonialRendersQuotationAttributionAndOptionalPortrait(): void
+    {
+        $html = $this->renderBasicWidget('testimonial', ['text' => '<p>Très <strong>utile</strong>.</p>', 'author' => 'Camille', 'job_title' => 'Designer', 'image_url' => '/uploads/portrait.jpg', 'alt' => '', 'width' => 100, 'height' => 100]);
+        self::assertStringContainsString('<figure><blockquote><p>Très <strong>utile</strong>.</p></blockquote>', $html);
+        self::assertStringContainsString('alt="" width="100" height="100" loading="lazy"', $html);
+        self::assertStringContainsString('<cite>Camille</cite> <span>Designer</span>', $html);
+    }
+
+    public function testToggleUsesNativeDetailsWithAnOptionalOpenInitialState(): void
+    {
+        $html = $this->renderBasicWidget('toggle', ['title' => 'Détails', 'text' => '<p>Informations</p>', 'initial' => 'open']);
+        self::assertStringContainsString('<details open><summary>Détails</summary><div><p>Informations</p></div></details>', $html);
+        self::assertStringContainsString('<details><summary>Détails</summary>', $this->renderBasicWidget('toggle', ['title' => 'Détails', 'initial' => 'closed']));
+        $node = $this->element('toggle');
+        $node['settings'] = ['initial' => 'open onclick=alert(1)'];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+    }
+
+    public function testSocialLinksUseNamedNavigationAndRejectUnsafeUrls(): void
+    {
+        $html = $this->renderBasicWidget('social', ['label' => 'Nos réseaux', 'facebook' => 'https://facebook.com/example', 'mastodon' => 'https://example.org/@user']);
+        self::assertStringContainsString('<nav aria-label="Nos réseaux"><ul>', $html);
+        self::assertStringContainsString('href="https://facebook.com/example">Facebook</a>', $html);
+        self::assertStringContainsString('href="https://example.org/@user">Mastodon</a>', $html);
+        $node = $this->element('social');
+        $node['settings'] = ['facebook' => 'javascript:alert(1)'];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+    }
+
+    public function testStarRatingRendersOneAccessibleLabelAndFiveVisualStars(): void
+    {
+        $html = $this->renderBasicWidget('star_rating', ['value' => 4]);
+        self::assertStringContainsString('<span role="img" aria-label="', $html);
+        self::assertStringContainsString('<span aria-hidden="true">★★★★☆</span>', $html);
+        $node = $this->element('star_rating');
+        $node['settings'] = ['value' => 6];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+    }
+
     public function testNewWidgetsProduceSafeReadableFallbacks(): void
     {
         $list = $this->element('list', 'list');

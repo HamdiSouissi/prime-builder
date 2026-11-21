@@ -567,8 +567,8 @@ async function openMedia(elementId, urlField, kind = 'image') {
       const node = find(history.present, elementId);
       if (!node || !media || typeof media.url !== 'string') return;
       const settings = { ...node.settings, [urlField]: media.url };
-      if (['image', 'card'].includes(node.type) && typeof media.alt === 'string') settings.alt = media.alt;
-      if (node.type === 'image') {
+      if (['image', 'card', 'image_box', 'testimonial'].includes(node.type) && typeof media.alt === 'string') settings.alt = media.alt;
+      if (['image', 'image_box', 'testimonial'].includes(node.type)) {
         for (const key of ['width', 'height']) if (Number.isInteger(media[key]) && media[key] > 0 && media[key] <= 10000) settings[key] = media[key];
       }
       commit(update(history.present, elementId, { settings }), false, ui.choose_media); renderSettings();
@@ -613,7 +613,7 @@ function renderSettings() {
         if (value === undefined) delete settings[name]; else settings[name] = value;
         commit(update(history.present, selected, { settings }), false, `${ui.content} : ${schema.label || ui[name] || name}`);
       }));
-      if ((['image', 'video', 'audio'].includes(element.type) && name === 'url') || (element.type === 'card' && name === 'image_url')) {
+      if ((['image', 'video', 'audio'].includes(element.type) && name === 'url') || (['card', 'image_box', 'testimonial'].includes(element.type) && name === 'image_url')) {
         const choose = text('button', ui.choose_media, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMedia = '';
         choose.addEventListener('click', () => openMedia(element.id, name, ['video', 'audio'].includes(element.type) ? element.type : 'image')); fields.append(choose);
       }

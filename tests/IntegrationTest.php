@@ -119,6 +119,22 @@ final class IntegrationTest extends TestCase
         self::assertSame('Titre Du code & du texte Suite', ($definition->textExtractor)($document['blocks'][0]['data']));
     }
 
+    public function testStarRatingIsLocalizedInPersistedContent(): void
+    {
+        $app = $this->activated(null);
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'][0] = [
+            'id' => 'rating', 'type' => 'star_rating', 'settings' => ['value' => 4], 'styles' => [], 'children' => [],
+        ];
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('role="img" aria-label="4 sur 5 étoiles"', $entry->contentHtml);
+        self::assertStringContainsString('aria-hidden="true">★★★★☆', $entry->contentHtml);
+    }
+
     public function testPartialPreviewRendersOnlyTheRequestedSubtreeAndValidatesTheWholeDocument(): void
     {
         $app = $this->activated(null);
@@ -565,7 +581,9 @@ final class IntegrationTest extends TestCase
         $document = $this->document();
         $document['blocks'][0]['data']['elements'] = $item['elements'];
         self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $document], $editor)->status());
-        self::assertStringContainsString('<strong>modèle</strong>', $app->get(EntryRepository::class)->find(3)?->contentHtml ?? '');
+        $inserted = $app->get(EntryRepository::class)->find(3);
+        self::assertNotNull($inserted);
+        self::assertStringContainsString('<strong>modèle</strong>', $inserted->contentHtml);
 
         $invalid = $payload;
         $invalid['data']['elements'][0]['children'][0]['type'] = 'unknown_widget';
