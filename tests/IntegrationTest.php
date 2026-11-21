@@ -293,6 +293,14 @@ final class IntegrationTest extends TestCase
         self::assertNotNull($entry);
         self::assertSame('dynamic', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['text']);
         self::assertStringNotContainsString('"dynamic"', $entry->content);
+        $revisions = $app->get(\Prime\Content\RevisionRepository::class)->forEntry(1);
+        self::assertNotEmpty($revisions);
+        $revisionId = $revisions[0]->id;
+        $document['blocks'][0]['data']['elements'][0]['settings']['text'] = 'Autre valeur';
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(\Prime\Content\EntryService::class)->restoreRevision(1, $revisionId, $this->user($app, 1));
+        self::assertSame('dynamic', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['text']);
+        self::assertStringNotContainsString('"dynamic"', $entry->content);
         $app->get(PluginManager::class)->deactivate('prime-builder');
         // A new request without the plugin has a fresh core-only block registry.
         $coreRenderer = new \Prime\Editor\Renderer(new BlockRegistry(), new \Prime\Security\HtmlSanitizer());

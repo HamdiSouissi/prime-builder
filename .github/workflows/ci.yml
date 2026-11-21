@@ -141,6 +141,14 @@ jobs:
       - name: Playwright
         working-directory: builder/tests/e2e
         run: npm test
+      - name: Fresh public request with the plugin disabled
+        working-directory: cms
+        run: |
+          php bin/prime plugin:deactivate prime-builder
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/test-prime-builder?pb-lifecycle-test=1' > /tmp/prime-builder-disabled.html
+          grep -F '<h2>dynamic</h2>' /tmp/prime-builder-disabled.html
+          if grep -q '/assets/plugins/prime-builder/' /tmp/prime-builder-disabled.html; then echo 'Plugin assets appeared after deactivation'; exit 1; fi
+          php bin/prime plugin:activate prime-builder
       - uses: actions/upload-artifact@v4
         if: always()
         with:
