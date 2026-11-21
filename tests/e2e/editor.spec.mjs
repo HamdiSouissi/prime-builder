@@ -140,6 +140,33 @@ test('image selection uses the Prime media picker', async ({ page }) => {
 });
 
 
+test('responsive container controls and unsaved style reset update the preview', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Conteneur' }).click();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await page.getByLabel('Disposition responsive').selectOption('grid');
+  await page.getByLabel('Colonnes responsive').fill('3');
+  await expect(page.frameLocator('[data-pb-frame]').locator('.pb-container').last()).toHaveCSS('display', 'grid');
+  await page.getByRole('button', { name: 'Mobile', exact: true }).click();
+  await page.getByLabel('Disposition responsive').selectOption('flex');
+  await page.getByLabel('Direction responsive').selectOption('column');
+  await expect(page.frameLocator('[data-pb-frame]').locator('.pb-container').last()).toHaveCSS('display', 'flex');
+  await expect(page.frameLocator('[data-pb-frame]').locator('.pb-container').last()).toHaveCSS('flex-direction', 'column');
+  await page.getByRole('button', { name: 'Ordinateur', exact: true }).click();
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await page.getByLabel('Couleur du texte').fill('#123456');
+  const container = page.frameLocator('[data-pb-frame]').locator('.pb-container').last();
+  await expect(container).toHaveCSS('color', 'rgb(18, 52, 86)');
+  await page.locator('[data-pb-status]').selectOption('published');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await expect(container).toHaveCSS('color', 'rgb(18, 52, 86)');
+  await page.getByLabel('Couleur du texte').fill('');
+  await expect(container).not.toHaveCSS('color', 'rgb(18, 52, 86)');
+  await expectAccessible(page);
+});
+
 test('built-in default widgets save and remain accessible together', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);

@@ -182,7 +182,7 @@ function makeField(name, schema, current, onChange) {
   let input;
   if (schema.type === 'enum') {
     input = document.createElement('select');
-    if (current == null) { const option = text('option', '—'); option.value = ''; input.append(option); }
+    const option = text('option', ui.default_option); option.value = ''; input.append(option);
     for (const value of schema.values) { const option = text('option', schema.option_labels?.[value] || ui[value] || value); option.value = value; input.append(option); }
   } else if (schema.type === 'rich' || schema.type === 'multiline' || schema.type === 'media_list') {
     input = document.createElement('textarea');
@@ -290,7 +290,13 @@ function renderSettings() {
     fields.append(text('p', ui.responsive_help, 'pb-intro'));
     const schemas = tab === 'style'
       ? { color: { type: 'text', max: 7 }, background: { type: 'text', max: 7 }, font_size: { type: 'integer', min: 0, max: 2000 }, align: { type: 'enum', values: ['left', 'center', 'right'] }, radius: { type: 'integer', min: 0, max: 2000 } }
-      : { padding: { type: 'integer', min: 0, max: 2000 }, margin: { type: 'integer', min: 0, max: 2000 }, gap: { type: 'integer', min: 0, max: 2000 }, min_height: { type: 'integer', min: 0, max: 2000 }, width: { type: 'text', max: 5 } };
+      : { padding: { type: 'integer', min: 0, max: 2000 }, margin: { type: 'integer', min: 0, max: 2000 }, gap: { type: 'integer', min: 0, max: 2000 }, min_height: { type: 'integer', min: 0, max: 2000 }, width: { type: 'text', max: 6 },
+        ...(isContainer(element) ? {
+          layout_mode: { type: 'enum', values: ['flex', 'grid'] }, flow: { type: 'enum', values: ['row', 'column'] },
+          grid_columns: { type: 'integer', min: 1, max: 6 }, wrap: { type: 'enum', values: ['wrap', 'nowrap'] },
+          justify: { type: 'enum', values: ['start', 'center', 'end', 'space-between'] }, items_align: { type: 'enum', values: ['start', 'center', 'end', 'stretch'] },
+        } : {}),
+      };
     for (const [name, schema] of Object.entries(schemas)) {
       fields.append(makeField(name, schema, element.styles?.[device]?.[name], value => {
         const current = find(history.present, selected); if (!current) return;
@@ -328,11 +334,19 @@ function applyVisualStyles(doc) {
         const order = device === 'mobile' ? ['desktop', 'tablet', 'mobile'] : device === 'tablet' ? ['desktop', 'tablet'] : ['desktop'];
         for (const mode of order) {
           const style = element.styles?.[mode] || {};
-          const properties = { color: 'color', background: 'backgroundColor', padding: 'padding', margin: 'margin', gap: 'gap', font_size: 'fontSize', radius: 'borderRadius', min_height: 'minHeight', align: 'textAlign', width: 'width' };
+          const lengths = { padding: 'padding', margin: 'margin', gap: 'gap', font_size: 'fontSize', radius: 'borderRadius', min_height: 'minHeight' };
           for (const [key, value] of Object.entries(style)) {
-            if (!(key in properties)) continue;
-            const allowed = typeof value === 'number' ? Number.isInteger(value) && value >= 0 && value <= 2000 : typeof value === 'string' && (/^#[a-f\d]{3}([a-f\d]{3})?$/i.test(value) || /^(100|\d{1,2})(%|px)$/.test(value) || ['left', 'center', 'right'].includes(value));
-            if (allowed) node.style[properties[key]] = typeof value === 'number' ? `${value}px` : value;
+            if (key in lengths && Number.isInteger(value) && value >= 0 && value <= 2000) node.style[lengths[key]] = `${value}px`;
+            else if (['color', 'background'].includes(key) && typeof value === 'string' && /^#[a-f\d]{3}([a-f\d]{3})?$/i.test(value)) node.style[key === 'color' ? 'color' : 'backgroundColor'] = value;
+            else if (key === 'align' && ['left', 'center', 'right'].includes(value)) node.style.textAlign = value;
+            else if (key === 'width' && typeof value === 'string' && /^(?:(?:100|[0-9]{1,2})%|(?:[0-9]{1,3}|1[0-9]{3}|2000)px)$/.test(value)) node.style.width = value;
+            else if (key === 'layout_mode' && ['flex', 'grid'].includes(value)) node.style.display = value;
+            else if (key === 'flow' && ['row', 'column'].includes(value)) node.style.flexDirection = value;
+            else if (key === 'grid_columns' && Number.isInteger(value) && value >= 1 && value <= 6) node.style.gridTemplateColumns = `repeat(${value},minmax(0,1fr))`;
+            else if (key === 'wrap' && ['wrap', 'nowrap'].includes(value)) node.style.flexWrap = value;
+            else if ((key === 'justify' && ['start', 'center', 'end', 'space-between'].includes(value)) || (key === 'items_align' && ['start', 'center', 'end', 'stretch'].includes(value))) {
+              node.style[key === 'justify' ? 'justifyContent' : 'alignItems'] = value === 'start' ? 'flex-start' : value === 'end' ? 'flex-end' : value;
+            }
           }
         }
         if (element.id === selected) { node.style.outline = '2px solid #ed6647'; node.style.outlineOffset = '2px'; }
@@ -360,6 +374,12 @@ async function renderPreview() {
     if (!doc.querySelector('[data-pb-kit-css]')) {
       const link = doc.createElement('link'); link.rel = 'stylesheet'; link.href = config.kitCssUrl; link.dataset.pbKitCss = ''; doc.head.append(link);
     }
+    // The server stylesheet represents the last saved version. Disable it in the
+    // editor iframe so clearing an unsaved value really returns to inheritance.
+    doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+      const url = new URL(link.href, doc.baseURI);
+      if (url.origin === location.origin && url.pathname.startsWith('/prime-builder/css/')) link.disabled = true;
+    });
     const current = doc.querySelector('.pb-layout');
     if (current) current.outerHTML = result.data.html;
     else {

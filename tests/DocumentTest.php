@@ -60,6 +60,28 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('@media(max-width:500px)', $compiled);
     }
 
+    public function testResponsiveContainerStylesAreAllowlistedAndCompiled(): void
+    {
+        $node = $this->element('container');
+        $node['settings'] = ['layout' => 'grid', 'columns' => 3];
+        $node['styles'] = [
+            'desktop' => ['width' => '1200px', 'justify' => 'space-between'],
+            'tablet' => ['grid_columns' => 2],
+            'mobile' => ['layout_mode' => 'flex', 'flow' => 'column', 'wrap' => 'wrap', 'items_align' => 'stretch'],
+        ];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $css = (new Compiler())->compile($result['data']);
+        self::assertStringContainsString('width:1200px;', $css);
+        self::assertStringContainsString('justify-content:space-between;', $css);
+        self::assertStringContainsString('grid-template-columns:repeat(2,minmax(0,1fr));', $css);
+        self::assertStringContainsString('display:flex;flex-direction:column;flex-wrap:wrap;align-items:stretch;', $css);
+        $node['styles']['mobile']['layout_mode'] = 'grid;}body{display:none';
+        $node['styles']['desktop']['width'] = '2001px';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        self::assertStringNotContainsString('body{', (new Compiler())->compile(['elements' => [$node]]));
+    }
+
     public function testMaliciousUrlsAndCssAreRejected(): void
     {
         $button = $this->element('button');

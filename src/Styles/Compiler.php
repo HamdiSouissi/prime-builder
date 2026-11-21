@@ -69,8 +69,29 @@ final class Compiler
         if ($key === 'align' && is_string($value) && in_array($value, ['left', 'center', 'right'], true)) {
             return 'text-align:' . $value . ';';
         }
-        if ($key === 'width' && is_string($value) && preg_match('/^(?:100|[0-9]{1,2})(?:%|px)$/', $value) === 1) {
+        if ($key === 'width' && is_string($value) && preg_match('/^(?:(?:100|[0-9]{1,2})%|(?:[0-9]{1,3}|1[0-9]{3}|2000)px)$/', $value) === 1) {
             return 'width:' . $value . ';';
+        }
+        if ($key === 'layout_mode' && is_string($value) && in_array($value, ['flex', 'grid'], true)) {
+            return 'display:' . $value . ';';
+        }
+        if ($key === 'flow' && is_string($value) && in_array($value, ['row', 'column'], true)) {
+            return 'flex-direction:' . $value . ';';
+        }
+        if ($key === 'grid_columns' && is_int($value) && $value >= 1 && $value <= 6) {
+            return 'grid-template-columns:repeat(' . $value . ',minmax(0,1fr));';
+        }
+        if ($key === 'wrap' && is_string($value) && in_array($value, ['wrap', 'nowrap'], true)) {
+            return 'flex-wrap:' . $value . ';';
+        }
+        if (in_array($key, ['justify', 'items_align'], true) && is_string($value)) {
+            $allowed = $key === 'justify' ? ['start', 'center', 'end', 'space-between'] : ['start', 'center', 'end', 'stretch'];
+            if (in_array($value, $allowed, true)) {
+                $normalized = match ($value) {
+                    'start' => 'flex-start', 'end' => 'flex-end', default => $value
+                };
+                return ($key === 'justify' ? 'justify-content:' : 'align-items:') . $normalized . ';';
+            }
         }
         return '';
     }

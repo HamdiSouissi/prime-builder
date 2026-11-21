@@ -173,8 +173,14 @@ final class Validator
                 $valid = match ($key) {
                     'color', 'background' => is_string($value) && preg_match('/^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/', $value) === 1,
                     'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height' => is_int($value) && $value >= 0 && $value <= 2000,
-                    'width' => is_string($value) && preg_match('/^(?:100|[0-9]{1,2})(?:%|px)$/', $value) === 1,
+                    'width' => is_string($value) && preg_match('/^(?:(?:100|[0-9]{1,2})%|(?:[0-9]{1,3}|1[0-9]{3}|2000)px)$/', $value) === 1,
                     'align' => is_string($value) && in_array($value, ['left', 'center', 'right'], true),
+                    'layout_mode' => is_string($value) && in_array($value, ['flex', 'grid'], true),
+                    'flow' => is_string($value) && in_array($value, ['row', 'column'], true),
+                    'grid_columns' => is_int($value) && $value >= 1 && $value <= 6,
+                    'wrap' => is_string($value) && in_array($value, ['wrap', 'nowrap'], true),
+                    'justify' => is_string($value) && in_array($value, ['start', 'center', 'end', 'space-between'], true),
+                    'items_align' => is_string($value) && in_array($value, ['start', 'center', 'end', 'stretch'], true),
                     default => false,
                 };
                 if (!$valid) {
