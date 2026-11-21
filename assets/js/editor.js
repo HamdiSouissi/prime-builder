@@ -5,8 +5,9 @@ const config = JSON.parse(root.querySelector('[data-pb-config]').value);
 const ui = config.ui;
 const $ = selector => root.querySelector(selector);
 const $$ = selector => [...root.querySelectorAll(selector)];
-const savedLayout = (config.document.blocks || []).find(block => block.type === 'prime-builder/layout');
-let foreign = !savedLayout && (config.document.blocks || []).length > 0;
+const originalBlocks = config.document.blocks || [];
+const savedLayout = originalBlocks.find(block => block.type === 'prime-builder/layout');
+let foreign = originalBlocks.length > 0 && (!savedLayout || originalBlocks.length !== 1);
 let history = new History(savedLayout?.data?.elements || []);
 let selected = null;
 let device = 'desktop';
@@ -17,8 +18,15 @@ let requestNumber = 0;
 let previewTimer;
 const frame = $('[data-pb-frame]');
 const status = $('[data-pb-status]');
+const schedule = $('[data-pb-schedule]');
+const parentSelect = $('[data-pb-parent]');
+const containerTypes = Object.entries(config.widgets).filter(([, definition]) => definition.container).map(([type]) => type);
+const isContainer = node => !!node && containerTypes.includes(node.type);
 const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-const localKey = `prime-builder:document:${config.entryId}`;
+const localKey = `prime-builder:document:${config.userId}:${config.entryId}`;
+const favoritesKey = `prime-builder:favorites:${config.userId}`;
+let favorites = new Set();
+try { const saved = JSON.parse(localStorage.getItem(favoritesKey) || '[]'); if (Array.isArray(saved)) favorites = new Set(saved.filter(item => typeof item === 'string')); } catch { /* Storage is optional. */ }
 const defaults = { heading: 'H', text: '¶', image: '▧', button: '↗', container: '▦', separator: '—', spacer: '↕', quote: '❝', alert: '!', progress: '◒', anchor: '#' };
 
 function text(tag, value, className = '') {
@@ -28,7 +36,7 @@ function text(tag, value, className = '') {
 }
 function markDirty() {
   dirty = true; $('[data-pb-save-state]').textContent = ui.unsaved.split('?')[0];
-  try { localStorage.setItem(localKey, JSON.stringify({ elements: history.present, status: status.value, time: Date.now() })); } catch { /* Storage can be disabled. */ }
+  try { localStorage.setItem(localKey, JSON.stringify({ elements: history.present, status: status.value, publishedAt: schedule.value, time: Date.now() })); } catch { /* Storage can be disabled. */ }
 }
 function commit(elements, rebuild = false) {
   if (!history.commit(elements)) return;
@@ -39,22 +47,24 @@ function commit(elements, rebuild = false) {
 function ensureLayout() {
   if (!foreign) return true;
   if (!confirm(ui.confirm_replace)) return false;
-  foreign = false; history = new History([]); return true;
+  foreign = false; history = new History(savedLayout?.data?.elements || []); return true;
 }
 function addWidget(type) {
   if (!config.widgets[type] || !ensureLayout()) return;
   const parent = find(history.present, selected);
   const node = createElement(type);
   selected = node.id; tab = 'content'; panel = 'settings';
-  commit(add(history.present, node, parent?.type === 'container' ? parent.id : null), true);
+  commit(add(history.present, node, isContainer(parent) ? parent.id : null, containerTypes), true);
 }
 function renderWidgets() {
   const list = $('[data-pb-widget-list]'); list.replaceChildren();
   const search = $('[data-pb-search]').value.trim().toLocaleLowerCase();
+  const available = Object.entries(config.widgets).filter(([, definition]) => definition.label.toLocaleLowerCase().includes(search));
   const groups = new Map();
-  for (const [type, definition] of Object.entries(config.widgets)) {
-    if (!definition.label.toLocaleLowerCase().includes(search)) continue;
-    const category = definition.category === 'structure' ? 'structure' : 'base';
+  const starred = available.filter(([type]) => favorites.has(type));
+  if (starred.length) groups.set('favorites', starred);
+  for (const [type, definition] of available) {
+    const category = ['structure', 'base', 'pro'].includes(definition.category) ? definition.category : 'base';
     if (!groups.has(category)) groups.set(category, []);
     groups.get(category).push([type, definition]);
   }
@@ -62,12 +72,21 @@ function renderWidgets() {
     list.append(text('h2', ui[category], 'pb-category'));
     const grid = document.createElement('div'); grid.className = 'pb-widget-grid';
     for (const [type, definition] of definitions) {
+      const card = document.createElement('div'); card.className = 'pb-widget-card';
       const button = document.createElement('button'); button.type = 'button'; button.className = 'pb-widget';
       button.draggable = true; button.setAttribute('aria-label', `${ui.add} ${definition.label}`);
       button.append(text('span', defaults[type] || '◇', 'pb-widget-icon'), text('span', definition.label));
       button.addEventListener('click', () => addWidget(type));
       button.addEventListener('dragstart', event => { event.dataTransfer.setData('text/prime-builder-widget', type); event.dataTransfer.effectAllowed = 'copy'; });
-      grid.append(button);
+      const star = text('button', favorites.has(type) ? '★' : '☆', 'pb-favorite'); star.type = 'button';
+      star.dataset.pbFavorite = type; star.setAttribute('aria-pressed', String(favorites.has(type)));
+      star.setAttribute('aria-label', `${favorites.has(type) ? ui.favorite_remove : ui.favorite_add} : ${definition.label}`);
+      star.addEventListener('click', () => {
+        if (favorites.has(type)) favorites.delete(type); else favorites.add(type);
+        try { localStorage.setItem(favoritesKey, JSON.stringify([...favorites])); } catch { /* Storage is optional. */ }
+        renderWidgets(); list.querySelector(`[data-pb-favorite="${CSS.escape(type)}"]`)?.focus();
+      });
+      card.append(button, star); grid.append(card);
     }
     list.append(grid);
   }
@@ -83,12 +102,12 @@ function renderTree() {
       const handle = text('span', '⠿', 'pb-tree-handle'); handle.setAttribute('aria-hidden', 'true');
       row.draggable = true;
       row.addEventListener('dragstart', event => { event.stopPropagation(); event.dataTransfer.setData('text/prime-builder-element', element.id); event.dataTransfer.effectAllowed = 'move'; });
-      row.addEventListener('dragover', event => { if (element.type === 'container') event.preventDefault(); });
+      row.addEventListener('dragover', event => { if (isContainer(element)) event.preventDefault(); });
       row.addEventListener('drop', event => {
-        if (element.type !== 'container') return;
+        if (!isContainer(element)) return;
         event.preventDefault(); event.stopPropagation();
         const source = event.dataTransfer.getData('text/prime-builder-element');
-        if (source) commit(moveInto(history.present, source, element.id), true);
+        if (source) commit(moveInto(history.present, source, element.id, containerTypes), true);
       });
       const button = text('button', config.widgets[element.type]?.label || element.type); button.type = 'button';
       button.addEventListener('click', () => { selected = element.id; tab = 'content'; panel = 'settings'; renderPanel(); schedulePreview(); });
@@ -114,7 +133,7 @@ function insertTemplate(template) {
   else {
     let next = history.present;
     const parent = find(next, selected);
-    for (const node of nodes) next = add(next, node, parent?.type === 'container' ? parent.id : null);
+    for (const node of nodes) next = add(next, node, isContainer(parent) ? parent.id : null, containerTypes);
     commit(next, true);
   }
   selected = null; panel = 'navigator'; renderPanel();
@@ -178,10 +197,27 @@ function makeField(name, schema, current, onChange) {
   });
   wrapper.append(input); return wrapper;
 }
+function renderParentOptions(selectedElement) {
+  parentSelect.replaceChildren();
+  const rootOption = text('option', ui.root); rootOption.value = ''; parentSelect.append(rootOption);
+  let currentParent = '';
+  function walk(nodes, parentId = '', depth = 0) {
+    for (const node of nodes) {
+      if (node.id === selectedElement.id) { currentParent = parentId; continue; }
+      if (isContainer(node)) {
+        const option = text('option', `${'— '.repeat(depth)}${config.widgets[node.type]?.label || node.type} · ${node.id}`);
+        option.value = node.id; parentSelect.append(option);
+        walk(node.children || [], node.id, depth + 1);
+      }
+    }
+  }
+  walk(history.present); parentSelect.value = currentParent;
+}
 function renderSettings() {
   const element = find(history.present, selected);
   if (!element) { panel = 'widgets'; renderPanel(); return; }
   const definition = config.widgets[element.type];
+  renderParentOptions(element);
   $('[data-pb-selected-title]').textContent = definition?.label || element.type;
   $$('[data-pb-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.pbTab === tab)));
   const fields = $('[data-pb-fields]'); fields.replaceChildren();
@@ -266,6 +302,9 @@ async function renderPreview() {
     if (!doc.querySelector('[data-pb-base-css]')) {
       const link = doc.createElement('link'); link.rel = 'stylesheet'; link.href = config.publicCssUrl; link.dataset.pbBaseCss = ''; doc.head.append(link);
     }
+    if (!doc.querySelector('[data-pb-kit-css]')) {
+      const link = doc.createElement('link'); link.rel = 'stylesheet'; link.href = config.kitCssUrl; link.dataset.pbKitCss = ''; doc.head.append(link);
+    }
     const current = doc.querySelector('.pb-layout');
     if (current) current.outerHTML = result.data.html;
     else {
@@ -279,6 +318,7 @@ function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeo
 function attachFrameEvents() {
   const doc = frame.contentDocument;
   if (!doc) return;
+  doc.addEventListener('keydown', shortcuts);
   doc.addEventListener('click', event => {
     const target = event.target.closest('[data-pb-id]');
     if (target) { event.preventDefault(); event.stopPropagation(); selected = target.dataset.pbId; panel = 'settings'; tab = 'content'; renderPanel(); schedulePreview(); }
@@ -291,7 +331,7 @@ function attachFrameEvents() {
     if (!type) return;
     const target = event.target.closest('[data-pb-id]');
     const node = target ? find(history.present, target.dataset.pbId) : null;
-    selected = node?.type === 'container' ? node.id : null;
+    selected = isContainer(node) ? node.id : null;
     addWidget(type);
   });
   schedulePreview();
@@ -300,16 +340,22 @@ async function save() {
   if (!ensureLayout()) return;
   const snapshot = JSON.stringify(history.present);
   const currentStatus = status.value;
+  const currentSchedule = schedule.value;
+  if (currentStatus === 'scheduled' && (!currentSchedule || !Number.isFinite(Date.parse(`${currentSchedule}Z`)) || Date.parse(`${currentSchedule}Z`) <= Date.now())) {
+    $('[data-pb-save-state]').textContent = ui.schedule_invalid; schedule.focus(); return;
+  }
   const data = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: history.present } }] };
   const button = $('[data-pb-save]'); button.disabled = true; $('[data-pb-save-state]').textContent = ui.saving;
   try {
     const response = await fetch(`/api/prime-builder/v1/documents/${config.entryId}`, {
       method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
-      body: JSON.stringify({ content: data, status: currentStatus }),
+      body: JSON.stringify({ content: data, status: currentStatus, ...(currentStatus === 'scheduled' ? { published_at: currentSchedule } : currentStatus === 'published' && config.status !== 'published' ? { published_at: '' } : {}) }),
     });
     const result = await response.json();
     if (!response.ok) { $('[data-pb-save-state]').textContent = result?.error?.message || ui.save_error; return; }
-    if (snapshot === JSON.stringify(history.present) && currentStatus === status.value) {
+    if (snapshot === JSON.stringify(history.present) && currentStatus === status.value && currentSchedule === schedule.value) {
+      config.status = result.data.status; config.publishedAt = result.data.published_at;
+      status.value = result.data.status; updateSchedule();
       history = new History(result.data.content.blocks[0].data.elements);
       dirty = false;
       try { localStorage.removeItem(localKey); } catch { /* Ignore unavailable storage. */ }
@@ -320,17 +366,20 @@ async function save() {
   } catch { $('[data-pb-save-state]').textContent = ui.connection_error; }
   finally { button.disabled = false; }
 }
-for (const [value, label] of [['draft', ui.draft], ...(config.canPublish ? [['published', ui.publish]] : [])]) {
+for (const [value, label] of [['draft', ui.draft], ...(config.canPublish ? [['published', ui.publish], ['scheduled', ui.scheduled]] : [])]) {
   const option = text('option', label); option.value = value; status.append(option);
 }
 if (![...status.options].some(option => option.value === config.status)) {
   const option = text('option', config.status); option.value = config.status; status.append(option);
 }
 status.value = config.status;
+schedule.value = (config.publishedAt || '').slice(0, 16).replace(' ', 'T');
+function updateSchedule() { $('[data-pb-schedule-wrap]').hidden = status.value !== 'scheduled'; }
+updateSchedule();
 try {
   const cached = JSON.parse(localStorage.getItem(localKey) || 'null');
   if (cached && Array.isArray(cached.elements) && confirm(ui.autosave_found)) {
-    if (!foreign || ensureLayout()) { history = new History(cached.elements); if ([...status.options].some(o => o.value === cached.status)) status.value = cached.status; markDirty(); }
+    if (!foreign || ensureLayout()) { history = new History(cached.elements); if ([...status.options].some(o => o.value === cached.status)) status.value = cached.status; if (typeof cached.publishedAt === 'string') schedule.value = cached.publishedAt; updateSchedule(); markDirty(); }
   }
 } catch { /* Unavailable or corrupt local drafts do not block editing. */ }
 $('[data-pb-search]').addEventListener('input', renderWidgets);
@@ -360,11 +409,46 @@ function redo() { const before = JSON.stringify(history.present); history.redo()
 $('[data-pb-undo]').addEventListener('click', undo);
 $('[data-pb-redo]').addEventListener('click', redo);
 $('[data-pb-save]').addEventListener('click', save);
-status.addEventListener('change', markDirty);
+status.addEventListener('change', () => { updateSchedule(); markDirty(); });
+schedule.addEventListener('input', markDirty);
+parentSelect.addEventListener('change', () => {
+  if (!selected) return;
+  commit(moveInto(history.present, selected, parentSelect.value || null, containerTypes));
+  renderParentOptions(find(history.present, selected)); parentSelect.focus();
+});
 frame.addEventListener('load', attachFrameEvents);
 window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
-document.addEventListener('keydown', event => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(); }
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.target.matches('input,textarea')) { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
-});
+const commandDialog = document.querySelector('[data-pb-commands]');
+const commandSearch = document.querySelector('[data-pb-command-search]');
+function renderCommands() {
+  const target = document.querySelector('[data-pb-command-list]'); target.replaceChildren();
+  const commands = [
+    [ui.save, save], [ui.undo, undo], [ui.redo, redo],
+    [ui.widgets, () => { panel = 'widgets'; renderPanel(); }],
+    [ui.navigator, () => { panel = 'navigator'; renderPanel(); }],
+    [ui.library, () => { panel = 'library'; renderPanel(); }],
+    ...Object.entries(config.widgets).map(([type, definition]) => [`${ui.add} ${definition.label}`, () => addWidget(type)]),
+  ];
+  const filter = commandSearch.value.trim().toLocaleLowerCase();
+  for (const [label, action] of commands) {
+    if (!label.toLocaleLowerCase().includes(filter)) continue;
+    const button = text('button', label); button.type = 'button';
+    button.addEventListener('click', () => { commandDialog.close(); action(); }); target.append(button);
+  }
+  if (!target.children.length) target.append(text('p', ui.command_empty, 'pb-empty'));
+}
+function openCommands() { commandSearch.value = ''; renderCommands(); if (!commandDialog.open) commandDialog.showModal(); commandSearch.focus(); }
+$('[data-pb-command-open]').addEventListener('click', openCommands);
+document.querySelector('[data-pb-command-close]').addEventListener('click', () => commandDialog.close());
+commandSearch.addEventListener('input', renderCommands);
+function shortcuts(event) {
+  if (!(event.ctrlKey || event.metaKey)) return;
+  const key = event.key.toLowerCase();
+  if (key === 's') { event.preventDefault(); save(); }
+  if (key === 'k') { event.preventDefault(); openCommands(); }
+  if ((key === 'z' || key === 'y') && !event.target.matches('input,textarea,[contenteditable="true"]')) {
+    event.preventDefault(); if (key === 'y' || event.shiftKey) redo(); else undo();
+  }
+}
+document.addEventListener('keydown', shortcuts);
 renderPanel();

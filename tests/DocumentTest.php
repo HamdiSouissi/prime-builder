@@ -9,6 +9,7 @@ use Prime\Hooks\Hooks;
 use Prime\Security\HtmlSanitizer;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
+use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
@@ -16,6 +17,7 @@ require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
 require_once dirname(__DIR__) . '/src/Document/Validator.php';
 require_once dirname(__DIR__) . '/src/Styles/Compiler.php';
+require_once dirname(__DIR__) . '/src/Styles/Kit.php';
 
 final class DocumentTest extends TestCase
 {
@@ -42,6 +44,20 @@ final class DocumentTest extends TestCase
         $css = (new Compiler())->compile($result['data']);
         self::assertStringContainsString('color:#c9441f', $css);
         self::assertStringContainsString('@media(max-width:767px)', $css);
+    }
+
+    public function testKitAndCustomBreakpointsAreSafe(): void
+    {
+        $css = Kit::compile(['primary' => '#123456;body{display:none}', 'text' => '#ABC', 'font_size' => 999]);
+        self::assertStringContainsString('--pb-kit-primary:#c9441f', $css);
+        self::assertStringContainsString('--pb-kit-text:#abc', $css);
+        self::assertStringContainsString('--pb-kit-font-size:28px', $css);
+        self::assertStringNotContainsString('body{', $css);
+        $node = $this->element();
+        $node['styles'] = ['tablet' => ['padding' => 10], 'mobile' => ['padding' => 5]];
+        $compiled = (new Compiler(900, 500))->compile(['elements' => [$node]]);
+        self::assertStringContainsString('@media(max-width:900px)', $compiled);
+        self::assertStringContainsString('@media(max-width:500px)', $compiled);
     }
 
     public function testMaliciousUrlsAndCssAreRejected(): void

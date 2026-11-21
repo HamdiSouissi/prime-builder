@@ -58,3 +58,13 @@ test('style updates preserve separate responsive values', () => {
   assert.equal(tree[0].styles.desktop.font_size, 32);
   assert.equal(tree[0].styles.mobile.font_size, 20);
 });
+
+test('extension-defined containers support nesting and safe reparenting', () => {
+  const group = { id: 'custom', type: 'third-party-group', settings: {}, styles: {}, children: [] };
+  const child = { id: 'child', type: 'heading', settings: {}, styles: {}, children: [] };
+  const tree = add([group], child, 'custom', ['container', 'third-party-group']);
+  assert.equal(tree[0].children[0].id, 'child');
+  const root = moveInto(tree, 'child', null, ['container', 'third-party-group']);
+  assert.equal(root[1].id, 'child');
+  assert.equal(tree[0].children.length, 1);
+});

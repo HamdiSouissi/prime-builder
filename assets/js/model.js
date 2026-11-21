@@ -26,10 +26,10 @@ export function locate(elements, id) {
   }
   return null;
 }
-export function add(elements, element, parentId = null) {
+export function add(elements, element, parentId = null, containerTypes = ['container']) {
   const next = clone(elements);
   const parent = parentId ? find(next, parentId) : null;
-  (parent && parent.type === 'container' ? parent.children : next).push(clone(element));
+  (parent && containerTypes.includes(parent.type) ? parent.children : next).push(clone(element));
   return next;
 }
 export function update(elements, elementId, patch) {
@@ -65,12 +65,12 @@ export function duplicate(elements, elementId) {
   found.list.splice(found.index + 1, 0, copy);
   return next;
 }
-export function moveInto(elements, elementId, parentId) {
+export function moveInto(elements, elementId, parentId, containerTypes = ['container']) {
   const next = clone(elements);
   const source = locate(next, elementId);
   if (!source || elementId === parentId || (parentId && find(source.element.children || [], parentId))) return next;
   const parent = parentId ? find(next, parentId) : null;
-  if (parentId && (!parent || parent.type !== 'container')) return next;
+  if (parentId && (!parent || !containerTypes.includes(parent.type))) return next;
   source.list.splice(source.index, 1);
   (parent ? parent.children : next).push(source.element);
   return next;

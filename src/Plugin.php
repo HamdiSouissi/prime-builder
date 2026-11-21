@@ -21,6 +21,7 @@ use PrimeBuilder\Controller\Documents;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
+use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
@@ -52,6 +53,18 @@ final class Plugin extends AbstractPlugin
                         'label' => 'plugin::prime-builder.settings.' . $name,
                         'description' => 'plugin::prime-builder.settings.' . $name . '_help',
                         'type' => $type, 'section' => 'prime-builder', 'default' => $default, 'rules' => $rules, 'priority' => 20,
+                    ], 'prime-builder');
+                }
+                $registry->section('prime-builder-kit', ['label' => 'plugin::prime-builder.settings.kit', 'description' => 'plugin::prime-builder.settings.kit_help', 'icon' => 'palette', 'priority' => 220, 'page' => 'general']);
+                foreach ([
+                    ['kit_primary', 'color', '#c9441f', 'required'],
+                    ['kit_text', 'color', '#1a1d29', 'required'],
+                    ['kit_font_size', 'number', 16, 'required|min:12|max:28'],
+                ] as [$name, $type, $default, $rules]) {
+                    $registry->add([
+                        'name' => 'plugin.prime-builder.' . $name,
+                        'label' => 'plugin::prime-builder.settings.' . $name,
+                        'type' => $type, 'section' => 'prime-builder-kit', 'default' => $default, 'rules' => $rules, 'priority' => 10,
                     ], 'prime-builder');
                 }
             }
@@ -103,13 +116,20 @@ final class Plugin extends AbstractPlugin
         }, capability: 'prime_builder.edit');
         $context->router()->frontGroup(static function (Router $router) use ($controller): void {
             $router->get('/prime-builder/css/{file}', [$controller, 'stylesheet'])->name('css');
+            $router->get('/prime-builder/kit/{file}', [$controller, 'kitStylesheet'])->name('kit');
         });
         $context->api()->patch('/documents/{id}', [$controller::class, 'update'], permission: 'prime_builder.edit');
         $context->api()->post('/documents/{id}/render', [$controller::class, 'render'], permission: 'prime_builder.edit');
         // PluginContext is not a container service, so API controllers need an explicit binding.
         $context->app()->container()->singleton(Documents::class, static fn (): Documents => $controller);
         $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context): void {
-            if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext || $page->entry === null) {
+            if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
+                return;
+            }
+            $kitCss = Kit::fromSettings($context->settings());
+            $assets->style('prime-builder-base', $context->url('css/public.css'));
+            $assets->style('prime-builder-kit', '/prime-builder/kit/' . substr(hash('sha256', $kitCss), 0, 16) . '.css', ['prime-builder-base']);
+            if ($page->entry === null) {
                 return;
             }
             $data = Layout::fromDocument($page->entry->decodedContent());
@@ -117,8 +137,7 @@ final class Plugin extends AbstractPlugin
                 return;
             }
             $css = (new Compiler((int) $context->settings()->get('breakpoint_tablet', 1024), (int) $context->settings()->get('breakpoint_mobile', 767)))->compile($data);
-            $assets->style('prime-builder-base', $context->url('css/public.css'));
-            $assets->style('prime-builder-document', '/prime-builder/css/' . $page->entry->id . '-' . substr(hash('sha256', $css), 0, 16) . '.css', ['prime-builder-base']);
+            $assets->style('prime-builder-document', '/prime-builder/css/' . $page->entry->id . '-' . substr(hash('sha256', $css), 0, 16) . '.css', ['prime-builder-kit']);
             $types = [];
             $collect = static function (array $elements) use (&$collect, &$types): void {
                 foreach ($elements as $element) {

@@ -20,6 +20,7 @@ use Prime\Plugins\PluginManager;
 use Prime\Security\Csrf;
 use Prime\Tests\Support\ApiTestFixture;
 use PrimeBuilder\Styles\Compiler;
+use PrimeBuilder\Styles\Kit;
 
 final class IntegrationTest extends TestCase
 {
@@ -68,6 +69,18 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('color:#c9441f', $stylesheet->body());
         self::assertStringContainsString('immutable', (string) $stylesheet->header('Cache-Control'));
         self::assertSame(404, $this->send($app, 'GET', '/prime-builder/css/1-0000000000000000.css')->status());
+    }
+
+    public function testGlobalKitIsFingerprintedAndSafe(): void
+    {
+        $app = $this->activated(null);
+        $kitCss = Kit::compile([]);
+        $url = '/prime-builder/kit/' . substr(hash('sha256', $kitCss), 0, 16) . '.css';
+        $response = $this->send($app, 'GET', $url);
+        self::assertSame(200, $response->status());
+        self::assertStringContainsString('immutable', (string) $response->header('Cache-Control'));
+        self::assertSame($kitCss, $response->body());
+        self::assertSame(404, $this->send($app, 'GET', '/prime-builder/kit/0000000000000000.css')->status());
     }
 
     public function testOwnerChecksAndSessionCsrf(): void
