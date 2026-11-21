@@ -105,9 +105,11 @@ final class Converter
     }
 
     /**
-     * Render the stored blocks exactly as the CMS does, including unique heading anchors. If
-     * the result differs from saved HTML (missing plugin, changed renderer, or global filter),
-     * there is no reliable per-block boundary in content_html and conversion must stop.
+     * Reproduce the current renderers, including unique heading anchors. With one unavailable
+     * renderer, recover its HTML only when all surrounding output matches the saved prefix and
+     * suffix. This assumes those other renderers have not changed since the content was saved;
+     * the CMS stores only a combined HTML string, not authoritative per-block fragments.
+     * Refuse mismatches or multiple unavailable renderers instead of discarding content.
      *
      * @return list<string>|null
      */
@@ -115,15 +117,21 @@ final class Converter
     {
         $fragments = [];
         $chunks = [];
+        $missingIndex = null;
         $usedAnchors = [];
         try {
-            foreach ($entry->decodedContent()['blocks'] as $block) {
+            foreach ($entry->decodedContent()['blocks'] as $index => $block) {
                 $type = $block['type'];
                 $data = $block['data'];
                 $definition = $this->blocks->get($type);
                 if ($definition === null) {
-                    // With just one unknown block its entire saved output is unambiguous.
-                    return count($entry->decodedContent()['blocks']) === 1 ? [$entry->contentHtml] : null;
+                    // Two unavailable renderers cannot in general be separated from one saved HTML string.
+                    if ($missingIndex !== null) {
+                        return null;
+                    }
+                    $missingIndex = $index;
+                    $fragments[] = null;
+                    continue;
                 }
                 $context = ['entry' => $entry, 'allowUnfilteredHtml' => $allowUnfilteredHtml];
                 if ($type === 'heading') {
@@ -149,7 +157,49 @@ final class Converter
         } catch (Throwable) {
             return null;
         }
-        return implode("\n", $chunks) === $entry->contentHtml ? $fragments : null;
+        $knownHtml = implode("\n", $chunks);
+        if ($missingIndex === null) {
+            return $knownHtml === $entry->contentHtml ? $this->completeFragments($fragments) : null;
+        }
+        if ($knownHtml === $entry->contentHtml) {
+            // The known output accounts for all saved HTML; core omits empty fragments.
+            $fragments[$missingIndex] = '';
+            return $this->completeFragments($fragments);
+        }
+
+        // With exactly one unavailable block, require the current known prefix and suffix
+        // to match the saved HTML byte for byte before attributing the remainder to it.
+        $before = array_filter(array_slice($fragments, 0, $missingIndex), static fn (?string $fragment): bool => $fragment !== null && $fragment !== '');
+        $after = array_filter(array_slice($fragments, $missingIndex + 1), static fn (?string $fragment): bool => $fragment !== null && $fragment !== '');
+        $prefix = $before === [] ? '' : implode("\n", $before) . "\n";
+        $suffix = $after === [] ? '' : "\n" . implode("\n", $after);
+        $length = strlen($entry->contentHtml) - strlen($prefix) - strlen($suffix);
+        if ($length <= 0 || !str_starts_with($entry->contentHtml, $prefix) || !str_ends_with($entry->contentHtml, $suffix)) {
+            return null;
+        }
+        $fragments[$missingIndex] = substr($entry->contentHtml, strlen($prefix), $length);
+        $complete = $this->completeFragments($fragments);
+        if ($complete === null) {
+            return null;
+        }
+        $reconstructed = array_filter($complete, static fn (string $fragment): bool => $fragment !== '');
+        return implode("\n", $reconstructed) === $entry->contentHtml ? $complete : null;
+    }
+
+    /**
+     * @param list<string|null> $fragments
+     * @return list<string>|null
+     */
+    private function completeFragments(array $fragments): ?array
+    {
+        $result = [];
+        foreach ($fragments as $fragment) {
+            if (!is_string($fragment)) {
+                return null;
+            }
+            $result[] = $fragment;
+        }
+        return $result;
     }
 
     private function id(): string

@@ -765,6 +765,86 @@ final class IntegrationTest extends TestCase
         }
     }
 
+    public function testUnavailableMiddleBlockKeepsSavedHtmlAndEditableNeighbours(): void
+    {
+        $app = $this->activated('admin');
+        $legacy = ['version' => 1, 'blocks' => [
+            ['id' => 'first', 'type' => 'paragraph', 'data' => ['text' => 'Premier contenu']],
+            ['id' => 'missing', 'type' => 'html', 'data' => ['html' => "<p data-legacy=\"missing\">Bloc absent\n<strong>conservé</strong></p>"]],
+            ['id' => 'last', 'type' => 'heading', 'data' => ['level' => 2, 'text' => 'Troisième contenu']],
+        ]];
+        $app->get(\Prime\Content\EntryService::class)->update(1, ['content' => $legacy], $this->user($app, 1));
+        $repository = $app->get(EntryRepository::class);
+        $before = $repository->find(1);
+        self::assertNotNull($before);
+        $beforeHtml = $before->contentHtml;
+        // Simulate an extension becoming unavailable after its output was saved.
+        $legacy['blocks'][1]['type'] = 'missing/block';
+        $statement = $this->db($app)->pdo()->prepare('UPDATE pc_entries SET content = ? WHERE id = 1');
+        $statement->execute([(string) json_encode($legacy, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)]);
+
+        $config = $this->editorConfig($app, 1);
+        self::assertSame(false, $config['conversionFailed']);
+        $converted = $config['document'];
+        $children = $converted['blocks'][0]['data']['elements'][0]['children'];
+        self::assertSame(['prime_block', 'original_content', 'prime_block'], array_column($children, 'type'));
+        $originals = \PrimeBuilder\Widgets\OriginalContent::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($originals);
+        $original = $originals->open($children[1]['settings']['payload']);
+        self::assertNotNull($original);
+        self::assertSame('missing/block', $original['type']);
+        self::assertStringContainsString("Bloc absent\n<strong>conservé</strong>", $original['html']);
+        self::assertStringContainsString($original['html'], $beforeHtml);
+        self::assertSame($beforeHtml, $repository->find(1)?->contentHtml);
+
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $converted['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        self::assertStringContainsString('data-legacy=\\"missing\\"', $preview->body());
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $converted, 'source_hash' => $config['sourceHash']], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $after = $repository->find(1);
+        self::assertNotNull($after);
+        self::assertStringContainsString($original['html'], $after->contentHtml);
+        self::assertStringContainsString('id="troisieme-contenu"', $after->contentHtml);
+        self::assertSame(true, strpos($after->contentHtml, 'Premier contenu') < strpos($after->contentHtml, 'Bloc absent'));
+        self::assertSame(true, strpos($after->contentHtml, 'Bloc absent') < strpos($after->contentHtml, 'Troisième contenu'));
+    }
+
+    public function testUnavailableBlockIsRecoveredAtEitherEdgeOrWhenItsOutputIsEmpty(): void
+    {
+        $app = $this->activated('admin');
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $known = ['id' => 'known', 'type' => 'paragraph', 'data' => ['text' => 'Bloc connu']];
+        $missing = ['id' => 'unknown', 'type' => 'missing/block', 'data' => []];
+        $renderer = new \Prime\Editor\Renderer($app->get(BlockRegistry::class), $app->get(\Prime\Security\HtmlSanitizer::class));
+        $knownHtml = $renderer->renderHtml(['version' => 1, 'blocks' => [$known]], $entry);
+        $unavailableHtml = "<div>Inconnu\navec plusieurs lignes</div>";
+        $cases = [
+            [[$missing, $known], $unavailableHtml . "\n" . $knownHtml, 0, $unavailableHtml],
+            [[$known, $missing], $knownHtml . "\n" . $unavailableHtml, 1, $unavailableHtml],
+            [[$known, $missing], $knownHtml, 1, ''],
+        ];
+        $originals = \PrimeBuilder\Widgets\OriginalContent::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($originals);
+        $statement = $this->db($app)->pdo()->prepare('UPDATE pc_entries SET content = ?, content_html = ? WHERE id = 1');
+        foreach ($cases as [$blocks, $html, $index, $expected]) {
+            $statement->execute([(string) json_encode(['version' => 1, 'blocks' => $blocks]), $html]);
+            $config = $this->editorConfig($app, 1);
+            self::assertSame(false, $config['conversionFailed']);
+            $children = $config['document']['blocks'][0]['data']['elements'][0]['children'];
+            self::assertSame('original_content', $children[$index]['type']);
+            $original = $originals->open($children[$index]['settings']['payload']);
+            self::assertNotNull($original);
+            self::assertSame($expected, $original['html']);
+        }
+
+        // Multiple unavailable renderers have no recoverable individual boundaries.
+        $statement->execute([(string) json_encode(['version' => 1, 'blocks' => [$missing, $known, ['id' => 'other', 'type' => 'missing/other', 'data' => []]]]), $unavailableHtml . "\n" . $knownHtml . "\n<div>Autre</div>"]);
+        self::assertSame(true, $this->editorConfig($app, 1)['conversionFailed']);
+    }
+
     public function testUnknownBlockBoundariesFailClosedAndStaleDocumentIsRejected(): void
     {
         $app = $this->activated('admin');

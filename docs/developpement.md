@@ -97,11 +97,12 @@ php tools/benchmark.php /chemin/vers/prime-cms
 cd tests/e2e
 npm ci --no-audit --no-fund
 npx playwright install --with-deps chromium
-# Fournir E2E_BASE_URL, E2E_ENTRY_ID, E2E_LEGACY_ENTRY_ID,
+# Fournir E2E_BASE_URL, E2E_ENTRY_ID, E2E_LEGACY_ENTRY_ID, E2E_MISSING_ENTRY_ID,
 # E2E_MOUSE_ENTRY_ID, E2E_KEYBOARD_ENTRY_ID et E2E_DRAG_ENTRY_ID, et si nécessaire
 # E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD. Les trois identifiants de parcours pointent
 # vers des pages de test vierges ; les deux premières ont les slugs
-# parcours-souris et parcours-clavier.
+# parcours-souris et parcours-clavier. E2E_MISSING_ENTRY_ID identifie la page de test
+# bloc-indisponible, préparée par tests/e2e/mark-block-missing.php comme dans la CI.
 npm test
 ```
 

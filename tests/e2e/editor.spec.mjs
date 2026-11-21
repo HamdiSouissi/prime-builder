@@ -900,6 +900,41 @@ test('existing three-block page is converted without losing its saved HTML', asy
   await expectAccessible(page);
 });
 
+test('unavailable block between existing blocks remains read-only and survives saving', async ({ page }) => {
+  const missingId = process.env.E2E_MISSING_ENTRY_ID;
+  expect(missingId).toMatch(/^[1-9][0-9]*$/);
+  let nativeDialogs = 0;
+  page.on('dialog', dialog => { nativeDialogs += 1; dialog.dismiss(); });
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${missingId}`);
+  await expect(page.locator('[data-pb-save]')).toBeEnabled();
+  const types = await page.evaluate(() => {
+    const config = JSON.parse(document.querySelector('[data-pb-config]').value);
+    return config.document.blocks[0].data.elements[0].children.map(node => node.type);
+  });
+  expect(types).toEqual(['prime_block', 'original_content', 'prime_block']);
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.getByText('Premier contenu disponible')).toBeVisible();
+  await expect(frame.getByText('Bloc indisponible conservé')).toBeVisible();
+  await expect(frame.getByText('Dernier contenu disponible')).toBeVisible();
+  await page.getByRole('button', { name: 'Structure', exact: true }).click();
+  await page.getByRole('button', { name: 'Contenu d’origine', exact: true }).click();
+  await expect(page.locator('[data-pb-fields]').getByText('Ce contenu d’origine ne peut pas être modifié ici.', { exact: false })).toBeVisible();
+  await expect(page.locator('[data-pb-fields] input')).toHaveCount(0);
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto('/bloc-indisponible');
+  const content = page.locator('.pb-layout');
+  await expect(content.locator('[data-legacy="missing"]')).toHaveText('Bloc indisponible conservé');
+  await expect(content.locator('#dernier-contenu-disponible')).toHaveText('Dernier contenu disponible');
+  const text = await content.innerText();
+  expect(text.indexOf('Premier contenu disponible')).toBeGreaterThanOrEqual(0);
+  expect(text.indexOf('Premier contenu disponible')).toBeLessThan(text.indexOf('Bloc indisponible conservé'));
+  expect(text.indexOf('Bloc indisponible conservé')).toBeLessThan(text.indexOf('Dernier contenu disponible'));
+  expect(nativeDialogs).toBe(0);
+  await expectAccessible(page);
+});
+
 test('departure dialog traps and restores focus and closes on Escape', async ({ page }) => {
   let nativeDialogs = 0;
   page.on('dialog', dialog => { nativeDialogs += 1; dialog.dismiss(); });
