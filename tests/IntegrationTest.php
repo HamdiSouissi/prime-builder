@@ -597,6 +597,7 @@ final class IntegrationTest extends TestCase
         $invalid['exclude'] = '3, 0, ../../';
         self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $invalid))->status());
         self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.theme_partials'));
+        /** @var \ArrayObject<int, bool> $purges */
         $purges = new \ArrayObject();
         $app->get(Hooks::class)->on('cache.purged', static function (mixed $event) use ($purges): void {
             if (is_array($event) && ($event['scope'] ?? null) === 'pages') {
@@ -636,7 +637,7 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/prime-builder/theme/', $assets->renderStyles());
         $fields['footer'] = $id;
         self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
-        $footer = $hooks->apply('site.partial', null, 'footer', $page, []);
+        $footer = $hooks->apply('site.partial', null, 'footer', $page, ['after_save' => true]);
         self::assertIsString($footer);
         self::assertStringContainsString('pbt_footer_', $footer);
         self::assertStringNotContainsString('pbt_header_', $footer);
@@ -646,7 +647,7 @@ final class IntegrationTest extends TestCase
         // A library manager deleting a source cannot silently change the selected theme snapshot.
         self::assertSame(200, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/' . $id, token: $admin)->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
-        self::assertSame($footer, $hooks->apply('site.partial', null, 'footer', $page, []));
+        self::assertSame($footer, $hooks->apply('site.partial', null, 'footer', $page, ['after_delete' => true]));
         $dynamic = ['version' => 1, 'elements' => [['id' => 'posts', 'type' => 'posts', 'settings' => ['limit' => 3], 'styles' => [], 'children' => []]]];
         $dynamicTemplate = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Articles', 'kind' => 'section', 'data' => $dynamic], $admin);
         self::assertSame(201, $dynamicTemplate->status(), $dynamicTemplate->body());
@@ -674,7 +675,7 @@ final class IntegrationTest extends TestCase
         $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
         $fields['_csrf_token'] = $app->get(Csrf::class)->token();
         self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
-        $newHeader = $hooks->apply('site.partial', null, 'header', $page, []);
+        $newHeader = $hooks->apply('site.partial', null, 'header', $page, ['after_html_save' => true]);
         self::assertIsString($newHeader);
         self::assertStringContainsString('<strong>sûr</strong>', $newHeader);
         self::assertStringNotContainsString('<script', $newHeader);

@@ -1,2 +1,2 @@
 /* The CMS shell's default small avatar color is slightly below AA on its soft background. */
-:root:has([data-pb-dashboard]) .pc-topbar .pc-avatar,:root:has([data-pb-settings]) .pc-topbar .pc-avatar{color:#a8381a}
+:root:has([data-pb-dashboard]) .pc-topbar .pc-avatar,:root:has([data-pb-settings]) .pc-topbar .pc-avatar,:root:has([data-pb-theme]) .pc-topbar .pc-avatar{color:#a8381a}
