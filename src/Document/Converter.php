@@ -187,7 +187,7 @@ final class Converter
     }
 
     /**
-     * @param list<string|null> $fragments
+     * @param array<int, string|null> $fragments
      * @return list<string>|null
      */
     private function completeFragments(array $fragments): ?array
