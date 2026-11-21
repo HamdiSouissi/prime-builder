@@ -261,6 +261,10 @@ jobs:
           DRAG_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
           test -n "$DRAG_ID"
           echo "E2E_DRAG_ENTRY_ID=$DRAG_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='HTML filtré' --slug=html-filtre --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          HTML_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$HTML_ID"
+          echo "E2E_HTML_ENTRY_ID=$HTML_ID" >> "$GITHUB_ENV"
           php -S 0.0.0.0:8080 -t public public/router.php > /tmp/prime-builder-server.log 2>&1 &
       - name: Report installation output on failure
         if: failure()
@@ -277,7 +281,13 @@ jobs:
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
       - name: Report browser test output on failure
         if: failure()
-        run: if test -f /tmp/prime-builder-e2e.log; then echo "::error title=Browser test log (base64)::$(tail -140 /tmp/prime-builder-e2e.log | base64 -w0)"; fi
+        run: |
+          if test -f /tmp/prime-builder-e2e.log; then
+            tail -c 24000 /tmp/prime-builder-e2e.log | split -b 2700 - /tmp/prime-builder-e2e-part-
+            for part in /tmp/prime-builder-e2e-part-*; do
+              echo "::error title=Browser test log $(basename "$part") (base64)::$(base64 -w0 "$part")"
+            done
+          fi
       - name: Fresh public request with the plugin disabled
         working-directory: cms
         run: |

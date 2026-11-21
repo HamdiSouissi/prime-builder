@@ -5,6 +5,7 @@ const id = process.env.E2E_ENTRY_ID || '1';
 const mouseId = process.env.E2E_MOUSE_ENTRY_ID || '';
 const keyboardId = process.env.E2E_KEYBOARD_ENTRY_ID || '';
 const dragId = process.env.E2E_DRAG_ENTRY_ID || '';
+const htmlId = process.env.E2E_HTML_ENTRY_ID || '';
 async function login(page) {
   await page.goto('/admin/login');
   await page.locator('input[name=email]').fill(process.env.E2E_ADMIN_EMAIL || 'builder@prime.test');
@@ -942,8 +943,9 @@ test('unrecoverable block boundaries remain one read-only group after saving and
 });
 
 test('filtered HTML is previewed, sanitized, saved and reopened', async ({ page }) => {
+  expect(htmlId).toMatch(/^[1-9][0-9]*$/);
   await login(page);
-  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.goto(`/admin/prime-builder/edit/${htmlId}`);
   await page.getByRole('button', { name: 'Ajouter HTML filtré', exact: true }).click();
   const field = page.getByLabel('Code HTML filtré', { exact: true });
   await field.fill('<p>Un <strong>fragment HTML</strong><script>alert(1)</script><a href="javascript:alert(1)" onclick="alert(2)">lien</a></p>');
@@ -955,7 +957,7 @@ test('filtered HTML is previewed, sanitized, saved and reopened', async ({ page 
   await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
   await page.reload();
   await expect(page.frameLocator('[data-pb-frame]').locator('.pb-html strong')).toHaveText('fragment HTML');
-  await page.goto('/test-prime-builder?filtered-html=1');
+  await page.goto('/html-filtre?filtered-html=1');
   await expect(page.locator('.pb-html strong')).toHaveText('fragment HTML');
   await expect(page.locator('.pb-html script, .pb-html [onclick]')).toHaveCount(0);
   await expect(page.locator('.pb-html [href^="javascript:"]')).toHaveCount(0);

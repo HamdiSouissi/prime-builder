@@ -425,7 +425,7 @@ final class IntegrationTest extends TestCase
         $editor = $this->send($app, 'GET', '/admin/prime-builder/edit/3');
         self::assertSame(200, $editor->status());
         self::assertSame(1, preg_match('~<textarea hidden data-pb-config>(.*?)</textarea>~s', $editor->body(), $matches));
-        $config = json_decode(html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'), true);
+        $config = json_decode(html_entity_decode($matches[1] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8'), true);
         self::assertSame(false, $config['canHtml']);
         self::assertSame(true, $config['widgets']['html']['hidden']);
         self::assertSame(true, $config['widgets']['html']['readOnly']);
