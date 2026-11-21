@@ -98,7 +98,7 @@ final class Snapshots
 
     private function validName(string $name): bool
     {
-        return preg_match('/^(?:kit|[1-9][0-9]*)-[a-f0-9]{16}\.css$/D', $name) === 1;
+        return preg_match('/^(?:kit|theme|[1-9][0-9]*)-[a-f0-9]{16}\.css$/D', $name) === 1;
     }
 
     private function matches(string $name, string $css): bool

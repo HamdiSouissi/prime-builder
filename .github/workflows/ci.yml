@@ -291,10 +291,16 @@ jobs:
       - name: Fresh public request with the plugin disabled
         working-directory: cms
         run: |
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/parcours-souris?pb-theme-active=1' > /tmp/prime-builder-theme-active.html
+          grep -F 'pb-theme-header' /tmp/prime-builder-theme-active.html
+          grep -F 'En-tête construit' /tmp/prime-builder-theme-active.html
           php bin/prime plugin:deactivate prime-builder
           curl --fail --silent --show-error 'http://127.0.0.1:8080/test-prime-builder?pb-lifecycle-test=1' > /tmp/prime-builder-disabled.html
           grep -F '<h2>Contenu conservé</h2>' /tmp/prime-builder-disabled.html
           if grep -q '/assets/plugins/prime-builder/' /tmp/prime-builder-disabled.html; then echo 'Plugin assets appeared after deactivation'; exit 1; fi
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/parcours-souris?pb-theme-disabled=1' > /tmp/prime-builder-theme-disabled.html
+          grep -F 'class="site-header' /tmp/prime-builder-theme-disabled.html
+          if grep -q 'pb-theme-header' /tmp/prime-builder-theme-disabled.html; then echo 'Theme header appeared after deactivation'; exit 1; fi
           php bin/prime plugin:activate prime-builder
       - name: Uninstall and verify data cleanup and public fallback
         working-directory: cms

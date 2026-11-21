@@ -991,7 +991,7 @@ test('departure dialog traps and restores focus and closes on Escape', async ({ 
   expect(nativeDialogs).toBe(0);
 });
 
-// Keep this last: the CI workflow next disables the plugin and makes a fresh uncached HTTP request.
+// Keep the saved page intact: the CI workflow disables the plugin after the suite.
 test('save a page for the deactivation check', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
@@ -1007,4 +1007,44 @@ test('save a page for the deactivation check', async ({ page }) => {
   expect(code).toBe(200);
   await page.goto('/test-prime-builder');
   await expect(page.locator('.pb-heading h2')).toHaveText('Contenu conservé');
+});
+
+// Leave these theme settings active for the CI's subsequent deactivation check.
+test('static theme header and footer replace Aurora except on excluded content', async ({ page }) => {
+  expect(htmlId).toMatch(/^[1-9][0-9]*$/);
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const created = await page.evaluate(async () => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const element = { id: 'theme_title', type: 'heading', settings: { text: 'En-tête construit', level: 2 }, styles: { desktop: { color: '#123456' } }, children: [] };
+    const response = await fetch('/api/prime-builder/v1/templates', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ name: 'Modèle de thème', kind: 'section', data: { version: 1, elements: [element] } }),
+    });
+    return { status: response.status, body: await response.json() };
+  });
+  expect(created.status).toBe(201);
+  const templateId = created.body.data.id;
+  await page.goto('/admin/prime-builder/theme');
+  await page.getByLabel('En-tête', { exact: true }).selectOption(templateId);
+  await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
+  await page.getByLabel('Contenus exclus', { exact: true }).fill(htmlId);
+  await expectAccessible(page);
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/prime-builder\/theme$/);
+  await expect(page.getByLabel('En-tête', { exact: true })).toHaveValue(templateId);
+
+  await page.goto('/parcours-souris?theme-preview=1');
+  const header = page.locator('header.pb-theme-header');
+  const footer = page.locator('footer.pb-theme-footer');
+  await expect(header.getByRole('heading', { name: 'En-tête construit' })).toBeVisible();
+  await expect(footer.getByRole('heading', { name: 'En-tête construit' })).toBeVisible();
+  await expect(page.locator('header.site-header')).toHaveCount(0);
+  await expect(header.locator('.pb-heading')).toHaveCSS('color', 'rgb(18, 52, 86)');
+  expect(await header.locator('.pb-heading').getAttribute('data-pb-id')).not.toBe(await footer.locator('.pb-heading').getAttribute('data-pb-id'));
+  await expectAccessible(page);
+  await page.goto('/html-filtre?theme-excluded=1');
+  await expect(page.locator('header.site-header')).toBeVisible();
+  await expect(page.locator('header.pb-theme-header, footer.pb-theme-footer')).toHaveCount(0);
+  await expectAccessible(page);
 });

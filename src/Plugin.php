@@ -35,6 +35,7 @@ use PrimeBuilder\Controller\Dashboard;
 use PrimeBuilder\Controller\Documents;
 use PrimeBuilder\Controller\Settings;
 use PrimeBuilder\Controller\Templates;
+use PrimeBuilder\Controller\ThemeBuilder;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
@@ -42,6 +43,7 @@ use PrimeBuilder\Security\EffectiveApiAuthentication;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
+use PrimeBuilder\Theme\Partials;
 use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
@@ -89,6 +91,7 @@ final class Plugin extends AbstractPlugin
         $blocks = $context->app()->get(BlockRegistry::class);
         $originals = OriginalContent::fromAppKey($context->app()->config()->get('app.key'));
         $htmlContent = HtmlContent::fromAppKey($context->app()->config()->get('app.key'));
+        $partials = new Partials($context);
         $content = new Content($context->app()->get(EntryQuery::class), $context->app()->get(ContentTypeRegistry::class), $context->app()->get(UrlGenerator::class));
         $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
         foreach (['content.saved', 'content.updated', 'content.published', 'content.deleted', 'content.trashed', 'content.restored', 'content.status_changed'] as $event) {
@@ -143,9 +146,22 @@ final class Plugin extends AbstractPlugin
             $payload['content_text'] = $renderer->extractText($candidate);
             return $payload;
         });
+        $context->hooks()->filter('site.partial', static function (mixed $previous, mixed $name, mixed $page) use ($context, $partials, $registry, $content, $blocks, $originals, $htmlContent): mixed {
+            if (is_string($previous) || !is_string($name) || !in_array($name, ['header', 'footer'], true) || !$page instanceof PageContext) {
+                return $previous;
+            }
+            $layout = $partials->layout($name, $page);
+            if ($layout === null) {
+                return $previous;
+            }
+            // Only validated library snapshots can reach here; HTML is still filtered.
+            $renderer = new Renderer($registry, $context->app()->get(\Prime\Security\HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, true);
+            return '<' . $name . ' class="pb-theme-' . $name . '">' . $renderer->render($layout) . '</' . $name . '>';
+        });
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
             if ($menu instanceof AdminMenu) {
                 $menu->add(new MenuItem(id: 'plugin.prime-builder', label: 'plugin::prime-builder.menu', icon: 'layout-dashboard', url: '/admin/prime-builder', position: 60, accent: 'brand', capability: 'prime_builder.edit', group: 'admin.menu.groups.content'));
+                $menu->add(new MenuItem(id: 'plugin.prime-builder-theme', label: 'plugin::prime-builder.theme.title', icon: 'layout-dashboard', url: '/admin/prime-builder/theme', position: 61, accent: 'brand', capability: 'prime_builder.theme_builder', group: 'admin.menu.groups.content'));
             }
             return $menu;
         });
@@ -153,6 +169,7 @@ final class Plugin extends AbstractPlugin
         $dashboard = new Dashboard($context);
         $settings = new Settings($context);
         $templates = new Templates($context);
+        $theme = new ThemeBuilder($context);
         $context->router()->adminGroup(static function (Router $router) use ($controller, $dashboard): void {
             $router->get('/', [$dashboard, 'index'])->name('index');
             $router->get('/edit/{id:\d+}', [$controller, 'edit'])->name('edit');
@@ -163,9 +180,14 @@ final class Plugin extends AbstractPlugin
             $router->get('/settings', [$settings, 'show'])->name('settings');
             $router->post('/settings', [$settings, 'save'])->name('settings.save');
         }, capability: 'prime_builder.settings');
-        $context->router()->frontGroup(static function (Router $router) use ($controller): void {
+        $context->router()->adminGroup(static function (Router $router) use ($theme): void {
+            $router->get('/theme', [$theme, 'show'])->name('theme');
+            $router->post('/theme', [$theme, 'save'])->name('theme.save');
+        }, capability: 'prime_builder.theme_builder');
+        $context->router()->frontGroup(static function (Router $router) use ($controller, $theme): void {
             $router->get('/prime-builder/css/{file}', [$controller, 'stylesheet'])->name('css');
             $router->get('/prime-builder/kit/{file}', [$controller, 'kitStylesheet'])->name('kit');
+            $router->get('/prime-builder/theme/{file}', [$theme, 'stylesheet'])->name('theme.css');
         });
         $context->api()->patch('/documents/{id}', [$controller::class, 'update'], permission: 'prime_builder.edit');
         $context->api()->post('/documents/{id}/render', [$controller::class, 'render'], permission: 'prime_builder.edit');
@@ -235,6 +257,48 @@ final class Plugin extends AbstractPlugin
                 if (is_string($script) && !isset($registeredScripts[$script]) && !str_contains($script, '..') && preg_match('#^/assets/plugins/[a-z0-9-]+/[a-zA-Z0-9_./-]+\.js(?:\?[a-zA-Z0-9_=&.-]+)?$#', $script) === 1) {
                     $assets->script('prime-builder-widget-' . $type, $script);
                     $registeredScripts[$script] = true;
+                }
+            }
+        });
+        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, $partials, $registry): void {
+            if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
+                return;
+            }
+            $types = [];
+            $collect = static function (array $elements) use (&$collect, &$types): void {
+                foreach ($elements as $element) {
+                    if (!is_array($element)) {
+                        continue;
+                    }
+                    if (is_string($element['type'] ?? null)) {
+                        $types[$element['type']] = true;
+                    }
+                    if (is_array($element['children'] ?? null)) {
+                        $collect($element['children']);
+                    }
+                }
+            };
+            foreach (['header', 'footer'] as $slot) {
+                $layout = $partials->layout($slot, $page);
+                if ($layout === null) {
+                    continue;
+                }
+                $css = (new Compiler((int) Configuration::get($context->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767)))->compile($layout);
+                $file = substr(hash('sha256', $css), 0, 16) . '.css';
+                (new Snapshots($context->app()->storagePath('prime-builder/styles')))->remember('theme-' . $file, $css);
+                $assets->style('prime-builder-theme-' . $slot, '/prime-builder/theme/' . $file, ['prime-builder-kit']);
+                $collect(is_array($layout['elements'] ?? null) ? $layout['elements'] : []);
+            }
+            $registered = [];
+            foreach ($assets->resolvedScripts() as $script) {
+                $registered[explode('?', $script['url'], 2)[0]] = true;
+            }
+            $definitions = $registry->all();
+            foreach (array_keys($types) as $type) {
+                $script = $definitions[$type]['script'] ?? null;
+                if (is_string($script) && !isset($registered[explode('?', $script, 2)[0]]) && !str_contains($script, '..') && preg_match('#^/assets/plugins/[a-z0-9-]+/[a-zA-Z0-9_./-]+\.js(?:\?[a-zA-Z0-9_=&.-]+)?$#', $script) === 1) {
+                    $assets->script('prime-builder-widget-' . $type, $script);
+                    $registered[explode('?', $script, 2)[0]] = true;
                 }
             }
         });

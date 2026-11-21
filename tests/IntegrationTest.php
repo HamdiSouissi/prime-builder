@@ -561,6 +561,126 @@ final class IntegrationTest extends TestCase
         self::assertSame(403, $this->send($app, 'GET', '/api/v1/users', token: $admin['token'])->status());
     }
 
+    public function testThemePartialsUseRealTemplatesAndRequireTheirOwnCapability(): void
+    {
+        $app = $this->activated('contributor');
+        $admin = $this->tokens($app)->issue($this->user($app, 1), 'templates', ['*'])['token'];
+        $layout = ['version' => 1, 'elements' => [
+            ['id' => 'title', 'type' => 'heading', 'settings' => ['text' => 'En-tête du constructeur', 'level' => 2], 'styles' => ['desktop' => ['color' => '#123456']], 'children' => []],
+            ['id' => 'tabs', 'type' => 'tabs', 'settings' => ['title_1' => 'Un', 'text_1' => 'Contenu', 'title_2' => 'Deux', 'text_2' => 'Suite'], 'styles' => [], 'children' => []],
+            ['id' => 'anchor', 'type' => 'anchor', 'settings' => ['anchor' => 'section'], 'styles' => [], 'children' => []],
+            ['id' => 'link', 'type' => 'button', 'settings' => ['text' => 'Lien', 'url' => '#section'], 'styles' => [], 'children' => []],
+        ]];
+        $created = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'En-tête partagé', 'kind' => 'section', 'data' => $layout], $admin);
+        self::assertSame(201, $created->status(), $created->body());
+        $id = json_decode($created->body(), true)['data']['id'];
+        $csrf = $app->get(Csrf::class)->token();
+        $fields = ['_csrf_token' => $csrf, 'header' => $id, 'footer' => '', 'exclude' => '3'];
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/theme')->status());
+        self::assertSame(403, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.theme_partials'));
+        $this->db($app)->pdo()->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'settings.manage')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $settingsToken = $this->tokens($app)->issue($this->user($app, 2), 'settings only', ['*'])['token'];
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/settings', ['plugin.prime-builder.theme_partials' => ['header' => $layout]], $settingsToken)->status());
+        self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.theme_partials'));
+
+        $this->db($app)->pdo()->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.theme_builder')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $fields['_csrf_token'] = $app->get(Csrf::class)->token();
+        self::assertSame(200, $this->send($app, 'GET', '/admin/prime-builder/theme')->status());
+        $noCsrf = $fields;
+        unset($noCsrf['_csrf_token']);
+        self::assertSame(419, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $noCsrf))->status());
+        $invalid = $fields;
+        $invalid['exclude'] = '3, 0, ../../';
+        self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $invalid))->status());
+        self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.theme_partials'));
+        $purges = new \ArrayObject();
+        $app->get(Hooks::class)->on('cache.purged', static function (mixed $event) use ($purges): void {
+            if (is_array($event) && ($event['scope'] ?? null) === 'pages') {
+                $purges[] = true;
+            }
+        });
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        self::assertNotEmpty($purges->getArrayCopy());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        $excluded = $app->get(EntryRepository::class)->find(3);
+        self::assertNotNull($entry);
+        self::assertNotNull($excluded);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry);
+        $excludedPage = new PageContext(type: PageContext::TYPE_ENTRY, entry: $excluded);
+        $hooks = $app->get(Hooks::class);
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($header);
+        self::assertStringContainsString('En-tête du constructeur', $header);
+        self::assertStringContainsString('class="pb-theme-header"', $header);
+        self::assertStringContainsString('href="#pbt-header-', $header);
+        self::assertStringContainsString('id="pbt-header-', $header);
+        self::assertStringNotContainsString('data-pb-id="title"', $header);
+        self::assertSame(null, $hooks->apply('site.partial', null, 'header', $excludedPage, []));
+        self::assertSame(null, $hooks->apply('site.partial', null, 'footer', $page, []));
+        self::assertSame('Autre plugin', $hooks->apply('site.partial', 'Autre plugin', 'header', $page, []));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringContainsString('/assets/plugins/prime-builder/js/tabs.js', $assets->renderScripts());
+        self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\.css)~', $assets->renderStyles(), $matches));
+        $css = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
+        self::assertSame(200, $css->status());
+        self::assertStringContainsString('color:#123456', $css->body());
+        self::assertStringContainsString('pbt_header_', $css->body());
+        self::assertSame(404, $this->send($app, 'GET', '/prime-builder/theme/0000000000000000.css')->status());
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $excludedPage);
+        self::assertStringNotContainsString('/prime-builder/theme/', $assets->renderStyles());
+        $fields['footer'] = $id;
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $footer = $hooks->apply('site.partial', null, 'footer', $page, []);
+        self::assertIsString($footer);
+        self::assertStringContainsString('pbt_footer_', $footer);
+        self::assertStringNotContainsString('pbt_header_', $footer);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/tabs.js'));
+        // A library manager deleting a source cannot silently change the selected theme snapshot.
+        self::assertSame(200, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/' . $id, token: $admin)->status());
+        self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
+        self::assertSame($footer, $hooks->apply('site.partial', null, 'footer', $page, []));
+        $dynamic = ['version' => 1, 'elements' => [['id' => 'posts', 'type' => 'posts', 'settings' => ['limit' => 3], 'styles' => [], 'children' => []]]];
+        $dynamicTemplate = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Articles', 'kind' => 'section', 'data' => $dynamic], $admin);
+        self::assertSame(201, $dynamicTemplate->status(), $dynamicTemplate->body());
+        $fields['header'] = json_decode($dynamicTemplate->body(), true)['data']['id'];
+        self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
+        $duplicates = ['version' => 1, 'elements' => [
+            ['id' => 'a', 'type' => 'anchor', 'settings' => ['anchor' => 'repetition'], 'styles' => [], 'children' => []],
+            ['id' => 'b', 'type' => 'anchor', 'settings' => ['anchor' => 'repetition'], 'styles' => [], 'children' => []],
+        ]];
+        $duplicateTemplate = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Ancres', 'kind' => 'section', 'data' => $duplicates], $admin);
+        self::assertSame(201, $duplicateTemplate->status(), $duplicateTemplate->body());
+        $fields['header'] = json_decode($duplicateTemplate->body(), true)['data']['id'];
+        self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
+
+        $html = ['version' => 1, 'elements' => [['id' => 'snippet', 'type' => 'html', 'settings' => ['markup' => '<p>HTML <strong>sûr</strong><script>alert(1)</script></p>'], 'styles' => [], 'children' => []]]];
+        $createdHtml = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'HTML', 'kind' => 'section', 'data' => $html], $admin);
+        self::assertSame(201, $createdHtml->status(), $createdHtml->body());
+        $fields['header'] = json_decode($createdHtml->body(), true)['data']['id'];
+        self::assertSame(403, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
+        $this->db($app)->pdo()->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.unfiltered_html')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $fields['_csrf_token'] = $app->get(Csrf::class)->token();
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $newHeader = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($newHeader);
+        self::assertStringContainsString('<strong>sûr</strong>', $newHeader);
+        self::assertStringNotContainsString('<script', $newHeader);
+        self::assertSame($css->body(), $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''))->body());
+    }
+
     public function testSettingsRequirePluginCapabilityAndCannotBeChangedThroughCoreApi(): void
     {
         $app = $this->activated('contributor');
