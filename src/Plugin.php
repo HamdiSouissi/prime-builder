@@ -10,7 +10,6 @@ use Prime\Admin\Notice;
 use Prime\Content\ContentType;
 use Prime\Editor\BlockDefinition;
 use Prime\Hooks\Hooks;
-use Prime\Http\Request;
 use Prime\Http\Router;
 use Prime\Plugins\AbstractPlugin;
 use Prime\Plugins\PluginContext;
@@ -62,7 +61,9 @@ final class Plugin extends AbstractPlugin
             if (!$type instanceof ContentType) {
                 return $editor;
             }
-            $key = match ($type->name) { 'page' => 'pages', 'post' => 'posts', default => null };
+            $key = match ($type->name) {
+                'page' => 'pages', 'post' => 'posts', default => null
+            };
             if ($key === null) {
                 $other = $context->settings()->get('other_types', '');
                 $names = is_string($other) ? array_map('trim', explode(',', $other)) : [];
@@ -96,7 +97,7 @@ final class Plugin extends AbstractPlugin
             return $menu;
         });
         $controller = new Documents($context);
-        $context->router()->adminGroup(static function (Router $router) use ($controller, $context): void {
+        $context->router()->adminGroup(static function (Router $router) use ($controller): void {
             $router->get('/', static fn (): \Prime\Http\Response => \Prime\Http\Response::redirect('/admin/settings/general#settings-section-prime-builder'))->name('index');
             $router->get('/edit/{id:\d+}', [$controller, 'edit'])->name('edit');
         }, capability: 'prime_builder.edit');

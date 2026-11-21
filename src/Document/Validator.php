@@ -130,7 +130,10 @@ final class Validator
         };
     }
 
-    /** @param list<string> $errors @return array<string, array<string, string|int>> */
+    /**
+     * @param list<string> $errors
+     * @return array<string, array<string, string|int>>
+     */
     private function styles(mixed $input, array &$errors): array
     {
         if (!is_array($input)) {

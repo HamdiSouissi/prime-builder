@@ -7,7 +7,10 @@ namespace PrimeBuilder\Document;
 /** Locate the builder block without changing unrelated Prime Editor documents. */
 final class Layout
 {
-    /** @param array<string, mixed> $document @return array<string, mixed>|null */
+    /**
+     * @param array<string, mixed> $document
+     * @return array<string, mixed>|null
+     */
     public static function fromDocument(array $document): ?array
     {
         foreach (is_array($document['blocks'] ?? null) ? $document['blocks'] : [] as $block) {
@@ -18,7 +21,10 @@ final class Layout
         return null;
     }
 
-    /** @param array<string, mixed> $data @return array<string, mixed> */
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
     public static function document(array $data): array
     {
         return ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => $data]]];

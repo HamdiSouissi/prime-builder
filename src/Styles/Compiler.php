@@ -24,7 +24,10 @@ final class Compiler
         return $modes['desktop'] . ($modes['tablet'] !== '' ? '@media(max-width:' . $this->tablet . 'px){' . $modes['tablet'] . '}' : '') . ($modes['mobile'] !== '' ? '@media(max-width:' . $this->mobile . 'px){' . $modes['mobile'] . '}' : '');
     }
 
-    /** @param array<mixed> $elements @param array<string, string> $modes */
+    /**
+     * @param array<mixed> $elements
+     * @param array<string, string> $modes
+     */
     private function walk(array $elements, array &$modes): void
     {
         foreach ($elements as $element) {

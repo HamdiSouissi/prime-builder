@@ -22,7 +22,10 @@ final class Renderer
         return '<div class="pb-layout">' . $this->renderElements($elements, $this->registry->all()) . '</div>';
     }
 
-    /** @param array<mixed> $elements @param array<string, array<string, mixed>> $definitions */
+    /**
+     * @param array<mixed> $elements
+     * @param array<string, array<string, mixed>> $definitions
+     */
     private function renderElements(array $elements, array $definitions): string
     {
         $html = '';
@@ -50,7 +53,10 @@ final class Renderer
         return $html;
     }
 
-    /** @param array<string, mixed> $settings @param array<string, mixed> $definition */
+    /**
+     * @param array<string, mixed> $settings
+     * @param array<string, mixed> $definition
+     */
     private function renderWidget(string $type, array $settings, array $definition): string
     {
         $text = self::escape(is_string($settings['text'] ?? null) ? $settings['text'] : '');

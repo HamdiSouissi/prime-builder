@@ -15,7 +15,6 @@ use Prime\Content\Exception\ContentException;
 use Prime\Content\Exception\ContentForbiddenException;
 use Prime\Content\Exception\ContentLockedException;
 use Prime\Content\Exception\ContentValidationException;
-use Prime\Editor\Renderer as CoreRenderer;
 use Prime\Http\Request;
 use Prime\Http\Response;
 use Prime\Plugins\PluginContext;

@@ -17,6 +17,13 @@ jobs:
   php:
     name: PHP validation, static analysis and translations
     runs-on: ubuntu-latest
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: prime_builder
+      DB_USERNAME: root
+      DB_PASSWORD: prime_ci_secret
+      DB_PREFIX: pc_
     services:
       mysql:
         image: mysql:8.0
@@ -56,8 +63,11 @@ jobs:
       - name: Install CMS for language check
         working-directory: cms
         run: |
-          php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Builder-Corail-2027!'
-          php bin/prime plugin:activate prime-builder
+          php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Builder-Corail-2027!' 2>&1 | tee /tmp/prime-install.log
+          php bin/prime plugin:activate prime-builder 2>&1 | tee -a /tmp/prime-install.log
+      - name: Report installation output on failure
+        if: failure()
+        run: if test -f /tmp/prime-install.log; then echo "::error title=Install log (base64)::$(base64 -w0 /tmp/prime-install.log)"; fi
       - name: Translation catalogue
         working-directory: cms
         run: php bin/prime lang:check --strict
@@ -65,6 +75,13 @@ jobs:
   e2e:
     name: Playwright and axe
     runs-on: ubuntu-latest
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: prime_builder
+      DB_USERNAME: root
+      DB_PASSWORD: prime_ci_secret
+      DB_PREFIX: pc_
     services:
       mysql:
         image: mysql:8.0
@@ -87,18 +104,26 @@ jobs:
           php-version: '8.3'
           extensions: mbstring, gd, exif, pdo_mysql, zip, fileinfo, openssl, intl
           coverage: none
-      - name: Install CMS and activate plugin
+      - name: Clone CMS and install plugin
         run: |
           git clone --depth 1 --branch main https://github.com/HamdiSouissi/prime-cms.git cms
           mkdir -p cms/content/plugins/prime-builder
           rsync -a --exclude='.git' builder/ cms/content/plugins/prime-builder/
-          cd cms
-          php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Builder-Corail-2027!'
-          php bin/prime plugin:activate prime-builder
-          OUT=$(php bin/prime content:create --type=page --title='Test Prime Builder' --slug=test-prime-builder --status=draft --body='{"version":1,"blocks":[]}')
-          echo "$OUT"
-          echo "E2E_ENTRY_ID=$(echo "$OUT" | grep -oE '#[0-9]+' | head -1 | tr -d '#')" >> "$GITHUB_ENV"
+      - name: Install CMS
+        working-directory: cms
+        run: php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Builder-Corail-2027!' 2>&1 | tee /tmp/prime-install.log
+      - name: Activate plugin and prepare page
+        working-directory: cms
+        run: |
+          php bin/prime plugin:activate prime-builder 2>&1 | tee -a /tmp/prime-install.log
+          php bin/prime content:create --type=page --title='Test Prime Builder' --slug=test-prime-builder --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$ID"
+          echo "E2E_ENTRY_ID=$ID" >> "$GITHUB_ENV"
           php -S 0.0.0.0:8080 -t public public/router.php > /tmp/prime-builder-server.log 2>&1 &
+      - name: Report installation output on failure
+        if: failure()
+        run: if test -f /tmp/prime-install.log; then echo "::error title=Install log (base64)::$(base64 -w0 /tmp/prime-install.log)"; fi
       - name: Install browser tooling
         working-directory: builder/tests/e2e
         run: |

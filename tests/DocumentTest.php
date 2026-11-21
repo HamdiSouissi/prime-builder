@@ -98,7 +98,9 @@ final class DocumentTest extends TestCase
     {
         $hooks = new Hooks();
         $hooks->filter('prime_builder.widgets', static function (array $widgets): array {
-            $widgets['broken'] = ['fields' => [], 'render' => static function (): string { throw new \RuntimeException('broken'); }];
+            $widgets['broken'] = ['fields' => [], 'render' => static function (): string {
+                throw new \RuntimeException('broken');
+            }];
             return $widgets;
         });
         $registry = new Registry($hooks);

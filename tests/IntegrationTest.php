@@ -13,11 +13,11 @@ use Prime\Hooks\Hooks;
 use Prime\Http\Kernel;
 use Prime\Http\Request;
 use Prime\Http\Response;
+use Prime\Http\Session;
 use Prime\Kernel\Application;
 use Prime\Plugins\AssetPublisher;
 use Prime\Plugins\PluginManager;
 use Prime\Security\Csrf;
-use Prime\Http\Session;
 use Prime\Tests\Support\ApiTestFixture;
 use PrimeBuilder\Styles\Compiler;
 
