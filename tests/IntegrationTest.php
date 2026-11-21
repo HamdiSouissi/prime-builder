@@ -71,6 +71,15 @@ final class IntegrationTest extends TestCase
         $checks = $app->get(Hooks::class)->apply('system.checks', []);
         self::assertSame('ok', $checks[1]['status']);
         self::assertSame('ok', $checks[2]['status']);
+        $legacyStatus = null;
+        if (is_array($checks)) {
+            foreach ($checks as $check) {
+                if (is_array($check) && ($check['id'] ?? '') === 'prime-builder.legacy-auth') {
+                    $legacyStatus = $check['status'] ?? null;
+                }
+            }
+        }
+        self::assertSame(version_compare($app->version(), '1.0.2', '<') ? 'warning' : null, $legacyStatus);
         $app->get(Settings::class)->set('plugin.prime-builder.breakpoint_tablet', 600);
         $app->get(Settings::class)->set('plugin.prime-builder.breakpoint_mobile', 767);
         $checks = $app->get(Hooks::class)->apply('system.checks', []);
@@ -353,6 +362,55 @@ final class IntegrationTest extends TestCase
         $statement = $pdo->prepare('UPDATE pc_api_tokens SET abilities = ? WHERE id = ?');
         $statement->execute(['["*"]', $admin['id']]);
         self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/2', ['content' => $this->document()], $admin['token'])->status());
+    }
+
+    public function testRevokedBearerAbilitiesAreRemovedFromCoreAndPluginApis(): void
+    {
+        $app = $this->activated(null);
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.edit'), (2, 'prime_builder.templates'), (2, 'content.publish')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $token = $this->tokens($app)->issue($this->user($app, 2), 'before revocation', ['*'])['token'];
+        $before = $this->send($app, 'GET', '/api/v1/me', token: $token);
+        self::assertSame(200, $before->status());
+        $beforeAbilities = json_decode($before->body(), true)['data']['abilities'];
+        self::assertSame(true, in_array('content.publish', $beforeAbilities, true));
+        self::assertSame(true, in_array('prime_builder.templates', $beforeAbilities, true));
+        $template = ['name' => 'Avant retrait', 'kind' => 'page', 'data' => $this->document()['blocks'][0]['data']];
+        $created = $this->send($app, 'POST', '/api/prime-builder/v1/templates', $template, $token);
+        self::assertSame(201, $created->status(), $created->body());
+        $templateId = json_decode($created->body(), true)['data']['id'];
+
+        $pdo->exec("DELETE FROM pc_role_capabilities WHERE role_id = 2 AND capability IN ('content.publish', 'prime_builder.templates')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        // The plugin guards HTTP; direct calls to the 1.0.1 core service remain outside it.
+        $after = $this->send($app, 'GET', '/api/v1/me', token: $token);
+        self::assertSame(200, $after->status());
+        $afterAbilities = json_decode($after->body(), true)['data']['abilities'];
+        self::assertSame(false, in_array('content.publish', $afterAbilities, true));
+        self::assertSame(false, in_array('prime_builder.templates', $afterAbilities, true));
+        self::assertSame(true, in_array('content.edit_own', $afterAbilities, true));
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/v1/content/post/3', ['status' => 'published'], $token)->status());
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document(), 'status' => 'published'], $token)->status());
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/templates', $template, $token)->status());
+        self::assertSame(403, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/' . $templateId, token: $token)->status());
+        // Unrevoked abilities still work; this is an intersection, not a blanket token ban.
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/v1/content/post/3', ['title' => 'Titre conservé'], $token)->status());
+        $pdo->exec("DELETE FROM pc_role_capabilities WHERE role_id = 2 AND capability = 'content.edit_own'");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/v1/content/post/3', ['title' => 'Interdit'], $token)->status());
+        self::assertSame(404, $this->send($app, 'GET', '/api/v1/content/post/3', token: $token)->status());
+        self::assertSame(404, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
+
+        // Even an administrator token with a literal stored '*' is not an administrator.
+        $admin = $this->tokens($app)->issue($this->user($app, 1), 'literal wildcard', ['*']);
+        $statement = $pdo->prepare('UPDATE pc_api_tokens SET abilities = ? WHERE id = ?');
+        $statement->execute(['["*"]', $admin['id']]);
+        $wildcard = $this->send($app, 'GET', '/api/v1/me', token: $admin['token']);
+        self::assertSame(200, $wildcard->status());
+        self::assertSame([], json_decode($wildcard->body(), true)['data']['abilities']);
+        self::assertSame(403, $this->send($app, 'GET', '/api/v1/users', token: $admin['token'])->status());
     }
 
     public function testSettingsRequirePluginCapabilityAndCannotBeChangedThroughCoreApi(): void

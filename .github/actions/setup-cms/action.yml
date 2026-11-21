@@ -6,6 +6,9 @@ inputs:
   install-dependencies:
     description: Install CMS development dependencies
     default: 'false'
+  cms-ref:
+    description: CMS commit to test, or main
+    default: 'main'
 runs:
   using: composite
   steps:
@@ -14,9 +17,17 @@ runs:
         php-version: '8.3'
         extensions: mbstring, gd, exif, pdo_mysql, pdo_sqlite, zip, fileinfo, openssl, intl
         coverage: none
-    - name: Clone Prime CMS main
+    - name: Clone Prime CMS
       shell: bash
-      run: git clone --depth 1 --branch main https://github.com/HamdiSouissi/prime-cms.git cms
+      env:
+        CMS_REF: ${{ inputs.cms-ref }}
+      run: |
+        git clone --depth 1 --branch main https://github.com/HamdiSouissi/prime-cms.git cms
+        if [[ "$CMS_REF" != main ]]; then
+          git -C cms fetch --depth 1 origin "$CMS_REF"
+          git -C cms checkout --detach FETCH_HEAD
+        fi
+        git -C cms rev-parse HEAD
     - name: Copy plugin
       if: inputs.copy-plugin == 'true'
       shell: bash

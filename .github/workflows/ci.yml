@@ -46,8 +46,12 @@ jobs:
         run: echo "::notice title=PHP-CS-Fixer::$(grep -E 'Found [0-9]+ of [0-9]+ files' /tmp/prime-builder-fixer.log | tail -1)"
 
   phpunit:
-    name: phpunit
+    name: phpunit (${{ matrix.cms }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cms: [main, '1cef617660f8d4f7bbd9d3d659de85d284fb18e7']
     env:
       DB_HOST: 127.0.0.1
       DB_PORT: '3306'
@@ -77,6 +81,7 @@ jobs:
       - uses: ./builder/.github/actions/setup-cms
         with:
           install-dependencies: 'true'
+          cms-ref: ${{ matrix.cms }}
       - name: Verify MySQL connection
         run: php -r '$db = new PDO("mysql:host=" . getenv("DB_HOST") . ";port=" . getenv("DB_PORT") . ";dbname=" . getenv("DB_DATABASE"), getenv("DB_USERNAME"), getenv("DB_PASSWORD")); echo "MySQL ", $db->query("SELECT VERSION()")->fetchColumn(), PHP_EOL;'
       - name: PHPUnit

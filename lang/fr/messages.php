@@ -60,6 +60,8 @@ return [
         'breakpoints' => 'Points de rupture',
         'valid' => 'Valides',
         'adjusted' => 'Valeurs ajustées automatiquement ; vérifiez les réglages',
+        'legacy_auth' => 'Sécurité des jetons Prime CMS 1.0.1',
+        'legacy_auth_warning' => 'La protection API dépend du plugin actif et peut entrer en conflit avec d’autres extensions ; mettez Prime CMS à jour vers 1.0.2 ou une version corrigée.',
         'label' => 'Prime Builder',
         'active' => 'Actif',
     ],

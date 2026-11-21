@@ -7,6 +7,10 @@ namespace PrimeBuilder;
 use Prime\Admin\Menu\AdminMenu;
 use Prime\Admin\Menu\MenuItem;
 use Prime\Admin\Notice;
+use Prime\Api\Token\ApiTokenService;
+use Prime\Auth\Auth;
+use Prime\Auth\Middleware\ApiAuthenticate;
+use Prime\Auth\UserRepository;
 use Prime\Content\ContentType;
 use Prime\Content\ContentTypeRegistry;
 use Prime\Content\Entry;
@@ -14,10 +18,13 @@ use Prime\Content\EntryQuery;
 use Prime\Editor\BlockDefinition;
 use Prime\Editor\BlockRegistry;
 use Prime\Hooks\Hooks;
+use Prime\Http\Kernel;
 use Prime\Http\Router;
+use Prime\I18n\Translator;
 use Prime\Plugins\AbstractPlugin;
 use Prime\Plugins\PluginContext;
 use Prime\Scheduler\Schedule;
+use Prime\Security\Csrf;
 use Prime\Security\HtmlSanitizer;
 use Prime\Site\PageContext;
 use Prime\Site\UrlGenerator;
@@ -29,6 +36,7 @@ use PrimeBuilder\Controller\Settings;
 use PrimeBuilder\Controller\Templates;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
+use PrimeBuilder\Security\EffectiveApiAuthentication;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
@@ -41,6 +49,16 @@ final class Plugin extends AbstractPlugin
 {
     public function register(PluginContext $context): void
     {
+        if (version_compare($context->app()->version(), '1.0.2', '<')) {
+            // Prime 1.0.1 trusts token abilities captured at issuance. Wrap, rather than
+            // replace, core authentication; the correction applies to all API routes while
+            // this plugin is active. Prime 1.0.2+ already performs this intersection.
+            $app = $context->app();
+            $app->get(Kernel::class)->registerMiddlewareAlias('api.auth', static fn (): EffectiveApiAuthentication => new EffectiveApiAuthentication(
+                new ApiAuthenticate($app->get(ApiTokenService::class), $app->get(Auth::class), $app->get(Csrf::class), $app->get(Translator::class)),
+                $app->get(UserRepository::class),
+            ));
+        }
         foreach (['edit', 'templates', 'theme_builder', 'forms', 'settings', 'unfiltered_html'] as $cap) {
             $context->capabilities()->register('prime_builder.' . $cap, 'plugin::prime-builder.capabilities.' . $cap);
         }
@@ -197,6 +215,9 @@ final class Plugin extends AbstractPlugin
             $mobile = (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767);
             $breakpointsValid = $tablet >= 600 && $tablet <= 2000 && $mobile >= 320 && $mobile < $tablet;
             $checks[] = ['id' => 'prime-builder.breakpoints', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.breakpoints'), 'status' => $breakpointsValid ? 'ok' : 'warning', 'value' => t($breakpointsValid ? 'plugin::prime-builder.system.valid' : 'plugin::prime-builder.system.adjusted')];
+            if (version_compare($context->app()->version(), '1.0.2', '<')) {
+                $checks[] = ['id' => 'prime-builder.legacy-auth', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.legacy_auth'), 'status' => 'warning', 'value' => t('plugin::prime-builder.system.legacy_auth_warning')];
+            }
             return $checks;
         });
     }

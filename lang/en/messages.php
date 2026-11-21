@@ -60,6 +60,8 @@ return [
         'breakpoints' => 'Breakpoints',
         'valid' => 'Valid',
         'adjusted' => 'Values were adjusted automatically; review the settings',
+        'legacy_auth' => 'Prime CMS 1.0.1 token security',
+        'legacy_auth_warning' => 'API protection depends on this plugin being active and can conflict with other extensions; upgrade Prime CMS to 1.0.2 or a fixed version.',
         'label' => 'Prime Builder',
         'active' => 'Active',
     ],
