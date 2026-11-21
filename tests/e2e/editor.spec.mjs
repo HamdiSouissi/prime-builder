@@ -616,17 +616,27 @@ test('drag ordering, nesting and keyboard alternatives persist in canvas and nav
   await parent.focus();
   await page.keyboard.press('End');
   await expect(parent).toHaveValue(group);
+  await expect(parent).toBeFocused();
   await expect.poll(groupOrder).toEqual([first, third]);
+  await expect(page.locator('[data-pb-live]')).toContainText('Déplacer vers');
   await page.keyboard.press('Tab');
-  await expect(page.locator('[data-pb-action="move_up"]')).toBeFocused();
+  const up = page.locator('[data-pb-action="move_up"]');
+  const down = page.locator('[data-pb-action="move_down"]');
+  await expect(up).toBeFocused();
   await page.keyboard.press('Enter');
   await expect.poll(groupOrder).toEqual([third, first]);
+  await expect(up).toBeFocused();
   await expect(page.locator('[data-pb-live]')).toContainText('Monter');
   await page.keyboard.press('Tab');
-  await expect(page.locator('[data-pb-action="move_down"]')).toBeFocused();
+  await expect(down).toBeFocused();
   await page.keyboard.press('Enter');
   await expect.poll(groupOrder).toEqual([first, third]);
+  await expect(down).toBeFocused();
   await expect(page.locator('[data-pb-live]')).toContainText('Descendre');
+  await page.keyboard.press('Enter');
+  await expect.poll(groupOrder).toEqual([first, third]);
+  await expect(down).toBeFocused();
+  await expect(page.locator('[data-pb-live]')).toHaveText('Ce déplacement n’est pas possible.');
 
   // Drag a widget from the parent document into the iframe, before a sibling.
   await page.locator('[data-pb-panel="widgets"]').click();
