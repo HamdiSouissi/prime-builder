@@ -93,6 +93,21 @@ final class Plugin extends AbstractPlugin
         }, styles: ['css/alternate.css']);
 
         $registry = new Registry($context->app()->get(Hooks::class));
+        // Prime 1.0's EntryView uses a raw `"dynamic"` substring as a dynamic-block
+        // sentinel. A plain builder field whose value is exactly that word must not
+        // trigger a live re-render (which would erase the fallback when disabled).
+        // Escaping one character changes only the JSON representation, never its value.
+        $context->hooks()->filter('content.saving', static function (mixed $payload): mixed {
+            if (!is_array($payload) || !is_string($payload['content'] ?? null)) {
+                return $payload;
+            }
+            $document = json_decode($payload['content'], true);
+            $blocks = is_array($document) ? ($document['blocks'] ?? null) : null;
+            if (is_array($blocks) && count($blocks) === 1 && is_array($blocks[0] ?? null) && ($blocks[0]['type'] ?? null) === 'prime-builder/layout') {
+                $payload['content'] = str_replace('"dynamic"', '"\\u0064ynamic"', $payload['content']);
+            }
+            return $payload;
+        });
         $context->blocks()->register(new BlockDefinition(
             type: 'prime-builder/layout',
             title: 'plugin::prime-builder.block.title',

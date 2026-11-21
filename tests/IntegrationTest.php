@@ -163,6 +163,25 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('<h2>Bonjour</h2>', $saved->contentHtml);
     }
 
+    public function testDynamicWordDoesNotHideFallbackAfterDeactivation(): void
+    {
+        $app = $this->activated(null);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'][0]['settings']['text'] = 'dynamic';
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertSame('dynamic', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['text']);
+        self::assertStringNotContainsString('"dynamic"', $entry->content);
+        $app->get(PluginManager::class)->deactivate('prime-builder');
+        // A new request without the plugin has a fresh core-only block registry.
+        $coreRenderer = new \Prime\Editor\Renderer(new BlockRegistry(), new \Prime\Security\HtmlSanitizer());
+        $zones = new \Prime\Site\Zone\ZoneRepository($this->db($app), $coreRenderer);
+        $view = new EntryView($entry, $app->get(UrlGenerator::class), zones: $zones, dynamicBlocks: $app->get(\Prime\Site\Zone\DynamicBlockRegistry::class));
+        self::assertStringContainsString('<h2>dynamic</h2>', $view->content());
+    }
+
     public function testInvalidTreeAndPrivateCssAreNotExposed(): void
     {
         $app = $this->activated(null);
