@@ -22,14 +22,16 @@ use Prime\Settings\Settings;
 use Prime\Site\PageContext;
 use Prime\Site\UrlGenerator;
 use Prime\Site\View\EntryView;
-use Prime\Tests\Support\ApiTestFixture;
 use Prime\Themes\ThemeAssetRegistry;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
+use PrimeBuilder\Tests\Support\DatabaseFixture;
+
+require_once __DIR__ . '/Support/DatabaseFixture.php';
 
 final class IntegrationTest extends TestCase
 {
-    use ApiTestFixture;
+    use DatabaseFixture;
 
     private string $assets = '';
 
@@ -38,6 +40,7 @@ final class IntegrationTest extends TestCase
         if ($this->assets !== '') {
             AssetPublisher::deleteDirectory($this->assets);
         }
+        $this->removeMysqlDatabases();
     }
 
     public function testActivationRegistersEditorBlockAndPageFilter(): void
@@ -375,7 +378,9 @@ final class IntegrationTest extends TestCase
             'kit_primary' => '#123456', 'kit_text' => '#abcdef', 'kit_font_size' => '18',
         ];
         $pdo = $this->db($app)->pdo();
-        $trigger = "CREATE TRIGGER reject_builder_settings BEFORE INSERT ON pc_settings WHEN NEW.name = 'plugin.prime-builder.configuration' BEGIN SELECT RAISE(ABORT, 'injected failure'); END";
+        $trigger = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql'
+            ? "CREATE TRIGGER reject_builder_settings BEFORE INSERT ON pc_settings FOR EACH ROW BEGIN IF NEW.name = 'plugin.prime-builder.configuration' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected failure'; END IF; END"
+            : "CREATE TRIGGER reject_builder_settings BEFORE INSERT ON pc_settings WHEN NEW.name = 'plugin.prime-builder.configuration' BEGIN SELECT RAISE(ABORT, 'injected failure'); END";
         $pdo->exec($trigger);
         $failed = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields));
         self::assertSame(500, $failed->status());
@@ -649,6 +654,9 @@ final class IntegrationTest extends TestCase
     private function activated(?string $as): Application
     {
         $app = $this->createApp($as);
+        if (getenv('PB_TEST_MYSQL') === '1') {
+            self::assertSame('mysql', $this->db($app)->pdo()->getAttribute(\PDO::ATTR_DRIVER_NAME));
+        }
         $this->db($app)->pdo()->exec('CREATE TABLE pc_plugins (slug VARCHAR(64) PRIMARY KEY, version VARCHAR(64), status VARCHAR(20), manifest_hash VARCHAR(64), last_error TEXT, errored_at DATETIME, installed_at DATETIME, activated_at DATETIME, created_at DATETIME, updated_at DATETIME)');
         $this->assets = sys_get_temp_dir() . '/prime_builder_assets_' . bin2hex(random_bytes(4));
         mkdir($this->assets, 0755, true);

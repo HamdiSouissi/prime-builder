@@ -80,7 +80,11 @@ Les commandes suivantes supposent une copie du plugin dans un checkout **de test
 ```bash
 # Depuis le CMS de test
 composer install --no-interaction --prefer-dist
+# Par défaut, les tests utilisent la fixture SQLite du CMS.
 vendor/bin/phpunit --bootstrap tests/bootstrap.php content/plugins/prime-builder/tests
+# Pour exécuter les tests d’intégration sur une instance MySQL de test isolée,
+# renseigner DB_HOST, DB_PORT, DB_USERNAME et DB_PASSWORD dans l’environnement :
+PB_TEST_MYSQL=1 vendor/bin/phpunit --bootstrap tests/bootstrap.php content/plugins/prime-builder/tests
 vendor/bin/phpstan analyse --configuration content/plugins/prime-builder/phpstan.neon --no-progress
 vendor/bin/php-cs-fixer fix --config content/plugins/prime-builder/.php-cs-fixer.dist.php --dry-run --diff
 php bin/prime lang:check --strict
@@ -99,4 +103,4 @@ npx playwright install --with-deps chromium
 npm test
 ```
 
-La CI clone le CMS, installe MySQL 8 et les dépendances de développement, crée des contenus de test, démarre le serveur, puis exécute ces contrôles. Le job navigateur installe le plugin à partir d’un ZIP via la CLI et vérifie ensuite la désactivation, la désinstallation et la conservation du contenu dans une instance jetable ; il ne teste pas le téléversement ZIP dans l’administration. Les résultats Playwright et le journal du serveur sont publiés comme artefact. Les scans axe sont limités aux violations sérieuses/critiques des écrans exercés : ils ne remplacent pas un audit WCAG manuel. Le `RETOUR.md` donne les résultats observés et les limites du prototype.
+Avec `PB_TEST_MYSQL=1`, chaque fixture d’intégration crée puis supprime une base aléatoire `prime_builder_test_*` : le compte MySQL doit avoir les droits `CREATE DATABASE` et `DROP DATABASE`. Ne jamais pointer ces tests vers une instance contenant des données réelles. La CI clone le CMS, installe MySQL 8 et les dépendances de développement, crée des contenus de test, démarre le serveur, puis exécute ces contrôles. Le job navigateur installe le plugin à partir d’un ZIP via la CLI et vérifie ensuite la désactivation, la désinstallation et la conservation du contenu dans une instance jetable ; il ne teste pas le téléversement ZIP dans l’administration. Les résultats Playwright et le journal du serveur sont publiés comme artefact. Les scans axe sont limités aux violations sérieuses/critiques des écrans exercés : ils ne remplacent pas un audit WCAG manuel. Le `RETOUR.md` donne les résultats observés et les limites du prototype.

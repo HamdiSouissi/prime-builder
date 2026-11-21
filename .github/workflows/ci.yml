@@ -55,6 +55,7 @@ jobs:
       DB_USERNAME: root
       DB_PASSWORD: prime_ci_secret
       DB_PREFIX: pc_
+      PB_TEST_MYSQL: '1'
     services:
       mysql:
         image: mysql:8.0
@@ -79,6 +80,9 @@ jobs:
         run: vendor/bin/phpunit --colors=never --bootstrap tests/bootstrap.php content/plugins/prime-builder/tests 2>&1 | tee /tmp/prime-builder-phpunit.log
       - name: Report PHPUnit summary
         run: echo "::notice title=PHPUnit::$(grep -E '^OK \(' /tmp/prime-builder-phpunit.log | tail -1)"
+      - name: Report PHPUnit output on failure
+        if: failure()
+        run: if test -f /tmp/prime-builder-phpunit.log; then echo "::error title=PHPUnit log (base64)::$(tail -160 /tmp/prime-builder-phpunit.log | base64 -w0)"; fi
 
   js:
     name: js
