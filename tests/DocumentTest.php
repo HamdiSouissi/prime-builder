@@ -20,6 +20,8 @@ require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
 require_once dirname(__DIR__) . '/src/Document/Validator.php';
+require_once dirname(__DIR__) . '/src/Document/Layout.php';
+require_once dirname(__DIR__) . '/src/Document/Converter.php';
 require_once dirname(__DIR__) . '/src/Styles/Values.php';
 require_once dirname(__DIR__) . '/src/Styles/Compiler.php';
 require_once dirname(__DIR__) . '/src/Styles/Kit.php';
