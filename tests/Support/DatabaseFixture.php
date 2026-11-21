@@ -31,10 +31,11 @@ trait DatabaseFixture
         // Copy that fixture into a fresh MySQL database before resolving any user services.
         $app = $this->createSqliteApp(null);
         $source = $this->db($app)->pdo();
-        $host = getenv('DB_HOST') ?: '127.0.0.1';
-        $port = getenv('DB_PORT') ?: '3306';
-        $username = getenv('DB_USERNAME') ?: 'root';
-        $password = getenv('DB_PASSWORD') ?: '';
+        // CMS tests/bootstrap.php deliberately resets DB_*; use isolated test-only names.
+        $host = getenv('PRIME_TEST_DB_HOST') ?: '127.0.0.1';
+        $port = getenv('PRIME_TEST_DB_PORT') ?: '3306';
+        $username = getenv('PRIME_TEST_DB_USERNAME') ?: 'root';
+        $password = getenv('PRIME_TEST_DB_PASSWORD') ?: '';
         $options = [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false];
         $server = new PDO('mysql:host=' . $host . ';port=' . $port . ';charset=utf8mb4', $username, $password, $options);
         $name = 'prime_builder_test_' . bin2hex(random_bytes(8));

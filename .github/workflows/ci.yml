@@ -56,6 +56,10 @@ jobs:
       DB_PASSWORD: prime_ci_secret
       DB_PREFIX: pc_
       PB_TEST_MYSQL: '1'
+      PRIME_TEST_DB_HOST: 127.0.0.1
+      PRIME_TEST_DB_PORT: '3306'
+      PRIME_TEST_DB_USERNAME: root
+      PRIME_TEST_DB_PASSWORD: prime_ci_secret
     services:
       mysql:
         image: mysql:8.0

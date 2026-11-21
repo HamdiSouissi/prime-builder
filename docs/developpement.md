@@ -83,7 +83,8 @@ composer install --no-interaction --prefer-dist
 # Par défaut, les tests utilisent la fixture SQLite du CMS.
 vendor/bin/phpunit --bootstrap tests/bootstrap.php content/plugins/prime-builder/tests
 # Pour exécuter les tests d’intégration sur une instance MySQL de test isolée,
-# renseigner DB_HOST, DB_PORT, DB_USERNAME et DB_PASSWORD dans l’environnement :
+# renseigner PRIME_TEST_DB_HOST, PRIME_TEST_DB_PORT, PRIME_TEST_DB_USERNAME
+# et PRIME_TEST_DB_PASSWORD dans l’environnement :
 PB_TEST_MYSQL=1 vendor/bin/phpunit --bootstrap tests/bootstrap.php content/plugins/prime-builder/tests
 vendor/bin/phpstan analyse --configuration content/plugins/prime-builder/phpstan.neon --no-progress
 vendor/bin/php-cs-fixer fix --config content/plugins/prime-builder/.php-cs-fixer.dist.php --dry-run --diff
