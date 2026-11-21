@@ -25,6 +25,7 @@ declare(strict_types=1);
         <div class="pb-brand"><span class="pb-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16v4H4zm0 7h7v7H4zm10 0h6v3h-6zm0 5h6v2h-6z" fill="currentColor"/></svg></span><span><strong><?= $this->e(t('plugin::prime-builder.menu')) ?></strong><small><?= $this->e($entry->title) ?></small></span></div>
         <div class="pb-top-actions"><button type="button" class="pb-button pb-button-quiet" data-pb-command-open aria-haspopup="dialog"><?= $this->e(t('plugin::prime-builder.ui.commands')) ?> <span aria-hidden="true"><?= $this->e(t('plugin::prime-builder.ui.command_hint')) ?></span></button><span class="pb-save-state" data-pb-save-state aria-live="polite"></span><a class="pb-button pb-button-quiet" href="<?= $this->e($entry->editUrl()) ?>"><?= $this->e(t('plugin::prime-builder.ui.back')) ?></a><button type="button" class="pb-button pb-button-primary" data-pb-save><?= $this->e(t('plugin::prime-builder.ui.save')) ?></button></div>
     </header>
+    <p class="pb-conversion-warning" data-pb-conversion-warning role="alert" hidden><?= $this->e(t('plugin::prime-builder.ui.conversion_failed')) ?></p>
     <div class="pb-workspace">
         <aside class="pb-sidebar" aria-label="<?= $this->e(t('plugin::prime-builder.ui.sidebar')) ?>">
             <div class="pb-panel-head"><div><span class="pb-eyebrow"><?= $this->e(t('plugin::prime-builder.ui.eyebrow')) ?></span><h1><?= $this->e(t('plugin::prime-builder.ui.editor_title')) ?></h1></div><span class="pb-panel-dot" aria-hidden="true"></span></div>
@@ -66,6 +67,14 @@ declare(strict_types=1);
     <div class="pb-command-head"><h2 id="pb-command-title"><?= $this->e(t('plugin::prime-builder.ui.commands')) ?></h2><button type="button" data-pb-command-close aria-label="<?= $this->e(t('plugin::prime-builder.ui.close')) ?>">×</button></div>
     <label class="pb-field"><?= $this->e(t('plugin::prime-builder.ui.command_search')) ?><input type="search" data-pb-command-search></label>
     <div class="pb-command-list" data-pb-command-list></div>
+</dialog>
+<dialog class="pb-confirm-dialog" data-pb-confirm aria-labelledby="pb-confirm-title" aria-describedby="pb-confirm-message">
+    <h2 id="pb-confirm-title" data-pb-confirm-title></h2>
+    <p id="pb-confirm-message" data-pb-confirm-message></p>
+    <div class="pb-confirm-actions">
+        <button type="button" data-pb-confirm-cancel><?= $this->e(t('plugin::prime-builder.ui.cancel')) ?></button>
+        <button type="button" class="pb-button pb-button-primary" data-pb-confirm-accept><?= $this->e(t('plugin::prime-builder.ui.continue')) ?></button>
+    </div>
 </dialog>
 </body>
 </html>

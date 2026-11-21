@@ -13,7 +13,7 @@ const $ = selector => root.querySelector(selector);
 const $$ = selector => [...root.querySelectorAll(selector)];
 const originalBlocks = config.document.blocks || [];
 const savedLayout = originalBlocks.find(block => block.type === 'prime-builder/layout');
-let foreign = originalBlocks.length > 0 && (!savedLayout || originalBlocks.length !== 1);
+const foreign = Boolean(config.conversionFailed) || (originalBlocks.length > 0 && (!savedLayout || originalBlocks.length !== 1));
 let history = new History(savedLayout?.data?.elements || []);
 let selected = null;
 let device = 'desktop';
@@ -40,9 +40,41 @@ function text(tag, value, className = '') {
   if (className) node.className = className;
   return node;
 }
+const confirmation = document.querySelector('[data-pb-confirm]');
+let confirmationResolver = null;
+let confirmationFocus = null;
+function showMessage(message, decision = false) {
+  if (confirmation.open || confirmationResolver) return Promise.resolve(false);
+  confirmationFocus = document.activeElement;
+  confirmation.querySelector('[data-pb-confirm-title]').textContent = decision ? ui.confirm_title : ui.notice_title;
+  confirmation.querySelector('[data-pb-confirm-message]').textContent = message;
+  const cancel = confirmation.querySelector('[data-pb-confirm-cancel]');
+  cancel.hidden = !decision;
+  confirmation.returnValue = '';
+  const result = new Promise(resolve => { confirmationResolver = resolve; });
+  confirmation.showModal();
+  (decision ? cancel : confirmation.querySelector('[data-pb-confirm-accept]')).focus();
+  return result;
+}
+confirmation.querySelector('[data-pb-confirm-cancel]').addEventListener('click', () => confirmation.close('cancel'));
+confirmation.querySelector('[data-pb-confirm-accept]').addEventListener('click', () => confirmation.close('accept'));
+confirmation.addEventListener('close', () => {
+  const resolve = confirmationResolver; confirmationResolver = null;
+  if (confirmationFocus?.isConnected) confirmationFocus.focus();
+  confirmationFocus = null;
+  resolve?.(confirmation.returnValue === 'accept');
+});
+confirmation.addEventListener('keydown', event => {
+  if (event.key !== 'Tab') return;
+  const focusable = [...confirmation.querySelectorAll('button:not([hidden]):not([disabled])')];
+  if (!focusable.length) { event.preventDefault(); return; }
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
 function markDirty() {
-  dirty = true; $('[data-pb-save-state]').textContent = ui.unsaved.split('?')[0];
-  try { localStorage.setItem(localKey, JSON.stringify({ elements: history.present, status: status.value, publishedAt: schedule.value, time: Date.now() })); } catch { /* Storage can be disabled. */ }
+  dirty = true; $('[data-pb-save-state]').textContent = ui.unsaved_short;
+  try { localStorage.setItem(localKey, JSON.stringify({ elements: history.present, status: status.value, publishedAt: schedule.value, sourceHash: config.sourceHash, time: Date.now() })); } catch { /* Storage can be disabled. */ }
 }
 function commit(elements, rebuild = false) {
   if (!history.commit(elements)) return;
@@ -52,11 +84,11 @@ function commit(elements, rebuild = false) {
 }
 function ensureLayout() {
   if (!foreign) return true;
-  if (!confirm(ui.confirm_replace)) return false;
-  foreign = false; history = new History(savedLayout?.data?.elements || []); return true;
+  $('[data-pb-conversion-warning]').hidden = false;
+  return false;
 }
 function addWidget(type) {
-  if (!config.widgets[type] || !ensureLayout()) return;
+  if (!config.widgets[type] || config.widgets[type].hidden || !ensureLayout()) return;
   const parent = find(history.present, selected);
   const node = newElement(type);
   selected = node.id; tab = 'content'; panel = 'settings';
@@ -65,7 +97,7 @@ function addWidget(type) {
 function renderWidgets() {
   const list = $('[data-pb-widget-list]'); list.replaceChildren();
   const search = $('[data-pb-search]').value.trim().toLocaleLowerCase();
-  const available = Object.entries(config.widgets).filter(([, definition]) => definition.label.toLocaleLowerCase().includes(search));
+  const available = Object.entries(config.widgets).filter(([, definition]) => !definition.hidden && definition.label.toLocaleLowerCase().includes(search));
   const groups = new Map();
   const starred = available.filter(([type]) => favorites.has(type));
   if (starred.length) groups.set('favorites', starred);
@@ -131,9 +163,9 @@ function freshIds(elements) {
   copy.forEach(visit);
   return copy;
 }
-function insertTemplate(template) {
+async function insertTemplate(template) {
   if (!ensureLayout()) return;
-  if (template.kind === 'page' && history.present.length && !confirm(ui.confirm_template)) return;
+  if (template.kind === 'page' && history.present.length && !await showMessage(ui.confirm_template, true)) return;
   const nodes = freshIds(template.elements);
   if (template.kind === 'page') commit(nodes, true);
   else {
@@ -154,7 +186,7 @@ function renderLibrary() {
   }
 }
 async function importDocument(file) {
-  if (!file || file.size > 1048576) { alert(ui.invalid_import); return; }
+  if (!file || file.size > 1048576) { await showMessage(ui.invalid_import); return; }
   try {
     const input = JSON.parse(await file.text());
     const layout = Array.isArray(input.blocks) ? input.blocks.find(block => block.type === 'prime-builder/layout')?.data : input;
@@ -164,10 +196,10 @@ async function importDocument(file) {
     });
     if (!response.ok) throw new Error('invalid');
     const result = await response.json();
-    if (!ensureLayout() || (history.present.length && !confirm(ui.confirm_template))) return;
+    if (!ensureLayout() || (history.present.length && !await showMessage(ui.confirm_template, true))) return;
     selected = null; commit(freshIds(result.data.layout.elements)); panel = 'navigator'; renderPanel();
     $('[data-pb-save-state]').textContent = ui.imported;
-  } catch { alert(ui.invalid_import); }
+  } catch { await showMessage(ui.invalid_import); }
 }
 function exportDocument() {
   if (foreign) return;
@@ -208,11 +240,14 @@ function renderParentOptions(selectedElement) {
   parentSelect.replaceChildren();
   const rootOption = text('option', ui.root); rootOption.value = ''; parentSelect.append(rootOption);
   let currentParent = '';
+  let containerNumber = 0;
   function walk(nodes, parentId = '', depth = 0) {
     for (const node of nodes) {
       if (node.id === selectedElement.id) { currentParent = parentId; continue; }
       if (isContainer(node)) {
-        const option = text('option', `${'— '.repeat(depth)}${config.widgets[node.type]?.label || node.type} · ${node.id}`);
+        containerNumber += 1;
+        const name = typeof node.settings?.title === 'string' && node.settings.title.trim() ? node.settings.title.trim() : `${config.widgets[node.type]?.label || node.type} ${containerNumber}`;
+        const option = text('option', `${'— '.repeat(depth)}${name}`);
         option.value = node.id; parentSelect.append(option);
         walk(node.children || [], node.id, depth + 1);
       }
@@ -272,6 +307,10 @@ function renderSettings() {
   $('[data-pb-selected-title]').textContent = definition?.label || element.type;
   $$('[data-pb-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.pbTab === tab)));
   const fields = $('[data-pb-fields]'); fields.replaceChildren();
+  if (definition?.readOnly) {
+    fields.append(text('p', ui.original_read_only, 'pb-intro'));
+    return;
+  }
   if (tab === 'content') {
     for (const [name, schema] of Object.entries(definition?.fields || {})) {
       fields.append(makeField(name, schema, element.settings[name], value => {
@@ -424,12 +463,13 @@ async function save() {
   try {
     const response = await fetch(`/api/prime-builder/v1/documents/${config.entryId}`, {
       method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
-      body: JSON.stringify({ content: data, status: currentStatus, ...(currentStatus === 'scheduled' ? { published_at: currentSchedule } : currentStatus === 'published' && config.status !== 'published' ? { published_at: '' } : {}) }),
+      body: JSON.stringify({ content: data, source_hash: config.sourceHash, status: currentStatus, ...(currentStatus === 'scheduled' ? { published_at: currentSchedule } : currentStatus === 'published' && config.status !== 'published' ? { published_at: '' } : {}) }),
     });
     const result = await response.json();
     if (!response.ok) { $('[data-pb-save-state]').textContent = result?.error?.message || ui.save_error; return; }
+    config.sourceHash = result.data.source_hash;
+    config.status = result.data.status; config.publishedAt = result.data.published_at;
     if (snapshot === JSON.stringify(history.present) && currentStatus === status.value && currentSchedule === schedule.value) {
-      config.status = result.data.status; config.publishedAt = result.data.published_at;
       status.value = result.data.status; updateSchedule();
       history = new History(result.data.content.blocks[0].data.elements);
       dirty = false;
@@ -437,7 +477,7 @@ async function save() {
       $('[data-pb-save-state]').textContent = ui.saved;
       frame.src = config.previewUrl;
       renderPanel();
-    } else $('[data-pb-save-state]').textContent = ui.unsaved.split('?')[0];
+    } else markDirty();
   } catch { $('[data-pb-save-state]').textContent = ui.connection_error; }
   finally { button.disabled = false; }
 }
@@ -451,12 +491,21 @@ status.value = config.status;
 schedule.value = (config.publishedAt || '').slice(0, 16).replace(' ', 'T');
 function updateSchedule() { $('[data-pb-schedule-wrap]').hidden = status.value !== 'scheduled'; }
 updateSchedule();
-try {
-  const cached = JSON.parse(localStorage.getItem(localKey) || 'null');
-  if (cached && Array.isArray(cached.elements) && confirm(ui.autosave_found)) {
-    if (!foreign || ensureLayout()) { history = new History(cached.elements); if ([...status.options].some(o => o.value === cached.status)) status.value = cached.status; if (typeof cached.publishedAt === 'string') schedule.value = cached.publishedAt; updateSchedule(); markDirty(); }
-  }
-} catch { /* Unavailable or corrupt local drafts do not block editing. */ }
+async function restoreLocalDraft() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(localKey) || 'null');
+    // An old draft must never silently replace a newer or previously unconverted document.
+    if (!foreign && cached && cached.sourceHash === config.sourceHash && Array.isArray(cached.elements) && await showMessage(ui.autosave_found, true)) {
+      history = new History(cached.elements);
+      if ([...status.options].some(o => o.value === cached.status)) status.value = cached.status;
+      if (typeof cached.publishedAt === 'string') schedule.value = cached.publishedAt;
+      updateSchedule(); markDirty(); renderPanel(); schedulePreview();
+    }
+  } catch { /* Unavailable or corrupt local drafts do not block editing. */ }
+}
+if (config.converted && !foreign) { dirty = true; $('[data-pb-save-state]').textContent = ui.unsaved_short; }
+if (foreign) { $('[data-pb-conversion-warning]').hidden = false; $('[data-pb-save]').disabled = true; status.disabled = true; }
+restoreLocalDraft();
 $('[data-pb-search]').addEventListener('input', renderWidgets);
 $('[data-pb-import]').addEventListener('change', event => { importDocument(event.target.files?.[0]); event.target.value = ''; });
 $('[data-pb-export]').addEventListener('click', exportDocument);
@@ -492,7 +541,15 @@ parentSelect.addEventListener('change', () => {
   renderParentOptions(find(history.present, selected)); parentSelect.focus();
 });
 frame.addEventListener('load', attachFrameEvents);
-window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
+root.addEventListener('click', async event => {
+  const link = event.target.closest('a[href]');
+  if (!dirty || !link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target || link.hasAttribute('download')) return;
+  const destination = new URL(link.href, location.href);
+  if (destination.origin === location.origin && destination.pathname === location.pathname && destination.search === location.search) return;
+  event.preventDefault();
+  if (await showMessage(ui.unsaved, true)) { dirty = false; location.assign(destination.href); }
+});
+window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ui.unsaved; } });
 const commandDialog = document.querySelector('[data-pb-commands]');
 const commandSearch = document.querySelector('[data-pb-command-search]');
 function renderCommands() {
@@ -502,7 +559,7 @@ function renderCommands() {
     [ui.widgets, () => { panel = 'widgets'; renderPanel(); }],
     [ui.navigator, () => { panel = 'navigator'; renderPanel(); }],
     [ui.library, () => { panel = 'library'; renderPanel(); }],
-    ...Object.entries(config.widgets).map(([type, definition]) => [`${ui.add} ${definition.label}`, () => addWidget(type)]),
+    ...Object.entries(config.widgets).filter(([, definition]) => !definition.hidden).map(([type, definition]) => [`${ui.add} ${definition.label}`, () => addWidget(type)]),
   ];
   const filter = commandSearch.value.trim().toLocaleLowerCase();
   for (const [label, action] of commands) {

@@ -107,6 +107,7 @@ return [
         'tab_text_2' => 'Contenu du deuxième onglet.',
     ],
     'widgets' => [
+        'original_content' => 'Contenu d’origine',
         'prime_block' => 'Bloc Prime',
         'posts' => 'Articles récents',
         'current_content' => 'Contenu actuel',
@@ -132,6 +133,13 @@ return [
         'anchor' => 'Ancre',
     ],
     'ui' => [
+        'conversion_failed' => 'Impossible de convertir ce contenu sans risquer de perdre son HTML enregistré. L’enregistrement est désactivé ; revenez à Prime Editor.',
+        'original_read_only' => 'Ce contenu d’origine ne peut pas être modifié ici. Vous pouvez le déplacer ou le supprimer.',
+        'unsaved_short' => 'Non enregistré',
+        'confirm_title' => 'Confirmer',
+        'notice_title' => 'Information',
+        'cancel' => 'Annuler',
+        'continue' => 'Continuer',
         'heading' => 'Titre',
         'list' => 'Liste',
         'quote' => 'Citation',

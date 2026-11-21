@@ -21,6 +21,7 @@ final class Renderer
         private readonly ?Entry $entry = null,
         private readonly bool $live = false,
         private readonly ?BlockRegistry $blocks = null,
+        private readonly ?OriginalContent $originals = null,
     ) {
     }
 
@@ -158,8 +159,18 @@ final class Renderer
             'posts' => $this->content?->posts($settings, $this->live) ?? '',
             'current_content' => $this->content?->current($settings, $this->entry) ?? '',
             'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry),
+            'original_content' => $this->renderOriginal($settings),
             default => '',
         };
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderOriginal(array $settings): string
+    {
+        $payload = is_string($settings['payload'] ?? null) ? $settings['payload'] : '';
+        $original = $this->originals?->open($payload);
+        // Only HTML previously saved for this very entry is allowed to bypass the sanitizer.
+        return $this->entry !== null && $original !== null && $original['entry'] === $this->entry->id ? $original['html'] : '';
     }
 
     /** @param array<string, mixed> $settings */

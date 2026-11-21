@@ -296,6 +296,98 @@ final class IntegrationTest extends TestCase
         self::assertSame(404, $this->send($app, 'GET', '/prime-builder/css/2-0000000000000000.css')->status());
     }
 
+    public function testOpeningAndSavingLegacyBlocksPreservesTheirContentsAndProtectedHtml(): void
+    {
+        $app = $this->activated('admin');
+        $service = $app->get(\Prime\Content\EntryService::class);
+        $legacy = ['version' => 1, 'blocks' => [
+            ['id' => 'first', 'type' => 'paragraph', 'data' => ['text' => 'Premier contenu']],
+            ['id' => 'middle', 'type' => 'html', 'data' => ['html' => '<p data-legacy="original">Contenu original conservé</p>']],
+            ['id' => 'last', 'type' => 'heading', 'data' => ['level' => 2, 'text' => 'Troisième contenu']],
+        ]];
+        $service->update(1, ['content' => $legacy], $this->user($app, 1));
+        $repository = $app->get(EntryRepository::class);
+        $before = $repository->find(1);
+        self::assertNotNull($before);
+        $beforeDocument = $before->content;
+        $beforeHtml = $before->contentHtml;
+        $config = $this->editorConfig($app, 1);
+        self::assertSame(false, $config['conversionFailed']);
+        self::assertSame(true, $config['converted']);
+        self::assertSame($beforeDocument, $repository->find(1)?->content);
+        self::assertSame($beforeHtml, $repository->find(1)?->contentHtml);
+        $converted = $config['document'];
+        $children = $converted['blocks'][0]['data']['elements'][0]['children'];
+        self::assertSame(['prime_block', 'original_content', 'prime_block'], array_column($children, 'type'));
+        $protected = $children[1]['settings']['payload'];
+        self::assertStringNotContainsString('Contenu original', $protected);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $converted['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        $previewHtml = json_decode($preview->body(), true)['data']['html'];
+        self::assertStringContainsString('<p data-legacy="original">Contenu original conservé</p>', $previewHtml);
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $converted, 'source_hash' => $config['sourceHash']], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $after = $repository->find(1);
+        self::assertNotNull($after);
+        self::assertStringContainsString('Premier contenu', $after->contentHtml);
+        self::assertStringContainsString('<p data-legacy="original">Contenu original conservé</p>', $after->contentHtml);
+        self::assertStringContainsString('Troisième contenu', $after->contentHtml);
+        self::assertSame(true, strpos($after->contentHtml, 'Premier contenu') < strpos($after->contentHtml, 'Contenu original conservé'));
+        self::assertSame(true, strpos($after->contentHtml, 'Contenu original conservé') < strpos($after->contentHtml, 'Troisième contenu'));
+
+        // A token cannot be altered, moved to another entry, or minted by the CMS encrypter.
+        $tampered = $converted;
+        $tampered['blocks'][0]['data']['elements'][0]['children'][1]['settings']['payload'] .= 'x';
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $tampered], $token)->status());
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/2', ['content' => $converted], $token)->status());
+        // The generic CMS writer also cannot render another entry's authenticated fragment.
+        $service->update(2, ['content' => $converted], $this->user($app, 1));
+        self::assertStringNotContainsString('Contenu original conservé', $repository->find(2)?->contentHtml ?? '');
+        $forged = $converted;
+        $forged['blocks'][0]['data']['elements'][0]['children'][1]['settings']['payload'] = $app->get(\Prime\Security\Encrypter::class)->encrypt((string) json_encode(['entry' => 1, 'type' => 'html', 'html' => '<script>alert(1)</script>']));
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $forged], $token)->status());
+        $styled = $converted;
+        $styled['blocks'][0]['data']['elements'][0]['children'][1]['styles'] = ['desktop' => ['color' => '#000000']];
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $styled], $token)->status());
+    }
+
+    public function testUnknownBlockBoundariesFailClosedAndStaleDocumentIsRejected(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $content = '{"version":1,"blocks":[{"id":"a","type":"missing/block","data":{}},{"id":"b","type":"paragraph","data":{"text":"Deux"}}]}';
+        $html = '<div>Ancien bloc</div>\n<p>Deux</p>';
+        $stmt = $pdo->prepare('UPDATE pc_entries SET content = ?, content_html = ? WHERE id = 1');
+        $stmt->execute([$content, $html]);
+        $config = $this->editorConfig($app, 1);
+        self::assertSame(true, $config['conversionFailed']);
+        self::assertSame($content, $app->get(EntryRepository::class)->find(1)?->content);
+        self::assertSame($html, $app->get(EntryRepository::class)->find(1)?->contentHtml);
+
+        // A lone unavailable block has an unambiguous saved HTML fragment.
+        $single = '{"version":1,"blocks":[{"id":"a","type":"missing/block","data":{}}]}';
+        $stmt->execute([$single, '<div>Ancien bloc</div>']);
+        $config = $this->editorConfig($app, 1);
+        self::assertSame(false, $config['conversionFailed']);
+        self::assertSame('original_content', $config['document']['blocks'][0]['data']['elements'][0]['children'][0]['type']);
+        $stmt->execute([$single, '<div>Changé ailleurs</div>']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        self::assertSame(409, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $config['document'], 'source_hash' => $config['sourceHash']], $token)->status());
+        self::assertSame('<div>Changé ailleurs</div>', $app->get(EntryRepository::class)->find(1)?->contentHtml);
+    }
+
+    /** @return array<string, mixed> */
+    private function editorConfig(Application $app, int $id): array
+    {
+        $response = $this->send($app, 'GET', '/admin/prime-builder/edit/' . $id);
+        self::assertSame(200, $response->status(), $response->body());
+        self::assertSame(1, preg_match('/<textarea hidden data-pb-config>(.*?)<\/textarea>/s', $response->body(), $matches));
+        $decoded = json_decode(html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'), true);
+        self::assertSame(true, is_array($decoded));
+        return $decoded;
+    }
+
     private function appLogin(Application $app): void
     {
         $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 1));

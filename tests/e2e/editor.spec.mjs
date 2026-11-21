@@ -92,8 +92,8 @@ test('template library supports insertion and JSON export/import', async ({ page
   await page.getByRole('button', { name: 'Exporter JSON' }).click();
   const file = await downloaded;
   expect(file.suggestedFilename()).toMatch(/^prime-builder-\d+\.json$/);
-  page.once('dialog', dialog => dialog.accept());
   await page.locator('[data-pb-import]').setInputFiles(await file.path());
+  await page.getByRole('dialog', { name: 'Confirmer' }).getByRole('button', { name: 'Continuer' }).click();
   await expect(page.locator('[data-pb-save-state]')).toHaveText('Modèle importé.');
 });
 
@@ -251,7 +251,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   const response = await page.evaluate(async entryId => {
     const config = JSON.parse(document.querySelector('[data-pb-config]').value);
     const { createElement } = await import('/assets/plugins/prime-builder/js/model.js');
-    const elements = Object.keys(config.widgets).map(type => {
+    const elements = Object.keys(config.widgets).filter(type => !config.widgets[type].hidden).map(type => {
       const element = createElement(type);
       element.settings = { ...element.settings, ...(config.widgetDefaults[type] || {}) };
       return element;
@@ -267,6 +267,66 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   await page.goto('/test-prime-builder');
   await expect(page.locator('.pb-element')).toHaveCount(23);
   await expectAccessible(page);
+});
+
+test('existing three-block page is converted without losing its saved HTML', async ({ page }) => {
+  const legacyId = process.env.E2E_LEGACY_ENTRY_ID;
+  expect(legacyId).toBeTruthy();
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${legacyId}`);
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Non enregistré');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.getByText('Premier contenu')).toBeVisible();
+  await expect(frame.getByText('Contenu original conservé')).toBeVisible();
+  await expect(frame.getByText('Troisième contenu')).toBeVisible();
+  const types = await page.evaluate(() => {
+    const config = JSON.parse(document.querySelector('[data-pb-config]').value);
+    return config.document.blocks[0].data.elements[0].children.map(node => node.type);
+  });
+  expect(types).toEqual(['prime_block', 'original_content', 'prime_block']);
+  await page.getByRole('button', { name: 'Structure', exact: true }).click();
+  await page.getByRole('button', { name: 'Contenu d’origine', exact: true }).click();
+  await expect(page.getByText('Ce contenu d’origine ne peut pas être modifié ici.', { exact: false })).toBeVisible();
+  await expect(page.locator('[data-pb-fields] input')).toHaveCount(0);
+  await expect(page.getByLabel('Déplacer vers').locator('option').last()).toHaveText('Conteneur 1');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto('/contenu-existant');
+  const content = page.locator('.pb-layout');
+  await expect(content).toContainText('Premier contenu');
+  await expect(content.locator('[data-legacy="original"]')).toHaveText('Contenu original conservé');
+  await expect(content).toContainText('Troisième contenu');
+  const text = await content.innerText();
+  expect(text.indexOf('Premier contenu')).toBeLessThan(text.indexOf('Contenu original conservé'));
+  expect(text.indexOf('Contenu original conservé')).toBeLessThan(text.indexOf('Troisième contenu'));
+  await expectAccessible(page);
+});
+
+test('departure dialog traps and restores focus and closes on Escape', async ({ page }) => {
+  let nativeDialogs = 0;
+  page.on('dialog', dialog => { nativeDialogs += 1; dialog.dismiss(); });
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Non enregistré');
+  const back = page.getByRole('link', { name: 'Retour au contenu' });
+  await back.click();
+  const dialog = page.getByRole('dialog', { name: 'Confirmer' });
+  await expect(dialog).toContainText('Des modifications ne sont pas enregistrées. Quitter la page ?');
+  const cancel = dialog.getByRole('button', { name: 'Annuler' });
+  const proceed = dialog.getByRole('button', { name: 'Continuer' });
+  await expect(cancel).toBeFocused();
+  await expectAccessible(page);
+  await page.keyboard.press('Tab');
+  await expect(proceed).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(proceed).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(back).toBeFocused();
+  expect(nativeDialogs).toBe(0);
 });
 
 // Keep this last: the CI workflow next disables the plugin and makes a fresh uncached HTTP request.

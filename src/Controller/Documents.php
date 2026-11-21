@@ -20,6 +20,7 @@ use Prime\Http\Request;
 use Prime\Http\Response;
 use Prime\I18n\Translator;
 use Prime\Plugins\PluginContext;
+use PrimeBuilder\Document\Converter;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Library;
 use PrimeBuilder\Document\Validator;
@@ -27,6 +28,7 @@ use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Widgets\Content;
+use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
@@ -67,6 +69,11 @@ final class Documents
             return null;
         }
         return $entry;
+    }
+
+    private function sourceHash(Entry $entry): string
+    {
+        return hash('sha256', $entry->content . "\0" . $entry->contentHtml . "\0" . $entry->status . "\0" . ($entry->publishedAt ?? ''));
     }
 
     public function edit(Request $request, string $id): Response
@@ -115,16 +122,24 @@ final class Documents
                 'category' => is_string($definition['category'] ?? null) ? $definition['category'] : 'base',
                 'fields' => $fields,
                 'container' => ($definition['container'] ?? false) === true,
+                'hidden' => ($definition['hidden'] ?? false) === true,
+                'readOnly' => ($definition['read_only'] ?? false) === true,
             ];
         }
         $ui = [];
-        foreach (['widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'history', 'drop', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'media_grid', 'media_error', 'images', 'captions', 'caption_language', 'transcript', 'fr', 'en', 'default_option', 'layout_mode', 'flow', 'grid_columns', 'wrap', 'nowrap', 'justify', 'items_align', 'start', 'end', 'space-between', 'stretch', 'limit', 'show_excerpt', 'show', 'hide', 'source', 'excerpt', 'published', 'block_type', 'block_data', 'paragraph', 'heading', 'list', 'quote', 'separator', 'code', 'table', 'callout'] as $key) {
+        foreach (['conversion_failed', 'original_read_only', 'unsaved_short', 'confirm_title', 'notice_title', 'cancel', 'continue', 'widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'history', 'drop', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'media_grid', 'media_error', 'images', 'captions', 'caption_language', 'transcript', 'fr', 'en', 'default_option', 'layout_mode', 'flow', 'grid_columns', 'wrap', 'nowrap', 'justify', 'items_align', 'start', 'end', 'space-between', 'stretch', 'limit', 'show_excerpt', 'show', 'hide', 'source', 'excerpt', 'published', 'block_type', 'block_data', 'paragraph', 'heading', 'list', 'quote', 'separator', 'code', 'table', 'callout'] as $key) {
             $ui[$key] = t('plugin::prime-builder.ui.' . $key);
         }
+        $document = $entry->decodedContent();
+        $originals = OriginalContent::fromAppKey($this->plugin->app()->config()->get('app.key'));
+        $converted = (new Converter($this->plugin->app()->get(BlockRegistry::class), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $registry, $originals))->convert($entry);
         $config = [
             'entryId' => $entry->id,
             'userId' => $user instanceof User ? $user->id : 0,
-            'document' => $entry->decodedContent(),
+            'sourceHash' => $this->sourceHash($entry),
+            'document' => $converted ?? $document,
+            'conversionFailed' => $converted === null,
+            'converted' => $converted !== null && $document['blocks'] !== [] && $converted !== $document,
             'previewUrl' => $entry->previewUrl(),
             'publicCssUrl' => $this->plugin->url('css/public.css'),
             'kitCssUrl' => '/prime-builder/kit/' . substr(hash('sha256', Kit::fromSettings($this->plugin->settings())), 0, 16) . '.css',
@@ -162,10 +177,23 @@ final class Documents
         if (!is_array($body) || !is_array($body['content'] ?? null) || strlen($request->rawBody()) > Validator::MAX_BYTES + 8192) {
             return ApiError::response('validation_failed', 422, $request);
         }
+        if (array_key_exists('source_hash', $body) && (!is_string($body['source_hash']) || !hash_equals($this->sourceHash($entry), $body['source_hash']))) {
+            return ApiError::response('conflict', 409, $request);
+        }
         // Require the builder's canonical single-block document; never accept arbitrary privileged core blocks.
         $blocks = $body['content']['blocks'] ?? null;
         if (($body['content']['version'] ?? null) !== 1 || !is_array($blocks) || count($blocks) !== 1 || !is_array($blocks[0] ?? null) || ($blocks[0]['type'] ?? null) !== 'prime-builder/layout') {
             return ApiError::response('validation_failed', 422, $request);
+        }
+        $data = $blocks[0]['data'] ?? null;
+        if (!is_array($data)) {
+            return ApiError::response('validation_failed', 422, $request);
+        }
+        // The CMS block validator has no entry context; enforce entry binding here too.
+        $validator = new Validator(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->app()->get(BlockRegistry::class), OriginalContent::fromAppKey($this->plugin->app()->config()->get('app.key')), $entry->id);
+        $validated = $validator->validate($data);
+        if ($validated['errors'] !== []) {
+            return ApiError::response('validation_failed', 422, $request, ['fields' => ['content' => $validated['errors']]]);
         }
         $input = ['content' => $body['content']];
         if (is_string($body['status'] ?? null)) {
@@ -176,7 +204,7 @@ final class Documents
         }
         try {
             $saved = $this->plugin->app()->get(EntryService::class)->update($entry->id, $input, $user);
-            return Response::json(['data' => ['id' => $saved->id, 'status' => $saved->status, 'published_at' => $saved->publishedAt, 'content' => $saved->decodedContent(), 'updated_at' => $saved->updatedAt]]);
+            return Response::json(['data' => ['id' => $saved->id, 'status' => $saved->status, 'published_at' => $saved->publishedAt, 'content' => $saved->decodedContent(), 'updated_at' => $saved->updatedAt, 'source_hash' => $this->sourceHash($saved)]]);
         } catch (ContentValidationException $exception) {
             return ApiError::response('validation_failed', 422, $request, ['fields' => $exception->errors()]);
         } catch (ContentLockedException) {
@@ -199,12 +227,13 @@ final class Documents
         if (!is_array($body) || !is_array($body['data'] ?? null) || strlen($request->rawBody()) > Validator::MAX_BYTES + 8192) {
             return ApiError::response('validation_failed', 422, $request);
         }
-        $validator = new Validator(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->app()->get(BlockRegistry::class));
+        $originals = OriginalContent::fromAppKey($this->plugin->app()->config()->get('app.key'));
+        $validator = new Validator(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->app()->get(BlockRegistry::class), $originals, $entry->id);
         $result = $validator->validate($body['data']);
         if ($result['errors'] !== []) {
             return ApiError::response('validation_failed', 422, $request, ['fields' => ['content' => $result['errors']]]);
         }
-        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class));
+        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals);
         return Response::json(['data' => ['html' => $renderer->render($result['data']), 'layout' => $result['data']]]);
     }
 
@@ -227,11 +256,12 @@ final class Documents
         }
         $registry = new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class));
         $sanitizer = $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class);
-        $result = (new Validator($registry, $sanitizer, $this->plugin->app()->get(BlockRegistry::class)))->validate($data);
+        $originals = OriginalContent::fromAppKey($this->plugin->app()->config()->get('app.key'));
+        $result = (new Validator($registry, $sanitizer, $this->plugin->app()->get(BlockRegistry::class), $originals, $entry->id))->validate($data);
         if ($result['errors'] !== []) {
             return ApiError::response('not_found', 404, $request);
         }
-        $renderer = new Renderer($registry, $sanitizer, $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class));
+        $renderer = new Renderer($registry, $sanitizer, $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals);
         return Response::json(['data' => ['widgets' => $renderer->liveWidgets($result['data'])]])
             ->withHeader('Cache-Control', 'no-store, private')
             ->withHeader('X-Content-Type-Options', 'nosniff');

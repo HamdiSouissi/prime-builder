@@ -41,6 +41,7 @@ final class Registry
             'posts' => ['limit' => ['type' => 'integer', 'min' => 1, 'max' => 12], 'show_excerpt' => ['type' => 'enum', 'values' => ['show', 'hide']]],
             'current_content' => ['source' => ['type' => 'enum', 'values' => ['title', 'excerpt', 'published', 'author']]],
             'prime_block' => ['block_type' => ['type' => 'enum', 'values' => PrimeBlock::ALLOWED], 'block_data' => ['type' => 'json_object', 'max' => 20000]],
+            'original_content' => ['payload' => ['type' => 'protected', 'max' => 1048576]],
             'tabs' => [
                 'label' => $text,
                 'title_1' => $text, 'text_1' => ['type' => 'rich', 'max' => 10000],
@@ -56,6 +57,10 @@ final class Registry
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];
+            if ($type === 'original_content') {
+                $definitions[$type]['hidden'] = true;
+                $definitions[$type]['read_only'] = true;
+            }
             if ($type === 'tabs') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
             } elseif (in_array($type, ['posts', 'current_content'], true)) {

@@ -216,6 +216,10 @@ jobs:
           ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
           test -n "$ID"
           echo "E2E_ENTRY_ID=$ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Contenu existant' --slug=contenu-existant --status=published --body='{"version":1,"blocks":[{"id":"first","type":"paragraph","data":{"text":"Premier contenu"}},{"id":"middle","type":"html","data":{"html":"<p data-legacy=\"original\">Contenu original conservé</p>"}},{"id":"last","type":"heading","data":{"level":2,"text":"Troisième contenu"}}]}' 2>&1 | tee -a /tmp/prime-install.log
+          LEGACY_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$LEGACY_ID"
+          echo "E2E_LEGACY_ENTRY_ID=$LEGACY_ID" >> "$GITHUB_ENV"
           php -S 0.0.0.0:8080 -t public public/router.php > /tmp/prime-builder-server.log 2>&1 &
       - name: Report installation output on failure
         if: failure()

@@ -11,9 +11,11 @@ use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
+use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
+require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
@@ -146,12 +148,23 @@ final class DocumentTest extends TestCase
     public function testAllBuiltInWidgetsRenderWithoutThrowing(): void
     {
         $registry = new Registry();
-        $renderer = new Renderer($registry, new HtmlSanitizer());
+        $originals = OriginalContent::fromAppKey(str_repeat('k', 32));
+        self::assertNotNull($originals);
+        $entry = \Prime\Content\Entry::fromRow(['id' => 1]);
+        $renderer = new Renderer($registry, new HtmlSanitizer(), entry: $entry, originals: $originals);
+        $validator = new Validator($registry, new HtmlSanitizer(), originals: $originals, entryId: 1);
         foreach (array_keys($registry->all()) as $type) {
             $node = $this->element($type, $type);
-            $result = $this->validator($registry)->validate(['version' => 1, 'elements' => [$node]]);
+            if ($type === 'original_content') {
+                $node['settings'] = ['payload' => $originals->protect(1, 'legacy', '<p>Conservé</p>')];
+            }
+            $result = $validator->validate(['version' => 1, 'elements' => [$node]]);
             self::assertSame([], $result['errors'], $type);
-            self::assertStringContainsString('data-pb-id="' . $type . '"', $renderer->render($result['data']));
+            $html = $renderer->render($result['data']);
+            self::assertStringContainsString('data-pb-id="' . $type . '"', $html);
+            if ($type === 'original_content') {
+                self::assertStringContainsString('<p>Conservé</p>', $html);
+            }
         }
     }
 

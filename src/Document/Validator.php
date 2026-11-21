@@ -6,6 +6,7 @@ namespace PrimeBuilder\Document;
 
 use Prime\Editor\BlockRegistry;
 use Prime\Security\HtmlSanitizer;
+use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\PrimeBlock;
 use PrimeBuilder\Widgets\Registry;
 
@@ -20,6 +21,8 @@ final class Validator
         private readonly Registry $registry,
         private readonly HtmlSanitizer $sanitizer,
         private readonly ?BlockRegistry $blocks = null,
+        private readonly ?OriginalContent $originals = null,
+        private readonly ?int $entryId = null,
     ) {
     }
 
@@ -113,7 +116,13 @@ final class Validator
                     $settings['block_data'] = $normalizedBlock;
                 }
             }
+            if ($type === 'original_content' && (!isset($settings['payload']) || count($settings) !== 1)) {
+                $errors[] = t('plugin::prime-builder.validation.settings');
+            }
             $styles = $this->styles($item['styles'] ?? [], $errors);
+            if ($type === 'original_content' && $styles !== []) {
+                $errors[] = t('plugin::prime-builder.validation.styles');
+            }
             $children = $item['children'] ?? [];
             if (!is_array($children) || !array_is_list($children) || (($definition['container'] ?? false) !== true && $children !== [])) {
                 $errors[] = t('plugin::prime-builder.validation.structure');
@@ -134,6 +143,10 @@ final class Validator
         }
         if (!is_string($value) || strlen($value) > (int) ($schema['max'] ?? 1000)) {
             return null;
+        }
+        if ($type === 'protected') {
+            $original = $this->originals?->open($value);
+            return $original !== null && ($this->entryId === null || $original['entry'] === $this->entryId) ? $value : null;
         }
         return match ($type) {
             'text', 'multiline' => trim(strip_tags($value)),

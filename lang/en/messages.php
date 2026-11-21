@@ -107,6 +107,7 @@ return [
         'tab_text_2' => 'Content of the second tab.',
     ],
     'widgets' => [
+        'original_content' => 'Original content',
         'prime_block' => 'Prime block',
         'posts' => 'Recent posts',
         'current_content' => 'Current content',
@@ -132,6 +133,13 @@ return [
         'anchor' => 'Anchor',
     ],
     'ui' => [
+        'conversion_failed' => 'This content cannot be converted without risking loss of saved HTML. Saving is disabled; return to Prime Editor.',
+        'original_read_only' => 'This original content cannot be edited here. You can move or delete it.',
+        'unsaved_short' => 'Not saved',
+        'confirm_title' => 'Confirm',
+        'notice_title' => 'Notice',
+        'cancel' => 'Cancel',
+        'continue' => 'Continue',
         'heading' => 'Heading',
         'list' => 'List',
         'quote' => 'Quote',
