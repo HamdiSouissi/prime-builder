@@ -1,0 +1,19 @@
+{
+  "title": "Section Héros",
+  "type": "section",
+  "document": {
+    "version": 1,
+    "elements": [
+      {
+        "id": "sec_hero_1",
+        "elType": "container",
+        "settings": { "layout_type": "flex", "content_width": "boxed", "padding": "64px 24px" },
+        "elements": [
+          { "id": "h_hero_1", "elType": "widget", "widgetType": "heading", "settings": { "tag": "h1", "text": "Construisez votre site avec Prime Builder" } },
+          { "id": "t_hero_1", "elType": "widget", "widgetType": "text-editor", "settings": { "text": "<p>Un constructeur visuel rapide, accessible et sans dépendance.</p>" } },
+          { "id": "b_hero_1", "elType": "widget", "widgetType": "button", "settings": { "text": "Démarrer", "url": "#contact" } }
+        ]
+      }
+    ]
+  }
+}

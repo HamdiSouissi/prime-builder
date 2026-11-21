@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: prime_test
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping -h localhost" --health-interval=10s --health-timeout=5s --health-retries=5
+
+    steps:
+      - name: Checkout prime-builder
+        uses: actions/checkout@v4
+        with:
+          path: prime-builder
+
+      - name: Checkout prime-cms
+        uses: actions/checkout@v4
+        with:
+          repository: HamdiSouissi/prime-cms
+          ref: main
+          path: prime-cms
+
+      - name: Setup PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo, pdo_mysql, json, intl
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Prime CMS dependencies
+        working-directory: prime-cms
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Copy plugin into Prime CMS
+        run: |
+          rm -rf prime-cms/content/plugins/prime-builder
+          cp -r prime-builder prime-cms/content/plugins/prime-builder
+
+      - name: Run JS tests
+        working-directory: prime-builder
+        run: node --test tests/js/editor.test.mjs
+
+      - name: Run PHPStan
+        working-directory: prime-cms
+        run: vendor/bin/phpstan analyse content/plugins/prime-builder/src --level=8
+
+      - name: Run PHP-CS-Fixer (dry-run)
+        working-directory: prime-cms
+        run: vendor/bin/php-cs-fixer fix content/plugins/prime-builder/src --dry-run --diff
+
+      - name: Run PHPUnit
+        working-directory: prime-cms
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: prime_test
+          DB_USERNAME: root
+          DB_PASSWORD: root
+        run: vendor/bin/phpunit content/plugins/prime-builder/tests/PrimeBuilderTest.php
+
+      - name: Check translations
+        working-directory: prime-cms
+        run: php bin/prime lang:check --strict

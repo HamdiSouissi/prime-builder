@@ -1,0 +1,20 @@
+{
+  "slug": "prime-builder",
+  "name": "Prime Builder",
+  "description": "plugin::prime-builder.manifest.description",
+  "version": "1.0.0",
+  "author": {
+    "name": "Hamdi Souissi",
+    "url": "https://github.com/HamdiSouissi/prime-builder"
+  },
+  "license": "MIT",
+  "namespace": "PrimeBuilder\\",
+  "main": "PrimeBuilder\\Plugin",
+  "requires": {
+    "prime": ">=1.0.0",
+    "php": "^8.2"
+  },
+  "icon": "assets/icon.svg",
+  "accent": "brand",
+  "settings_url": "/admin/prime-builder/settings"
+}

@@ -1,0 +1,122 @@
+.pb-root {
+  width: 100%;
+}
+
+.pb-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pb-container-gap, 20px);
+  width: 100%;
+}
+
+.pb-container--boxed {
+  max-width: var(--pb-content-width, 1200px);
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+
+.pb-container--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.pb-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.65rem 1.25rem;
+  border-radius: 8px;
+  background: var(--pb-accent, #C9441F);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  border: 0;
+  cursor: pointer;
+}
+
+.pb-button:focus-visible {
+  outline: 2px solid var(--pb-primary, #ED6647);
+  outline-offset: 2px;
+}
+
+.pb-image__img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.pb-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.pb-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pb-form__field input,
+.pb-form__field textarea,
+.pb-form__field select {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.pb-form__hp {
+  position: absolute;
+  left: -9999px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pb-progress__track {
+  height: 10px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.pb-progress__bar {
+  height: 100%;
+  background: var(--pb-primary, #ED6647);
+}
+
+.pb-tabs__list {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.pb-tabs__tab {
+  padding: 0.5rem 1rem;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pb-tabs__tab[aria-selected="true"] {
+  border-bottom: 2px solid var(--pb-accent, #C9441F);
+  font-weight: 600;
+}
+
+.pb-carousel {
+  position: relative;
+  overflow: hidden;
+}
+
+.pb-carousel__track {
+  display: flex;
+  transition: transform 0.3s ease;
+}
+
+.pb-carousel__slide {
+  min-width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pb-carousel__track { transition: none; }
+}

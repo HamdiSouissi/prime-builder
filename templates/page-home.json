@@ -1,0 +1,18 @@
+{
+  "title": "Page d’accueil complète",
+  "type": "page",
+  "document": {
+    "version": 1,
+    "elements": [
+      {
+        "id": "pg_home_1",
+        "elType": "container",
+        "settings": { "layout_type": "flex", "content_width": "boxed" },
+        "elements": [
+          { "id": "pg_h1", "elType": "widget", "widgetType": "heading", "settings": { "tag": "h1", "text": "Bienvenue sur Prime CMS" } },
+          { "id": "pg_cta", "elType": "widget", "widgetType": "cta", "settings": { "title": "Prêt à publier ?", "description": "Découvrez nos fonctionnalités.", "button_text": "Explorer", "url": "/about" } }
+        ]
+      }
+    ]
+  }
+}
