@@ -286,7 +286,7 @@ test('existing three-block page is converted without losing its saved HTML', asy
   expect(types).toEqual(['prime_block', 'original_content', 'prime_block']);
   await page.getByRole('button', { name: 'Structure', exact: true }).click();
   await page.getByRole('button', { name: 'Contenu d’origine', exact: true }).click();
-  await expect(page.getByText('Ce contenu d’origine ne peut pas être modifié ici.', { exact: false })).toBeVisible();
+  await expect(page.locator('[data-pb-fields]').getByText('Ce contenu d’origine ne peut pas être modifié ici.', { exact: false })).toBeVisible();
   await expect(page.locator('[data-pb-fields] input')).toHaveCount(0);
   await expect(page.getByLabel('Déplacer vers').locator('option').last()).toHaveText('Conteneur 1');
   await page.locator('[data-pb-save]').click();
