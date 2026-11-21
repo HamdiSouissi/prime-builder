@@ -21,6 +21,7 @@ use Prime\Scheduler\Schedule;
 use Prime\Security\HtmlSanitizer;
 use Prime\Site\PageContext;
 use Prime\Site\UrlGenerator;
+use Prime\Support\Str;
 use Prime\Themes\ThemeAssetRegistry;
 use PrimeBuilder\Controller\Dashboard;
 use PrimeBuilder\Controller\Documents;
@@ -81,7 +82,7 @@ final class Plugin extends AbstractPlugin
             category: 'plugins',
             validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer, $blocks, $originals))->validate($data),
             renderer: static fn (array $data, HtmlSanitizer $sanitizer, array $renderContext): string => (new Renderer($registry, $sanitizer, $context->logger(), $content, ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null, false, $blocks, $originals))->render($data),
-            textExtractor: static fn (array $data): string => trim(strip_tags((new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals))->render($data))),
+            textExtractor: static fn (array $data): string => Str::plainText((new Renderer($registry, $context->app()->get(HtmlSanizer::class), $context->logger(), $content, null, false, $blocks, $originals))->render($data)),
             keywords: ['builder', 'layout'],
         ));
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
@@ -97,8 +98,8 @@ final class Plugin extends AbstractPlugin
             $router->get('/', [$dashboard, 'index'])->name('index');
             $router->get('/edit/{id:\d+}', [$controller, 'edit'])->name('edit');
         }, capability: 'prime_builder.edit');
-        // The CMS settings screens/API only check settings.manage, not a section's capability.
-        // A separate route prevents that broader permission from bypassing our settings capability.
+        // Keep the plugin's dedicated settings page and capability; Prime 1.0.2 also
+        // enforces section capabilities for settings registered in its general catalogue.
         $context->router()->adminGroup(static function (Router $router) use ($settings): void {
             $router->get('/settings', [$settings, 'show'])->name('settings');
             $router->post('/settings', [$settings, 'save'])->name('settings.save');

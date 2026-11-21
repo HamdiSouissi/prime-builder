@@ -13,7 +13,7 @@ use Prime\Plugins\PluginContext;
 use PrimeBuilder\Configuration;
 use Throwable;
 
-/** Settings have their own capability: the CMS-wide settings API does not enforce section capabilities. */
+/** The dedicated settings page is protected by the plugin's settings capability. */
 final class Settings
 {
     private const DEFAULTS = [

@@ -7,7 +7,6 @@ namespace PrimeBuilder\Controller;
 use Prime\Api\ApiError;
 use Prime\Auth\Auth;
 use Prime\Auth\User;
-use Prime\Auth\UserRepository;
 use Prime\Content\ContentTypeRegistry;
 use Prime\Content\Entry;
 use Prime\Content\EntryRepository;
@@ -58,47 +57,6 @@ final class Documents
             'prime_block' => ['block_type' => 'paragraph', 'block_data' => (string) json_encode(['text' => $copy('prime_block')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)],
             'tabs' => ['label' => $copy('tabs_label'), 'title_1' => $copy('tab_1'), 'text_1' => $copy('tab_text_1'), 'title_2' => $copy('tab_2'), 'text_2' => $copy('tab_text_2')],
         ];
-    }
-
-    /**
-     * Restrict a bearer token to the account's current capabilities as well as those
-     * granted to the token. Prime 1.0.1 otherwise retains capabilities removed from a role.
-     */
-    private function apiUser(Request $request): ?User
-    {
-        $user = $request->attribute('api.user');
-        if (!$user instanceof User) {
-            return null;
-        }
-        if ($request->attribute('api.token_id') === null) {
-            return $user;
-        }
-        $account = $this->plugin->app()->get(UserRepository::class)->find($user->id);
-        if ($account === null || !$account->isActive()) {
-            return null;
-        }
-        // A literal wildcard would make User::isAdministrator() true. Tokens issued by
-        // the CMS expand it to registered abilities, so reject a persisted wildcard here.
-        $capabilities = array_values(array_filter($user->capabilities, static fn (string $capability): bool => $capability !== '*' && $account->can($capability)));
-        return new User(
-            id: $account->id,
-            email: $account->email,
-            displayName: $account->displayName,
-            status: $account->status,
-            locale: $account->locale,
-            sessionVersion: $account->sessionVersion,
-            lastLoginAt: $account->lastLoginAt,
-            passwordChangedAt: $account->passwordChangedAt,
-            twoFactorConfirmedAt: $account->twoFactorConfirmedAt,
-            twoFactorLastStep: $account->twoFactorLastStep,
-            createdAt: $account->createdAt,
-            updatedAt: $account->updatedAt,
-            roles: [],
-            capabilities: $capabilities,
-            avatarMediaId: $account->avatarMediaId,
-            username: $account->username,
-            bio: $account->bio,
-        );
     }
 
     private function entry(int $id, ?User $user): ?Entry
@@ -214,8 +172,8 @@ final class Documents
 
     public function update(Request $request, string $id): Response
     {
-        $user = $this->apiUser($request);
-        if ($user === null || !$user->can('prime_builder.edit')) {
+        $user = $request->attribute('api.user');
+        if (!$user instanceof User || !$user->can('prime_builder.edit')) {
             return ApiError::response('forbidden', 403, $request);
         }
         $entry = $this->entry((int) $id, $user);
@@ -267,8 +225,8 @@ final class Documents
 
     public function render(Request $request, string $id): Response
     {
-        $user = $this->apiUser($request);
-        if ($user === null || !$user->can('prime_builder.edit')) {
+        $user = $request->attribute('api.user');
+        if (!$user instanceof User || !$user->can('prime_builder.edit')) {
             return ApiError::response('forbidden', 403, $request);
         }
         $entry = $this->entry((int) $id, $user);
@@ -332,7 +290,7 @@ final class Documents
         $type = $this->plugin->app()->get(ContentTypeRegistry::class)->get($entry->type);
         $public = $type !== null && $type->public && \Prime\Site\UrlResolver::isPubliclyVisible($entry);
         $apiUser = $request->attribute('api.user');
-        $user = $apiUser instanceof User ? $this->apiUser($request) : $this->plugin->app()->get(Auth::class)->user($request);
+        $user = $apiUser instanceof User ? $apiUser : $this->plugin->app()->get(Auth::class)->user($request);
         if (!$public && $this->entry($entry->id, $user) === null) {
             return ApiError::response('not_found', 404, $request);
         }

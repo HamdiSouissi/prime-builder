@@ -1,12 +1,12 @@
 # Prime Builder
 
-Plugin de composition visuelle pour Prime CMS 1.0.1 et versions ultérieures compatibles. Il utilise le moteur de contenu et le thème actifs de Prime CMS, sans dépendance PHP ou JavaScript tierce à l’exécution.
+Plugin de composition visuelle pour Prime CMS 1.0.2 et versions ultérieures compatibles. Il utilise le moteur de contenu et le thème actifs de Prime CMS, sans dépendance PHP ou JavaScript tierce à l’exécution.
 
 > **État : prototype partiel, version 0.1.0.** Il ne constitue pas encore un remplacement complet d’un constructeur visuel professionnel. Le Theme Builder, les formulaires, les popups, les widgets globaux et de nombreuses fonctions demandées ne sont pas implémentés. Ne l’utilisez pas en production sans revue, sauvegarde et tests adaptés à votre site. Voir [RETOUR.md](RETOUR.md).
 
 ## Prérequis
 
-- Prime CMS 1.0.1 avec PHP 8.2–8.x et les extensions requises par le CMS. Le manifeste déclare Prime ≥ 1.0.1 et PHP `^8.2` ; la compatibilité des futures versions n’a pas été vérifiée.
+- Prime CMS 1.0.2 avec PHP 8.2–8.x et les extensions requises par le CMS. Le manifeste déclare Prime ≥ 1.0.2 et PHP `^8.2` ; la compatibilité des futures versions n’a pas été vérifiée.
 - Accès à l’administration et aux capacités nécessaires : `prime_builder.edit` **et** les permissions de modification du contenu concerné. La publication requiert en outre la permission de publication du type de contenu. La bibliothèque, l’import et l’export dans l’éditeur nécessitent `prime_builder.templates` ; la page de réglages du plugin nécessite `prime_builder.settings`. Les autres capacités déclarées correspondent à des fonctions qui restent à développer.
 - API REST du CMS activée pour enregistrer et actualiser les aperçus. Le dossier de stockage de Prime doit être accessible en écriture pour conserver les anciennes feuilles CSS à empreinte.
 - Un navigateur moderne avec JavaScript pour l’éditeur. Le contenu statique enregistré reste lisible sans JavaScript ; les listes d’articles utilisent alors un lien de repli vers l’archive.

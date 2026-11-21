@@ -1,4 +1,5 @@
 /node_modules/
+/tests/e2e/node_modules/
 /.arena/
 /.phpunit.cache/
 /.phpstan-cache/

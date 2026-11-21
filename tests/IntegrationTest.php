@@ -96,6 +96,29 @@ final class IntegrationTest extends TestCase
         self::assertSame(404, $this->send($app, 'GET', '/prime-builder/css/1-0000000000000000.css')->status());
     }
 
+    public function testPlainTextSeparatesRenderedElementsAndNormalizesWhitespace(): void
+    {
+        $app = $this->activated(null);
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'][0]['settings'] = ['text' => 'Titre', 'level' => 2];
+        $document['blocks'][0]['data']['elements'][] = [
+            'id' => 'paragraph', 'type' => 'text', 'settings' => ['text' => '<p>Paragraphe</p>'], 'styles' => [], 'children' => [],
+        ];
+        $definition = $app->get(BlockRegistry::class)->get('prime-builder/layout');
+        self::assertNotNull($definition);
+        self::assertSame('Titre Paragraphe', ($definition->textExtractor)($document['blocks'][0]['data']));
+
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertSame('Titre Paragraphe', $entry->contentText);
+
+        $document['blocks'][0]['data']['elements'][1]['settings']['text'] = '<p>Du <code>code</code> &amp; du texte<br>Suite</p>';
+        self::assertSame('Titre Du code & du texte Suite', ($definition->textExtractor)($document['blocks'][0]['data']));
+    }
+
     public function testPartialPreviewRendersOnlyTheRequestedSubtreeAndValidatesTheWholeDocument(): void
     {
         $app = $this->activated(null);
@@ -324,8 +347,8 @@ final class IntegrationTest extends TestCase
         $pdo->exec("UPDATE pc_users SET status = 'disabled' WHERE id = 2");
         self::assertSame(401, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
 
-        // The CMS expands '*' on issuance. A literal wildcard in storage must not make
-        // the restricted User an administrator in the plugin if old data contains one.
+        // Prime 1.0.2 expands '*' on issuance and ignores a literal wildcard in storage;
+        // the effective API user must never become an administrator from that value.
         $admin = $this->tokens($app)->issue($this->user($app, 1), 'wildcard regression', ['*']);
         $statement = $pdo->prepare('UPDATE pc_api_tokens SET abilities = ? WHERE id = ?');
         $statement->execute(['["*"]', $admin['id']]);
