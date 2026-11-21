@@ -325,9 +325,9 @@ function freshIds(elements, removeAnchors = false) {
   return copy;
 }
 async function insertTemplate(template) {
-  if (!config.canTemplates || !ensureLayout()) return;
+  if (!ensureLayout()) return;
   if (template.kind === 'page' && history.present.length && !await showMessage(ui.confirm_template, true)) return;
-  const nodes = freshIds(template.elements);
+  const nodes = freshIds(template.elements, true);
   if (template.kind === 'page') commit(nodes, true, `${ui.insert} : ${template.name}`);
   else {
     let next = history.present;
@@ -343,8 +343,88 @@ function renderLibrary() {
     const card = document.createElement('div'); card.className = 'pb-template-card';
     const info = document.createElement('div'); info.append(text('strong', template.name), text('small', template.kind === 'page' ? ui.page_template : ui.section_template));
     const button = text('button', ui.insert); button.type = 'button'; button.setAttribute('aria-label', `${ui.insert} ${template.name}`);
-    button.addEventListener('click', () => insertTemplate(template)); card.append(info, button); list.append(card);
+    button.addEventListener('click', () => insertTemplate(template));
+    const actions = document.createElement('div'); actions.className = 'pb-template-actions'; actions.append(button);
+    if (config.canTemplates && template.id) {
+      const removeButton = text('button', ui.remove); removeButton.type = 'button';
+      removeButton.setAttribute('aria-label', `${ui.template_delete} ${template.name}`);
+      removeButton.addEventListener('click', async () => {
+        if (!await showMessage(ui.template_delete_confirm, true)) return;
+        removeButton.disabled = true;
+        try {
+          const response = await fetch(`/api/prime-builder/v1/templates/${encodeURIComponent(template.id)}`, {
+            method: 'DELETE', credentials: 'same-origin', headers: { 'X-Prime-CSRF': csrf },
+          });
+          if (!response.ok) throw new Error('delete failed');
+          config.library = config.library.filter(item => item.id !== template.id);
+          renderLibrary(); $('[data-pb-live]').textContent = ui.template_deleted;
+          $('[data-pb-panel="library"]').focus();
+        } catch { removeButton.disabled = false; await showMessage(ui.template_error); }
+      });
+      actions.append(removeButton);
+    }
+    card.append(info, actions); list.append(card);
   }
+}
+const templateDialog = document.querySelector('[data-pb-save-template]');
+let templateFocus = null;
+let templateSnapshot = null;
+let templateEpoch = 0;
+function openSaveTemplate(opener) {
+  const element = find(history.present, selected);
+  if (!config.canTemplates || !templateDialog || !element || !ensureLayout()) return;
+  templateFocus = opener?.isConnected && opener.getClientRects().length ? opener : $('[data-pb-context-open]');
+  templateSnapshot = structuredClone(element);
+  templateEpoch++;
+  templateDialog.querySelector('[data-pb-template-name]').value = elementLabel(element);
+  templateDialog.querySelector('[data-pb-template-error]').hidden = true;
+  templateDialog.querySelector('button[type="submit"]').disabled = false;
+  templateDialog.showModal();
+  templateDialog.querySelector('[data-pb-template-name]').focus();
+}
+if (templateDialog) {
+  const form = templateDialog.querySelector('[data-pb-template-form]');
+  const submit = form.querySelector('button[type="submit"]');
+  const error = form.querySelector('[data-pb-template-error]');
+  templateDialog.querySelector('[data-pb-template-cancel]').addEventListener('click', () => templateDialog.close());
+  templateDialog.addEventListener('close', () => {
+    templateEpoch++; templateSnapshot = null;
+    if (templateFocus?.isConnected && templateFocus.getClientRects().length) templateFocus.focus();
+    else $('[data-pb-panel="widgets"]')?.focus();
+    templateFocus = null;
+  });
+  templateDialog.addEventListener('keydown', event => {
+    if (event.key !== 'Tab') return;
+    const focusable = [...templateDialog.querySelectorAll('input:not([disabled]), button:not([disabled])')];
+    if (!focusable.length) { event.preventDefault(); return; }
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!templateSnapshot) return;
+    const epoch = templateEpoch;
+    const name = templateDialog.querySelector('[data-pb-template-name]').value.trim();
+    if (!name) { templateDialog.querySelector('[data-pb-template-name]').focus(); return; }
+    const data = { version: 1, elements: [structuredClone(templateSnapshot)] };
+    submit.disabled = true; error.hidden = true;
+    try {
+      const response = await fetch('/api/prime-builder/v1/templates', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+        body: JSON.stringify({ name, kind: 'section', data }),
+      });
+      if (!response.ok) throw new Error('save failed');
+      const result = await response.json();
+      config.library.push(result.data);
+      $('[data-pb-live]').textContent = ui.template_saved;
+      if (epoch === templateEpoch && templateDialog.open) templateDialog.close();
+    } catch {
+      if (epoch === templateEpoch && templateDialog.open) { error.textContent = ui.template_error; error.hidden = false; }
+    } finally {
+      if (epoch === templateEpoch) submit.disabled = false;
+    }
+  });
 }
 async function importDocument(file) {
   if (!config.canTemplates) return;
@@ -353,7 +433,7 @@ async function importDocument(file) {
     const input = JSON.parse(await file.text());
     const layout = Array.isArray(input.blocks) ? input.blocks.find(block => block.type === 'prime-builder/layout')?.data : input;
     if (!layout || !Array.isArray(layout.elements) || layout.version !== 1) throw new Error('invalid');
-    const response = await fetch(`/api/prime-builder/v1/documents/${config.entryId}/render`, {
+    const response = await fetch(`/api/prime-builder/v1/documents/${config.entryId}/import`, {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf }, body: JSON.stringify({ data: layout }),
     });
     if (!response.ok) throw new Error('invalid');
@@ -364,7 +444,7 @@ async function importDocument(file) {
   } catch { await showMessage(ui.invalid_import); }
 }
 function exportDocument() {
-  if (!config.canTemplates || foreign) return;
+  if (foreign) return;
   const payload = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: history.present } }] };
   const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
   const link = document.createElement('a'); link.href = url; link.download = `prime-builder-${config.entryId}.json`; link.click();
@@ -881,10 +961,9 @@ if (config.converted && !foreign) { dirty = true; $('[data-pb-save-state]').text
 if (foreign) { $('[data-pb-conversion-warning]').hidden = false; $('[data-pb-save]').disabled = true; status.disabled = true; }
 restoreLocalDraft();
 $('[data-pb-search]').addEventListener('input', renderWidgets);
-$('[data-pb-import]').addEventListener('change', event => { importDocument(event.target.files?.[0]); event.target.value = ''; });
+$('[data-pb-import]')?.addEventListener('change', event => { importDocument(event.target.files?.[0]); event.target.value = ''; });
 $('[data-pb-export]').addEventListener('click', exportDocument);
 $$('[data-pb-panel]').forEach(button => button.addEventListener('click', () => {
-  if (button.dataset.pbPanel === 'library' && !config.canTemplates) return;
   panel = button.dataset.pbPanel; renderPanel();
 }));
 $('[data-pb-close-settings]').addEventListener('click', () => { panel = 'widgets'; renderPanel(); });
@@ -905,7 +984,10 @@ contextMenu.addEventListener('click', event => {
   const button = event.target.closest('[data-pb-context]');
   if (!button || button.disabled) return;
   const action = button.dataset.pbContext;
-  closeContext(); performElementAction(action);
+  const opener = contextOpener;
+  closeContext();
+  if (action === 'save_template') { openSaveTemplate(opener); return; }
+  performElementAction(action);
   const nextFocus = panel === 'settings' ? $('[data-pb-context-open]') : $('[data-pb-panel="widgets"]');
   nextFocus?.focus();
 });
@@ -990,7 +1072,7 @@ function renderCommands() {
     [ui.save, save], [ui.undo, undo], [ui.redo, redo], [ui.history, openHistory],
     [ui.widgets, () => { panel = 'widgets'; renderPanel(); }],
     [ui.navigator, () => { panel = 'navigator'; renderPanel(); }],
-    ...(config.canTemplates ? [[ui.library, () => { panel = 'library'; renderPanel(); }]] : []),
+    [ui.library, () => { panel = 'library'; renderPanel(); }],
     ...Object.entries(config.widgets).filter(([, definition]) => !definition.hidden).map(([type, definition]) => [`${ui.add} ${definition.label}`, () => addWidget(type)]),
   ];
   const filter = commandSearch.value.trim().toLocaleLowerCase();

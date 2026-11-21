@@ -506,9 +506,11 @@ final class IntegrationTest extends TestCase
         $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
         $config = $this->editorConfig($app, 3);
         self::assertSame(false, $config['canTemplates']);
-        self::assertSame([], $config['library']);
+        self::assertSame(9, count($config['library']));
         $screen = $this->send($app, 'GET', '/admin/prime-builder/edit/3');
-        self::assertStringContainsString('data-pb-panel="library" aria-pressed="false" hidden', $screen->body());
+        self::assertStringContainsString('data-pb-panel="library" aria-pressed="false">', $screen->body());
+        self::assertStringNotContainsString('data-pb-context="save_template"', $screen->body());
+        self::assertStringNotContainsString('data-pb-import', $screen->body());
 
         $db->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.templates')");
         $app->get(\Prime\Auth\RoleRepository::class)->forget();
@@ -518,6 +520,88 @@ final class IntegrationTest extends TestCase
         self::assertSame(9, count($config['library']));
         $screen = $this->send($app, 'GET', '/admin/prime-builder/edit/3');
         self::assertStringContainsString('data-pb-panel="library" aria-pressed="false">', $screen->body());
+        self::assertStringContainsString('data-pb-context="save_template"', $screen->body());
+        self::assertStringContainsString('data-pb-import', $screen->body());
+    }
+
+    public function testSharedTemplatesAreValidatedPersistentAndProtectedByCapabilitiesAndCsrf(): void
+    {
+        $app = $this->activated(null);
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.edit')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $editor = $this->tokens($app)->issue($this->user($app, 2), 'editor', ['*'])['token'];
+        $admin = $this->tokens($app)->issue($this->user($app, 1), 'admin', ['*'])['token'];
+        $layout = ['version' => 1, 'elements' => [[
+            'id' => 'parent', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [[
+                'id' => 'child', 'type' => 'text', 'settings' => ['text' => '<p>Bonjour <strong>modèle</strong><script>alert(1)</script></p>'], 'styles' => [], 'children' => [],
+            ]],
+        ]]];
+        $payload = ['name' => '<b>Modèle partagé</b>', 'kind' => 'section', 'data' => $layout];
+        self::assertSame(401, $this->send($app, 'POST', '/api/prime-builder/v1/templates', $payload)->status());
+        self::assertSame(200, $this->send($app, 'GET', '/api/prime-builder/v1/templates', token: $editor)->status());
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/templates', $payload, $editor)->status());
+        self::assertSame(403, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/' . str_repeat('a', 32), token: $editor)->status());
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/import', ['data' => $layout], $editor)->status());
+
+        $created = $this->send($app, 'POST', '/api/prime-builder/v1/templates', $payload, $admin);
+        self::assertSame(201, $created->status(), $created->body());
+        $item = json_decode($created->body(), true)['data'];
+        self::assertSame('Modèle partagé', $item['name']);
+        self::assertMatchesRegularExpression('/^[a-f0-9]{32}$/', $item['id']);
+        self::assertStringNotContainsString('<script', $item['elements'][0]['children'][0]['settings']['text']);
+        self::assertStringContainsString('<strong>modèle</strong>', $item['elements'][0]['children'][0]['settings']['text']);
+        self::assertStringContainsString('no-store', (string) $created->header('Cache-Control'));
+        $key = 'plugin.prime-builder.saved_template.' . $item['id'];
+        $statement = $pdo->prepare('SELECT autoload FROM pc_settings WHERE name = ?');
+        $statement->execute([$key]);
+        self::assertSame(0, (int) $statement->fetchColumn());
+        $app->get(Settings::class)->flushCache();
+        $listing = $this->send($app, 'GET', '/api/prime-builder/v1/templates', token: $editor);
+        $items = json_decode($listing->body(), true)['data'];
+        self::assertSame(10, count($items));
+        self::assertSame($item, $items[9]);
+        // Inserting an available snapshot requires edit, not template management.
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = $item['elements'];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $document], $editor)->status());
+        self::assertStringContainsString('<strong>modèle</strong>', $app->get(EntryRepository::class)->find(3)?->contentHtml ?? '');
+
+        $invalid = $payload;
+        $invalid['data']['elements'][0]['children'][0]['type'] = 'unknown_widget';
+        self::assertSame(422, $this->send($app, 'POST', '/api/prime-builder/v1/templates', $invalid, $admin)->status());
+        $invalid = $payload;
+        $invalid['name'] = str_repeat('a', 101);
+        self::assertSame(422, $this->send($app, 'POST', '/api/prime-builder/v1/templates', $invalid, $admin)->status());
+        $originals = \PrimeBuilder\Widgets\OriginalContent::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($originals);
+        $protected = $originals->protect(3, 'legacy', '<p>Secret lié à une entrée</p>');
+        self::assertNotNull($protected);
+        $invalid = $payload;
+        $invalid['data']['elements'][0]['children'][0] = ['id' => 'legacy', 'type' => 'original_content', 'settings' => ['payload' => $protected], 'styles' => [], 'children' => []];
+        self::assertSame(422, $this->send($app, 'POST', '/api/prime-builder/v1/templates', $invalid, $admin)->status());
+
+        $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.templates')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $manager = $this->tokens($app)->issue($this->user($app, 2), 'template manager', ['*'])['token'];
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/templates', $payload, $editor)->status());
+        self::assertSame(200, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/import', ['data' => $layout], $manager)->status());
+        self::assertSame(404, $this->send($app, 'POST', '/api/prime-builder/v1/documents/2/import', ['data' => $layout], $manager)->status());
+        self::assertSame(200, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/import', ['data' => $invalid['data']], $manager)->status());
+        $invalid['data']['elements'][0]['children'][0]['settings']['payload'] = $originals->protect(2, 'legacy', '<p>Autre entrée</p>');
+        self::assertSame(422, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/import', ['data' => $invalid['data']], $manager)->status());
+        self::assertSame(404, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/not-a-template', token: $manager)->status());
+
+        $this->appLogin($app);
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/templates', $payload)->status());
+        self::assertSame(403, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/' . $item['id'])->status());
+        $csrf = (new Csrf($app->get(Session::class)))->token();
+        $headers = ['Content-Type' => 'application/json', 'Accept' => 'application/json', 'X-Prime-CSRF' => $csrf];
+        $request = Request::create('POST', '/api/prime-builder/v1/templates', headers: $headers, rawBody: (string) json_encode($payload));
+        self::assertSame(201, $app->get(Kernel::class)->handle($request)->status());
+        self::assertSame(200, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/' . $item['id'], token: $manager)->status());
+        self::assertSame(false, $app->get(Settings::class)->has($key));
+        self::assertSame(404, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/' . $item['id'], token: $manager)->status());
     }
 
     public function testDeactivationKeepsReadableHtmlAndUninstallCleansSettingsAndCapabilities(): void

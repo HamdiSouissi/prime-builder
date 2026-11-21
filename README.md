@@ -7,7 +7,7 @@ Plugin de composition visuelle pour Prime CMS 1.0.2 et versions ultérieures com
 ## Prérequis
 
 - Prime CMS 1.0.2 avec PHP 8.2–8.x et les extensions requises par le CMS. Le manifeste déclare Prime ≥ 1.0.2 et PHP `^8.2` ; la compatibilité des futures versions n’a pas été vérifiée.
-- Accès à l’administration et aux capacités nécessaires : `prime_builder.edit` **et** les permissions de modification du contenu concerné. La publication requiert en outre la permission de publication du type de contenu. La bibliothèque, l’import et l’export dans l’éditeur nécessitent `prime_builder.templates` ; la page de réglages du plugin nécessite `prime_builder.settings`. Les autres capacités déclarées correspondent à des fonctions qui restent à développer.
+- Accès à l’administration et aux capacités nécessaires : `prime_builder.edit` **et** les permissions de modification du contenu concerné. La publication requiert en outre la permission de publication du type de contenu. Les éditeurs peuvent consulter et insérer les modèles ; `prime_builder.templates` est requis pour enregistrer, importer ou supprimer. La page de réglages du plugin nécessite `prime_builder.settings`. Les autres capacités déclarées correspondent à des fonctions qui restent à développer.
 - API REST du CMS activée pour enregistrer et actualiser les aperçus. Le dossier de stockage de Prime doit être accessible en écriture pour conserver les anciennes feuilles CSS à empreinte.
 - Un navigateur moderne avec JavaScript pour l’éditeur. Le contenu statique enregistré reste lisible sans JavaScript ; les listes d’articles utilisent alors un lien de repli vers l’archive.
 
@@ -65,7 +65,7 @@ Les 23 widgets inclus sont : conteneur, titre, texte, image, bouton, séparateur
 - **Articles récents** affiche au maximum 12 articles publics ; sans JavaScript ou si l’API est indisponible, un lien vers l’archive est conservé à la place de titres potentiellement périmés.
 - **Contenu actuel** affiche titre, extrait, auteur ou date. La valeur sauvegardée peut être ancienne si JavaScript ou l’API est indisponible.
 - **Bloc Prime** accepte un objet JSON pour l’un des huit types statiques autorisés : paragraphe, titre, liste, citation, code, séparateur, tableau ou encadré. Le bloc HTML libre, les blocs dynamiques et les autres types ne sont pas pris en charge par ce pont.
-- La bibliothèque contient six sections et trois pages. Les modèles de contact ne sont que des compositions statiques : ils ne fournissent **aucun formulaire fonctionnel**. Les compositions s’importent et s’exportent en JSON ; les URL d’images ne sont pas embarquées dans l’export.
+- La bibliothèque contient six sections et trois pages livrées. Depuis le menu contextuel d’un élément, une personne ayant `prime_builder.templates` peut enregistrer sa composition comme modèle partagé, puis l’insérer ou la supprimer dans la bibliothèque. Les fragments « Contenu d’origine » liés à une entrée ne peuvent pas être enregistrés comme modèles ; un modèle inséré est une copie indépendante, pas un widget global synchronisé. Les modèles de contact ne sont que des compositions statiques : ils ne fournissent **aucun formulaire fonctionnel**. Les compositions s’importent et s’exportent en JSON ; les URL d’images ne sont pas embarquées dans l’export.
 
 ## Désactivation et désinstallation
 

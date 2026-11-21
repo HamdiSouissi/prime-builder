@@ -26,6 +26,7 @@ use Prime\Themes\ThemeAssetRegistry;
 use PrimeBuilder\Controller\Dashboard;
 use PrimeBuilder\Controller\Documents;
 use PrimeBuilder\Controller\Settings;
+use PrimeBuilder\Controller\Templates;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
@@ -94,6 +95,7 @@ final class Plugin extends AbstractPlugin
         $controller = new Documents($context);
         $dashboard = new Dashboard($context);
         $settings = new Settings($context);
+        $templates = new Templates($context);
         $context->router()->adminGroup(static function (Router $router) use ($controller, $dashboard): void {
             $router->get('/', [$dashboard, 'index'])->name('index');
             $router->get('/edit/{id:\d+}', [$controller, 'edit'])->name('edit');
@@ -110,9 +112,14 @@ final class Plugin extends AbstractPlugin
         });
         $context->api()->patch('/documents/{id}', [$controller::class, 'update'], permission: 'prime_builder.edit');
         $context->api()->post('/documents/{id}/render', [$controller::class, 'render'], permission: 'prime_builder.edit');
+        $context->api()->post('/documents/{id}/import', [$controller::class, 'import'], permission: 'prime_builder.templates');
         $context->api()->get('/documents/{id}/live', [$controller::class, 'live'], public: true);
-        // PluginContext is not a container service, so API controllers need an explicit binding.
+        $context->api()->get('/templates', [$templates::class, 'index'], permission: 'prime_builder.edit');
+        $context->api()->post('/templates', [$templates::class, 'create'], permission: 'prime_builder.templates');
+        $context->api()->delete('/templates/{id}', [$templates::class, 'delete'], permission: 'prime_builder.templates');
+        // PluginContext is not a container service, so API controllers need explicit bindings.
         $context->app()->container()->singleton(Documents::class, static fn (): Documents => $controller);
+        $context->app()->container()->singleton(Templates::class, static fn (): Templates => $templates);
         $context->hooks()->filter('scheduler.register', static function (mixed $schedule) use ($context): mixed {
             if ($schedule instanceof Schedule) {
                 $schedule->call(

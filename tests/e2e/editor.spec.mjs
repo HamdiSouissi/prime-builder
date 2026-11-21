@@ -255,6 +255,60 @@ test('template library supports insertion and JSON export/import', async ({ page
   await expect(page.locator('[data-pb-save-state]')).toHaveText('Modèle importé.');
 });
 
+test('context menu saves a reusable template with keyboard, reload and deletion', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('Témoin du modèle enregistré');
+  const opener = page.locator('[data-pb-context-open]');
+  const menu = page.getByRole('menu', { name: 'Actions de l’élément' });
+  const dialog = page.getByRole('dialog', { name: 'Enregistrer comme modèle' });
+
+  await opener.focus();
+  await page.keyboard.press('Shift+F10');
+  await expect(menu.getByRole('menuitem', { name: 'Copier', exact: true })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Enregistrer comme modèle' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  const name = dialog.getByLabel('Nom du modèle');
+  await expect(name).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog.getByRole('button', { name: 'Enregistrer', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(name).toBeFocused();
+  await expectAccessible(page);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+
+  await page.keyboard.press('Shift+F10');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await name.fill('Modèle clavier partagé');
+  const saved = page.waitForResponse(response => response.url().endsWith('/api/prime-builder/v1/templates') && response.request().method() === 'POST');
+  await page.keyboard.press('Enter');
+  expect((await saved).status()).toBe(201);
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+  await expect(page.locator('[data-pb-live]')).toHaveText('Modèle enregistré dans la bibliothèque.');
+
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.reload();
+  await page.getByRole('button', { name: 'Modèles', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Insérer Modèle clavier partagé' })).toBeVisible();
+  await page.getByRole('button', { name: 'Insérer Modèle clavier partagé' }).click();
+  await expect(page.frameLocator('[data-pb-frame]').getByRole('heading', { name: 'Témoin du modèle enregistré' })).toHaveCount(2);
+  await page.getByRole('button', { name: 'Modèles', exact: true }).click();
+  await page.getByRole('button', { name: 'Supprimer le modèle Modèle clavier partagé' }).click();
+  await page.getByRole('dialog', { name: 'Confirmer' }).getByRole('button', { name: 'Continuer' }).click();
+  await expect(page.getByRole('button', { name: 'Insérer Modèle clavier partagé' })).toHaveCount(0);
+  await expect(page.locator('[data-pb-live]')).toHaveText('Modèle supprimé.');
+  await expectAccessible(page);
+});
+
 test('tabs work with keyboard and remain readable without JavaScript', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);

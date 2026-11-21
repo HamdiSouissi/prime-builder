@@ -31,7 +31,7 @@ declare(strict_types=1);
     <div class="pb-workspace">
         <aside class="pb-sidebar" aria-label="<?= $this->e(t('plugin::prime-builder.ui.sidebar')) ?>">
             <div class="pb-panel-head"><div><span class="pb-eyebrow"><?= $this->e(t('plugin::prime-builder.ui.eyebrow')) ?></span><h1><?= $this->e(t('plugin::prime-builder.ui.editor_title')) ?></h1></div><span class="pb-panel-dot" aria-hidden="true"></span></div>
-            <nav class="pb-panel-nav" aria-label="<?= $this->e(t('plugin::prime-builder.ui.panels')) ?>"><button type="button" class="pb-nav-active" data-pb-panel="widgets" aria-pressed="true"><?= $this->e(t('plugin::prime-builder.ui.widgets')) ?></button><button type="button" data-pb-panel="navigator" aria-pressed="false"><?= $this->e(t('plugin::prime-builder.ui.navigator')) ?></button><button type="button" data-pb-panel="library" aria-pressed="false"<?= $canTemplates ? '' : ' hidden' ?>><?= $this->e(t('plugin::prime-builder.ui.library')) ?></button></nav>
+            <nav class="pb-panel-nav" aria-label="<?= $this->e(t('plugin::prime-builder.ui.panels')) ?>"><button type="button" class="pb-nav-active" data-pb-panel="widgets" aria-pressed="true"><?= $this->e(t('plugin::prime-builder.ui.widgets')) ?></button><button type="button" data-pb-panel="navigator" aria-pressed="false"><?= $this->e(t('plugin::prime-builder.ui.navigator')) ?></button><button type="button" data-pb-panel="library" aria-pressed="false"><?= $this->e(t('plugin::prime-builder.ui.library')) ?></button></nav>
             <section class="pb-panel-content" data-pb-widget-panel>
                 <label class="pb-search"><span aria-hidden="true">⌕</span><span class="pb-sr-only"><?= $this->e(t('plugin::prime-builder.ui.search')) ?></span><input type="search" data-pb-search placeholder="<?= $this->e(t('plugin::prime-builder.ui.search')) ?>"></label>
                 <p class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.intro')) ?></p>
@@ -45,7 +45,7 @@ declare(strict_types=1);
             <section class="pb-panel-content" data-pb-library-panel hidden>
                 <h2><?= $this->e(t('plugin::prime-builder.ui.library')) ?></h2>
                 <p class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.library_intro')) ?></p>
-                <div class="pb-library-actions"><label class="pb-library-import"><?= $this->e(t('plugin::prime-builder.ui.import')) ?><input type="file" accept="application/json,.json" data-pb-import></label><button type="button" data-pb-export><?= $this->e(t('plugin::prime-builder.ui.export')) ?></button></div>
+                <div class="pb-library-actions"><?php if ($canTemplates): ?><label class="pb-library-import"><?= $this->e(t('plugin::prime-builder.ui.import')) ?><input type="file" accept="application/json,.json" data-pb-import></label><?php endif; ?><button type="button" data-pb-export><?= $this->e(t('plugin::prime-builder.ui.export')) ?></button></div>
                 <p class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.import_help')) ?></p>
                 <div data-pb-library-list></div>
             </section>
@@ -73,6 +73,7 @@ declare(strict_types=1);
         <button type="button" role="menuitem" tabindex="-1" data-pb-context="paste"><?= $this->e(t('plugin::prime-builder.ui.paste')) ?></button>
         <button type="button" role="menuitem" tabindex="-1" data-pb-context="paste_style"><?= $this->e(t('plugin::prime-builder.ui.paste_style')) ?></button>
         <button type="button" role="menuitem" tabindex="-1" data-pb-context="duplicate"><?= $this->e(t('plugin::prime-builder.ui.duplicate')) ?></button>
+        <?php if ($canTemplates): ?><button type="button" role="menuitem" tabindex="-1" data-pb-context="save_template"><?= $this->e(t('plugin::prime-builder.ui.save_template')) ?></button><?php endif; ?>
         <button type="button" role="menuitem" tabindex="-1" data-pb-context="reset_style"><?= $this->e(t('plugin::prime-builder.ui.reset_style')) ?></button>
         <button type="button" role="menuitem" tabindex="-1" data-pb-context="remove"><?= $this->e(t('plugin::prime-builder.ui.remove')) ?></button>
     </div>
@@ -89,6 +90,20 @@ declare(strict_types=1);
     <p id="pb-history-help" class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.history_help')) ?></p>
     <ol class="pb-history-list" data-pb-history-list></ol>
 </dialog>
+<?php if ($canTemplates): ?>
+<dialog class="pb-confirm-dialog" data-pb-save-template aria-labelledby="pb-save-template-title" aria-describedby="pb-save-template-help">
+    <form data-pb-template-form>
+        <h2 id="pb-save-template-title"><?= $this->e(t('plugin::prime-builder.ui.save_template')) ?></h2>
+        <p id="pb-save-template-help"><?= $this->e(t('plugin::prime-builder.ui.template_shared_help')) ?></p>
+        <label class="pb-field" for="pb-template-name"><?= $this->e(t('plugin::prime-builder.ui.template_name')) ?><input id="pb-template-name" data-pb-template-name required maxlength="100" autocomplete="off"></label>
+        <p data-pb-template-error role="alert" hidden></p>
+        <div class="pb-confirm-actions">
+            <button type="button" data-pb-template-cancel><?= $this->e(t('plugin::prime-builder.ui.cancel')) ?></button>
+            <button type="submit" class="pb-button pb-button-primary"><?= $this->e(t('plugin::prime-builder.ui.save')) ?></button>
+        </div>
+    </form>
+</dialog>
+<?php endif; ?>
 <dialog class="pb-confirm-dialog" data-pb-confirm aria-labelledby="pb-confirm-title" aria-describedby="pb-confirm-message">
     <h2 id="pb-confirm-title" data-pb-confirm-title></h2>
     <p id="pb-confirm-message" data-pb-confirm-message></p>
