@@ -7,7 +7,7 @@ Plugin de composition visuelle pour Prime CMS 1.0.1 et versions ultérieures com
 ## Prérequis
 
 - Prime CMS 1.0.1 avec PHP 8.2–8.x et les extensions requises par le CMS. Le manifeste déclare Prime ≥ 1.0.1 et PHP `^8.2` ; la compatibilité des futures versions n’a pas été vérifiée.
-- Accès à l’administration et aux capacités nécessaires : `prime_builder.edit` **et** les permissions de modification du contenu concerné. La publication requiert en outre la permission de publication du type de contenu. La bibliothèque n’a pas de contrôle distinct `prime_builder.templates` ; les réglages utilisent `settings.manage` du CMS, et non `prime_builder.settings`.
+- Accès à l’administration et aux capacités nécessaires : `prime_builder.edit` **et** les permissions de modification du contenu concerné. La publication requiert en outre la permission de publication du type de contenu. La bibliothèque, l’import et l’export dans l’éditeur nécessitent `prime_builder.templates` ; la page de réglages du plugin nécessite `prime_builder.settings`. Les autres capacités déclarées correspondent à des fonctions qui restent à développer.
 - API REST du CMS activée pour enregistrer et actualiser les aperçus. Le dossier de stockage de Prime doit être accessible en écriture pour conserver les anciennes feuilles CSS à empreinte.
 - Un navigateur moderne avec JavaScript pour l’éditeur. Le contenu statique enregistré reste lisible sans JavaScript ; les listes d’articles utilisent alors un lien de repli vers l’archive.
 
@@ -48,7 +48,7 @@ Le CMS installe le ZIP inactif. Voir son aide avant d’utiliser `--replace` ou 
 
 ## Premiers pas
 
-1. Dans **Prime Builder**, vérifier les types activés. Les pages sont activées par défaut ; articles et autres types peuvent l’être dans les réglages généraux. Enregistrer d’abord tout nouveau contenu.
+1. Dans **Prime Builder › Réglages**, vérifier les types activés. Les pages sont activées par défaut ; articles et autres types peuvent y être activés. Enregistrer d’abord tout nouveau contenu.
 2. Ouvrir le contenu dans l’administration, puis **Modifier avec Prime Builder**. L’aperçu est une iframe de même origine utilisant le thème du site.
 3. Ajouter des éléments depuis la recherche ou les catégories. Un conteneur sélectionné reçoit les nouveaux éléments ; le panneau **Structure** et la commande **Déplacer vers** permettent aussi de réorganiser au clavier. Les onglets **Contenu**, **Style** et **Avancé** exposent les réglages disponibles.
 4. Choisir ordinateur, tablette ou mobile pour ajuster les valeurs correspondantes. Les valeurs absentes héritent des tailles supérieures. Les points de rupture et le petit kit global de couleurs/taille se règlent dans le CMS.
@@ -56,7 +56,7 @@ Le CMS installe le ZIP inactif. Voir son aide avant d’utiliser `--replace` ou 
 
 Raccourcis : `Ctrl/⌘ S` enregistrer, `Ctrl/⌘ K` ouvrir les commandes, `Ctrl/⌘ Z` annuler et `Ctrl/⌘ Y` ou `Ctrl/⌘ Maj Z` rétablir hors des champs de texte. Les modifications non enregistrées déclenchent un avertissement ; une copie locale par utilisateur et contenu peut être proposée à la réouverture. Ce stockage navigateur n’est pas une sauvegarde serveur.
 
-**Attention à la conversion :** un contenu utilisant d’autres blocs Prime n’est pas converti automatiquement. Le constructeur demande confirmation avant de remplacer son document par une mise en page Prime Builder. Exporter ou sauvegarder le contenu d’origine avant de confirmer.
+**Attention à la conversion :** à l’ouverture, le constructeur tente de convertir les blocs Prime existants dans leur ordre, sans écrire avant l’enregistrement. Les blocs pris en charge deviennent des blocs Prime éditables ; les autres sont conservés en lecture seule lorsque leur HTML enregistré peut être retrouvé sans ambiguïté. Si ce n’est pas possible, l’enregistrement est désactivé pour éviter une perte. Cette conversion ne couvre pas tous les contenus et ne remplace pas une sauvegarde préalable. Les fragments conservés sont liés au contenu et à la clé `APP_KEY` du site.
 
 ## Éléments et modèles disponibles
 

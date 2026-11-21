@@ -32,6 +32,7 @@ code=$(curl --silent --show-error --cookie "$tmp/cookies" --cookie-jar "$tmp/coo
 if [[ $code != 302 ]]; then printf 'FAIL POST /admin/login: HTTP %s (expected 302)\n' "$code" >&2; exit 1; fi
 printf 'OK POST /admin/login: 302\n'
 get_200 /admin/prime-builder "$tmp/dashboard.html"
+get_200 /admin/prime-builder/settings "$tmp/settings.html"
 get_200 "/admin/prime-builder/edit/$id" "$tmp/editor.html"
 get_200 "/admin/content/page/$id/edit" "$tmp/core-editor.html"
 get_200 /smoke-prime-builder "$tmp/public.html"

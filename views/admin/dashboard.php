@@ -7,6 +7,7 @@ declare(strict_types=1);
 /** @var list<array{label: string, url: ?string}> $breadcrumbs */
 /** @var list<array{label: string, url: string}> $contentTypes */
 /** @var bool $canManageSettings */
+/** @var bool $canViewSystem */
 /** @var string $version */
 /** @var string $cmsVersion */
 /** @var int $widgetCount */
@@ -34,7 +35,7 @@ $this->layout('admin::layouts/app');
                 </ul>
             <?php endif; ?>
             <?php if ($canManageSettings): ?>
-                <p><a class="pc-btn pc-btn--secondary" href="/admin/settings/general#settings-section-prime-builder"><?= $this->e(t('plugin::prime-builder.dashboard.settings')) ?></a></p>
+                <p><a class="pc-btn pc-btn--secondary" href="/admin/prime-builder/settings"><?= $this->e(t('plugin::prime-builder.dashboard.settings')) ?></a></p>
             <?php endif; ?>
         </div>
     </section>
@@ -48,7 +49,7 @@ $this->layout('admin::layouts/app');
                 <dt><?= $this->e(t('plugin::prime-builder.dashboard.templates')) ?></dt><dd><?= $this->e((string) $templateCount) ?></dd>
             </dl>
             <p><?= $this->e(t('plugin::prime-builder.dashboard.limits')) ?></p>
-            <?php if ($canManageSettings): ?>
+            <?php if ($canViewSystem): ?>
                 <p><a href="/admin/tools/system"><?= $this->e(t('plugin::prime-builder.dashboard.system')) ?></a></p>
             <?php endif; ?>
         </div>

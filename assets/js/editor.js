@@ -164,7 +164,7 @@ function freshIds(elements) {
   return copy;
 }
 async function insertTemplate(template) {
-  if (!ensureLayout()) return;
+  if (!config.canTemplates || !ensureLayout()) return;
   if (template.kind === 'page' && history.present.length && !await showMessage(ui.confirm_template, true)) return;
   const nodes = freshIds(template.elements);
   if (template.kind === 'page') commit(nodes, true);
@@ -186,6 +186,7 @@ function renderLibrary() {
   }
 }
 async function importDocument(file) {
+  if (!config.canTemplates) return;
   if (!file || file.size > 1048576) { await showMessage(ui.invalid_import); return; }
   try {
     const input = JSON.parse(await file.text());
@@ -202,7 +203,7 @@ async function importDocument(file) {
   } catch { await showMessage(ui.invalid_import); }
 }
 function exportDocument() {
-  if (foreign) return;
+  if (!config.canTemplates || foreign) return;
   const payload = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: history.present } }] };
   const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
   const link = document.createElement('a'); link.href = url; link.download = `prime-builder-${config.entryId}.json`; link.click();
@@ -578,7 +579,10 @@ restoreLocalDraft();
 $('[data-pb-search]').addEventListener('input', renderWidgets);
 $('[data-pb-import]').addEventListener('change', event => { importDocument(event.target.files?.[0]); event.target.value = ''; });
 $('[data-pb-export]').addEventListener('click', exportDocument);
-$$('[data-pb-panel]').forEach(button => button.addEventListener('click', () => { panel = button.dataset.pbPanel; renderPanel(); }));
+$$('[data-pb-panel]').forEach(button => button.addEventListener('click', () => {
+  if (button.dataset.pbPanel === 'library' && !config.canTemplates) return;
+  panel = button.dataset.pbPanel; renderPanel();
+}));
 $('[data-pb-close-settings]').addEventListener('click', () => { panel = 'widgets'; renderPanel(); });
 $$('[data-pb-tab]').forEach(button => button.addEventListener('click', () => { tab = button.dataset.pbTab; renderSettings(); }));
 $$('[data-pb-device]').forEach(button => button.addEventListener('click', () => {
@@ -627,7 +631,7 @@ function renderCommands() {
     [ui.save, save], [ui.undo, undo], [ui.redo, redo],
     [ui.widgets, () => { panel = 'widgets'; renderPanel(); }],
     [ui.navigator, () => { panel = 'navigator'; renderPanel(); }],
-    [ui.library, () => { panel = 'library'; renderPanel(); }],
+    ...(config.canTemplates ? [[ui.library, () => { panel = 'library'; renderPanel(); }]] : []),
     ...Object.entries(config.widgets).filter(([, definition]) => !definition.hidden).map(([type, definition]) => [`${ui.add} ${definition.label}`, () => addWidget(type)]),
   ];
   const filter = commandSearch.value.trim().toLocaleLowerCase();

@@ -299,6 +299,37 @@ test('color picker uses kit references and spacing has numeric units', async ({ 
   await expectAccessible(page);
 });
 
+test('plugin settings save and remain usable on desktop and mobile', async ({ page }) => {
+  await login(page);
+  await page.goto('/admin/prime-builder/settings');
+  await expect(page.getByRole('heading', { name: 'Réglages Prime Builder' })).toBeVisible();
+  const primary = page.getByLabel('Couleur principale', { exact: true });
+  const tablet = page.getByLabel('Point de rupture tablette (px)');
+  const originalPrimary = await primary.inputValue();
+  const originalTablet = await tablet.inputValue();
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('settings-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('settings-mobile.png'), fullPage: true });
+  async function submit() {
+    const response = page.waitForResponse(result => result.request().method() === 'POST' && result.url().endsWith('/admin/prime-builder/settings'));
+    await page.locator('form[action="/admin/prime-builder/settings"] button[type="submit"]').click();
+    expect((await response).status()).toBe(302);
+  }
+  await primary.fill('#0a6380');
+  await tablet.fill('1200');
+  await submit();
+  await expect(primary).toHaveValue('#0a6380');
+  await expect(tablet).toHaveValue('1200');
+  await primary.fill(originalPrimary);
+  await tablet.fill(originalTablet);
+  await submit();
+  await expect(primary).toHaveValue(originalPrimary);
+  await expect(tablet).toHaveValue(originalTablet);
+});
+
 test('existing three-block page is converted without losing its saved HTML', async ({ page }) => {
   const legacyId = process.env.E2E_LEGACY_ENTRY_ID;
   expect(legacyId).toBeTruthy();

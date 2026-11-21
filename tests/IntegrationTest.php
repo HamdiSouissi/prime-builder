@@ -254,6 +254,84 @@ final class IntegrationTest extends TestCase
         self::assertSame(200, $app->get(Kernel::class)->handle($request)->status());
     }
 
+    public function testSettingsRequirePluginCapabilityAndCannotBeChangedThroughCoreApi(): void
+    {
+        $app = $this->activated('contributor');
+        $db = $this->db($app)->pdo();
+        $csrf = $app->get(Csrf::class)->token();
+        $fields = [
+            '_csrf_token' => $csrf, 'pages' => '1', 'posts' => '1', 'other_types' => 'portfolio, product',
+            'breakpoint_tablet' => '1100', 'breakpoint_mobile' => '700',
+            'kit_primary' => '#123456', 'kit_text' => '#abcdef', 'kit_font_size' => '18',
+        ];
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/settings')->status());
+        self::assertSame(403, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields))->status());
+
+        // The general CMS settings permission alone must not expose or modify plugin fields.
+        $db->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'settings.manage')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/settings')->status());
+        $general = $this->send($app, 'GET', '/admin/settings/general');
+        self::assertSame(200, $general->status());
+        self::assertStringNotContainsString('settings-section-prime-builder', $general->body());
+        $token = $this->tokens($app)->issue($this->user($app, 2), 'settings', ['*'])['token'];
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/settings', ['plugin.prime-builder.kit_primary' => '#badbad'], $token)->status());
+        self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.kit_primary'));
+
+        // Plugin settings can be managed without the broader CMS settings permission.
+        $db->exec("DELETE FROM pc_role_capabilities WHERE role_id = 2 AND capability = 'settings.manage'");
+        $db->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.settings')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $fields['_csrf_token'] = $app->get(Csrf::class)->token();
+        self::assertSame(200, $this->send($app, 'GET', '/admin/prime-builder/settings')->status());
+        self::assertSame(403, $this->send($app, 'GET', '/admin/settings/general')->status());
+        $withoutCsrf = $fields;
+        unset($withoutCsrf['_csrf_token']);
+        self::assertSame(419, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $withoutCsrf))->status());
+        $invalid = $fields;
+        $invalid['breakpoint_mobile'] = '1500';
+        $invalid['kit_primary'] = '</style><script>alert(1)</script>';
+        $response = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $invalid));
+        self::assertSame(422, $response->status(), $response->body());
+        self::assertStringNotContainsString('</style><script>alert(1)</script>', $response->body());
+        self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.posts'));
+        $response = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields));
+        self::assertSame(302, $response->status(), $response->body());
+        self::assertSame(true, $app->get(Settings::class)->get('plugin.prime-builder.posts'));
+        self::assertSame(1100, $app->get(Settings::class)->get('plugin.prime-builder.breakpoint_tablet'));
+        self::assertSame('#123456', $app->get(Settings::class)->get('plugin.prime-builder.kit_primary'));
+        self::assertSame('portfolio, product', $app->get(Settings::class)->get('plugin.prime-builder.other_types'));
+    }
+
+    public function testEditorAndTemplateAccessHaveSeparateCapabilities(): void
+    {
+        $app = $this->activated('contributor');
+        $db = $this->db($app)->pdo();
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/edit/3')->status());
+        $token = $this->tokens($app)->issue($this->user($app, 2), 'editor', ['*'])['token'];
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/render', ['data' => ['version' => 1, 'elements' => []]], $token)->status());
+        $db->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.edit')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $config = $this->editorConfig($app, 3);
+        self::assertSame(false, $config['canTemplates']);
+        self::assertSame([], $config['library']);
+        $screen = $this->send($app, 'GET', '/admin/prime-builder/edit/3');
+        self::assertStringContainsString('data-pb-panel="library" aria-pressed="false" hidden', $screen->body());
+
+        $db->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.templates')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $config = $this->editorConfig($app, 3);
+        self::assertSame(true, $config['canTemplates']);
+        self::assertSame(9, count($config['library']));
+        $screen = $this->send($app, 'GET', '/admin/prime-builder/edit/3');
+        self::assertStringContainsString('data-pb-panel="library" aria-pressed="false">', $screen->body());
+    }
+
     public function testDeactivationKeepsReadableHtmlAndUninstallCleansSettingsAndCapabilities(): void
     {
         $app = $this->activated(null);

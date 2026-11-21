@@ -21,6 +21,9 @@ return [
         'unfiltered_html' => 'Utiliser le HTML avancé',
     ],
     'settings' => [
+        'page_title' => 'Réglages Prime Builder',
+        'saved' => 'Réglages Prime Builder enregistrés.',
+        'invalid' => 'Certains réglages sont invalides. Vérifiez les valeurs et les points de rupture avant de réessayer.',
         'kit' => 'Kit de style Prime Builder',
         'kit_help' => 'Valeurs par défaut pour les mises en page. Les styles locaux priment.',
         'kit_primary' => 'Couleur principale',

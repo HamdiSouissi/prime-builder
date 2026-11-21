@@ -19,12 +19,12 @@ use Prime\Plugins\AbstractPlugin;
 use Prime\Plugins\PluginContext;
 use Prime\Scheduler\Schedule;
 use Prime\Security\HtmlSanitizer;
-use Prime\Settings\SettingsRegistry;
 use Prime\Site\PageContext;
 use Prime\Site\UrlGenerator;
 use Prime\Themes\ThemeAssetRegistry;
 use PrimeBuilder\Controller\Dashboard;
 use PrimeBuilder\Controller\Documents;
+use PrimeBuilder\Controller\Settings;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
@@ -42,44 +42,6 @@ final class Plugin extends AbstractPlugin
         foreach (['edit', 'templates', 'theme_builder', 'forms', 'settings', 'unfiltered_html'] as $cap) {
             $context->capabilities()->register('prime_builder.' . $cap, 'plugin::prime-builder.capabilities.' . $cap);
         }
-        $context->hooks()->filter('settings.register', static function (mixed $registry): mixed {
-            if ($registry instanceof SettingsRegistry) {
-                $registry->section('prime-builder', ['label' => 'plugin::prime-builder.settings.title', 'description' => 'plugin::prime-builder.settings.description', 'icon' => 'layout-dashboard', 'priority' => 210, 'page' => 'general']);
-                foreach (['pages' => true, 'posts' => false] as $name => $default) {
-                    $registry->add([
-                        'name' => 'plugin.prime-builder.' . $name,
-                        'label' => 'plugin::prime-builder.settings.' . $name,
-                        'description' => 'plugin::prime-builder.settings.' . $name . '_help',
-                        'type' => 'toggle', 'section' => 'prime-builder', 'default' => $default, 'rules' => '', 'priority' => 10,
-                    ], 'prime-builder');
-                }
-                foreach ([
-                    ['other_types', 'text', '', 'max:500'],
-                    ['breakpoint_tablet', 'number', 1024, 'required|min:600|max:2000'],
-                    ['breakpoint_mobile', 'number', 767, 'required|min:320|max:1600'],
-                ] as [$name, $type, $default, $rules]) {
-                    $registry->add([
-                        'name' => 'plugin.prime-builder.' . $name,
-                        'label' => 'plugin::prime-builder.settings.' . $name,
-                        'description' => 'plugin::prime-builder.settings.' . $name . '_help',
-                        'type' => $type, 'section' => 'prime-builder', 'default' => $default, 'rules' => $rules, 'priority' => 20,
-                    ], 'prime-builder');
-                }
-                $registry->section('prime-builder-kit', ['label' => 'plugin::prime-builder.settings.kit', 'description' => 'plugin::prime-builder.settings.kit_help', 'icon' => 'palette', 'priority' => 220, 'page' => 'general']);
-                foreach ([
-                    ['kit_primary', 'color', '#c9441f', 'required'],
-                    ['kit_text', 'color', '#1a1d29', 'required'],
-                    ['kit_font_size', 'number', 16, 'required|min:12|max:28'],
-                ] as [$name, $type, $default, $rules]) {
-                    $registry->add([
-                        'name' => 'plugin.prime-builder.' . $name,
-                        'label' => 'plugin::prime-builder.settings.' . $name,
-                        'type' => $type, 'section' => 'prime-builder-kit', 'default' => $default, 'rules' => $rules, 'priority' => 10,
-                    ], 'prime-builder');
-                }
-            }
-            return $registry;
-        });
         $context->hooks()->filter('content.editor', static function (mixed $editor, mixed $type = null) use ($context): mixed {
             if (!$type instanceof ContentType) {
                 return $editor;
@@ -130,10 +92,17 @@ final class Plugin extends AbstractPlugin
         });
         $controller = new Documents($context);
         $dashboard = new Dashboard($context);
+        $settings = new Settings($context);
         $context->router()->adminGroup(static function (Router $router) use ($controller, $dashboard): void {
             $router->get('/', [$dashboard, 'index'])->name('index');
             $router->get('/edit/{id:\d+}', [$controller, 'edit'])->name('edit');
         }, capability: 'prime_builder.edit');
+        // The CMS settings screens/API only check settings.manage, not a section's capability.
+        // A separate route prevents that broader permission from bypassing our settings capability.
+        $context->router()->adminGroup(static function (Router $router) use ($settings): void {
+            $router->get('/settings', [$settings, 'show'])->name('settings');
+            $router->post('/settings', [$settings, 'save'])->name('settings.save');
+        }, capability: 'prime_builder.settings');
         $context->router()->frontGroup(static function (Router $router) use ($controller): void {
             $router->get('/prime-builder/css/{file}', [$controller, 'stylesheet'])->name('css');
             $router->get('/prime-builder/kit/{file}', [$controller, 'kitStylesheet'])->name('kit');

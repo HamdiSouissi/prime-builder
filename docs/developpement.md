@@ -21,7 +21,7 @@ Le document sauvegardé est un document Prime v1 contenant un unique bloc `prime
 
 `Validator` limite les données de mise en page encodées à 1 Mio, 500 éléments et une profondeur de 12 ; les identifiants doivent être uniques et ne contenir que lettres, chiffres, `_` et `-`. Il vérifie le catalogue, les champs, les enfants et les propriétés CSS autorisées. Les champs `rich` passent par `Prime\Security\HtmlSanitizer` ; les URL et valeurs CSS ont leurs propres listes de validation. Le `Renderer` échappe les sorties et isole les erreurs de rendu d’un widget.
 
-Le bloc est enregistré avec `PluginContext::blocks()` ; `EntryService::update()` valide et sauvegarde le document, le HTML rendu, le texte et les révisions du CMS. Les documents préexistants mixtes ne sont pas convertis automatiquement. Depuis Prime CMS 1.0.1, `EntryView::content()` détecte les blocs dynamiques par leur type décodé ; le plugin ne modifie plus la représentation JSON des contenus.
+Le bloc est enregistré avec `PluginContext::blocks()` ; `EntryService::update()` valide et sauvegarde le document, le HTML rendu, le texte et les révisions du CMS. `Converter` tente de convertir les blocs existants sans écrire à l’ouverture : huit types statiques deviennent des widgets `prime_block`, les autres peuvent être conservés en lecture seule avec leur HTML authentifié et chiffré, lié à l’entrée et à `APP_KEY`. Il refuse l’enregistrement si les fragments enregistrés ne peuvent être reconstitués sans ambiguïté ; ce n’est pas une conversion universelle. Une modification de `APP_KEY` rend les fragments conservés illisibles. Depuis Prime CMS 1.0.1, `EntryView::content()` détecte les blocs dynamiques par leur type décodé ; le plugin ne modifie plus la représentation JSON des contenus.
 
 ## Routes et sécurité
 
@@ -29,11 +29,14 @@ Le bloc est enregistré avec `PluginContext::blocks()` ; `EntryService::update()
 |---|---|
 | `GET /admin/prime-builder` | Tableau de bord, administration et `prime_builder.edit`. |
 | `GET /admin/prime-builder/edit/{id}` | Éditeur plein écran ; capacité du plugin et `EntryService::canEdit()` pour l’entrée et son type. |
+| `GET/POST /admin/prime-builder/settings` | Réglages et kit ; `prime_builder.settings`, CSRF du CMS sur l’écriture, validation des valeurs avant enregistrement. |
 | `PATCH /api/prime-builder/v1/documents/{id}` | Document v1 mono-bloc ; API du CMS, `prime_builder.edit`, contrôle par entrée, CSRF en session, validation et `EntryService::update()`. |
 | `POST /api/prime-builder/v1/documents/{id}/render` | Même contrôle ; valide les données et retourne l’aperçu HTML sans enregistrer. |
 | `GET /api/prime-builder/v1/documents/{id}/live` | Retours HTML des widgets de contenu ; entrée publiquement visible ou droits de modification ; `private, no-store`. La pile API du CMS applique sa limite de débit. |
 | `GET /prime-builder/css/{id}-{empreinte}.css` | CSS de contenu. Entrée publique ou droit d’édition ; aperçu privé `no-store`. |
 | `GET /prime-builder/kit/{empreinte}.css` | CSS du kit global. |
+
+Les réglages du plugin ne sont pas enregistrés dans le catalogue générique du CMS : ce catalogue n’applique pas la capacité déclarée pour une section dans ses écrans et son API. Ils passent par la page dédiée, avec leur propre contrôle. L’accès à la bibliothèque, à l’import et à l’export dans l’interface requiert `prime_builder.templates` ; il n’existe pas encore d’API de modèles enregistrés. Un client autorisé à modifier un document peut toujours composer lui-même un JSON équivalent.
 
 L’API accepte les modes d’authentification du CMS, notamment une session avec en-tête `X-Prime-CSRF` ou un jeton porteur autorisé. La route `live` ne transmet pas les brouillons des articles listés : `EntryQuery` effectue une seule requête bornée aux articles publics pour les widgets de la requête. Le navigateur actualise les widgets concernés une fois par document ; le HTML de repli des articles ne contient pas de copie persistante des titres d’autres contenus.
 

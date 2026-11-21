@@ -155,11 +155,13 @@ final class Documents
             'canPublish' => $user instanceof User && $type !== null && $service->canPublish($user, $type),
             'widgets' => $definitions,
             'widgetDefaults' => $this->widgetDefaults(),
-            'library' => (new Library($this->plugin->path('templates')))->all(),
+            'canTemplates' => $user instanceof User && $user->can('prime_builder.templates'),
+            'library' => $user instanceof User && $user->can('prime_builder.templates') ? (new Library($this->plugin->path('templates')))->all() : [],
             'ui' => $ui,
         ];
         $html = $this->plugin->views()->render('prime-builder::admin/builder', [
             'entry' => $entry,
+            'canTemplates' => $config['canTemplates'],
             'configJson' => json_encode($config, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) ?: '{}',
             'cssUrl' => $this->plugin->url('css/editor.css'),
             'jsUrl' => $this->plugin->url('js/editor.js'),

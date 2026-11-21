@@ -21,6 +21,9 @@ return [
         'unfiltered_html' => 'Use advanced HTML',
     ],
     'settings' => [
+        'page_title' => 'Prime Builder settings',
+        'saved' => 'Prime Builder settings saved.',
+        'invalid' => 'Some settings are invalid. Check the values and breakpoints before trying again.',
         'kit' => 'Prime Builder style kit',
         'kit_help' => 'Default values for layouts. Element styles take precedence.',
         'kit_primary' => 'Primary color',

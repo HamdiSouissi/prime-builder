@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 /** @var \Prime\Content\Entry $entry */
 /** @var string $configJson */
+/** @var bool $canTemplates */
 /** @var string $cssUrl */
 /** @var string $jsUrl */
 ?>
@@ -29,7 +30,7 @@ declare(strict_types=1);
     <div class="pb-workspace">
         <aside class="pb-sidebar" aria-label="<?= $this->e(t('plugin::prime-builder.ui.sidebar')) ?>">
             <div class="pb-panel-head"><div><span class="pb-eyebrow"><?= $this->e(t('plugin::prime-builder.ui.eyebrow')) ?></span><h1><?= $this->e(t('plugin::prime-builder.ui.editor_title')) ?></h1></div><span class="pb-panel-dot" aria-hidden="true"></span></div>
-            <nav class="pb-panel-nav" aria-label="<?= $this->e(t('plugin::prime-builder.ui.panels')) ?>"><button type="button" class="pb-nav-active" data-pb-panel="widgets" aria-pressed="true"><?= $this->e(t('plugin::prime-builder.ui.widgets')) ?></button><button type="button" data-pb-panel="navigator" aria-pressed="false"><?= $this->e(t('plugin::prime-builder.ui.navigator')) ?></button><button type="button" data-pb-panel="library" aria-pressed="false"><?= $this->e(t('plugin::prime-builder.ui.library')) ?></button></nav>
+            <nav class="pb-panel-nav" aria-label="<?= $this->e(t('plugin::prime-builder.ui.panels')) ?>"><button type="button" class="pb-nav-active" data-pb-panel="widgets" aria-pressed="true"><?= $this->e(t('plugin::prime-builder.ui.widgets')) ?></button><button type="button" data-pb-panel="navigator" aria-pressed="false"><?= $this->e(t('plugin::prime-builder.ui.navigator')) ?></button><button type="button" data-pb-panel="library" aria-pressed="false"<?= $canTemplates ? '' : ' hidden' ?>><?= $this->e(t('plugin::prime-builder.ui.library')) ?></button></nav>
             <section class="pb-panel-content" data-pb-widget-panel>
                 <label class="pb-search"><span aria-hidden="true">⌕</span><span class="pb-sr-only"><?= $this->e(t('plugin::prime-builder.ui.search')) ?></span><input type="search" data-pb-search placeholder="<?= $this->e(t('plugin::prime-builder.ui.search')) ?>"></label>
                 <p class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.intro')) ?></p>
