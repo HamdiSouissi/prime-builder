@@ -6,8 +6,8 @@ Plugin de composition visuelle pour Prime CMS 1.0.0 et versions ultérieures com
 
 ## Prérequis
 
-- Prime CMS ≥ 1.0.0, PHP ≥ 8.2 avec les extensions requises par le CMS et son installation fonctionnelle.
-- Accès à l’administration et aux capacités nécessaires : `prime_builder.edit` **et** les permissions de modification du contenu concerné. La publication requiert en outre la permission de publication du type de contenu.
+- Prime CMS 1.0.0 avec PHP 8.2–8.x et les extensions requises par le CMS. Le manifeste déclare Prime ≥ 1.0.0 et PHP `^8.2` ; la compatibilité des futures versions n’a pas été vérifiée.
+- Accès à l’administration et aux capacités nécessaires : `prime_builder.edit` **et** les permissions de modification du contenu concerné. La publication requiert en outre la permission de publication du type de contenu. La bibliothèque n’a pas de contrôle distinct `prime_builder.templates` ; les réglages utilisent `settings.manage` du CMS, et non `prime_builder.settings`.
 - API REST du CMS activée pour enregistrer et actualiser les aperçus. Le dossier de stockage de Prime doit être accessible en écriture pour conserver les anciennes feuilles CSS à empreinte.
 - Un navigateur moderne avec JavaScript pour l’éditeur. Le contenu statique enregistré reste lisible sans JavaScript ; les listes d’articles utilisent alors un lien de repli vers l’archive.
 

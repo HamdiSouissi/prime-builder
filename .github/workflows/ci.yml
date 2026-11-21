@@ -111,17 +111,17 @@ jobs:
           php-version: '8.3'
           extensions: mbstring, gd, exif, pdo_mysql, zip, fileinfo, openssl, intl
           coverage: none
-      - name: Clone CMS and install plugin
+      - name: Clone CMS and package plugin
         run: |
           git clone --depth 1 --branch main https://github.com/HamdiSouissi/prime-cms.git cms
-          mkdir -p cms/content/plugins/prime-builder
-          rsync -a --exclude='.git' builder/ cms/content/plugins/prime-builder/
+          git -C builder archive --format=zip --prefix=prime-builder/ HEAD -o "$GITHUB_WORKSPACE/prime-builder.zip"
       - name: Install CMS
         working-directory: cms
         run: php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Cascade-Corail-900!Orbit' 2>&1 | tee /tmp/prime-install.log
-      - name: Activate plugin and prepare page
+      - name: Install ZIP, activate plugin and prepare page
         working-directory: cms
         run: |
+          php bin/prime plugin:install "$GITHUB_WORKSPACE/prime-builder.zip" 2>&1 | tee -a /tmp/prime-install.log
           php bin/prime plugin:activate prime-builder 2>&1 | tee -a /tmp/prime-install.log
           php bin/prime content:create --type=post --title='Actualité publique' --slug=actualite-publique --status=published --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
           php bin/prime content:create --type=post --title='Brouillon confidentiel' --slug=brouillon-confidentiel --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
@@ -152,6 +152,24 @@ jobs:
           grep -F '<h2>dynamic</h2>' /tmp/prime-builder-disabled.html
           if grep -q '/assets/plugins/prime-builder/' /tmp/prime-builder-disabled.html; then echo 'Plugin assets appeared after deactivation'; exit 1; fi
           php bin/prime plugin:activate prime-builder
+      - name: Uninstall and verify data cleanup and public fallback
+        working-directory: cms
+        run: |
+          php bin/prime settings:set plugin.prime-builder.kit_primary '"#123456"'
+          php ../builder/tests/e2e/lifecycle-check.php seed
+          test -d content/plugins/prime-builder
+          test -d public/assets/plugins/prime-builder
+          test -d storage/prime-builder/styles
+          find storage/prime-builder/styles -name '*.css' -type f -print -quit | grep -q .
+          php bin/prime plugin:deactivate prime-builder
+          php bin/prime plugin:uninstall prime-builder
+          test ! -e content/plugins/prime-builder
+          test ! -e public/assets/plugins/prime-builder
+          test ! -e storage/prime-builder/styles
+          php ../builder/tests/e2e/lifecycle-check.php verify
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/test-prime-builder?pb-uninstall-test=1' > /tmp/prime-builder-uninstalled.html
+          grep -F '<h2>dynamic</h2>' /tmp/prime-builder-uninstalled.html
+          if grep -q '/assets/plugins/prime-builder/' /tmp/prime-builder-uninstalled.html; then echo 'Plugin assets appeared after uninstall'; exit 1; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
