@@ -277,7 +277,9 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('settings-section-prime-builder', $general->body());
         $token = $this->tokens($app)->issue($this->user($app, 2), 'settings', ['*'])['token'];
         self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/settings', ['plugin.prime-builder.kit_primary' => '#badbad'], $token)->status());
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/settings', ['plugin.prime-builder.configuration' => ['kit_primary' => '#badbad']], $token)->status());
         self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.kit_primary'));
+        self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.configuration'));
 
         // Plugin settings can be managed without the broader CMS settings permission.
         $db->exec("DELETE FROM pc_role_capabilities WHERE role_id = 2 AND capability = 'settings.manage'");
@@ -296,13 +298,69 @@ final class IntegrationTest extends TestCase
         $response = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $invalid));
         self::assertSame(422, $response->status(), $response->body());
         self::assertStringNotContainsString('</style><script>alert(1)</script>', $response->body());
-        self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.posts'));
+        self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.configuration'));
         $response = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields));
         self::assertSame(302, $response->status(), $response->body());
-        self::assertSame(true, $app->get(Settings::class)->get('plugin.prime-builder.posts'));
-        self::assertSame(1100, $app->get(Settings::class)->get('plugin.prime-builder.breakpoint_tablet'));
-        self::assertSame('#123456', $app->get(Settings::class)->get('plugin.prime-builder.kit_primary'));
-        self::assertSame('portfolio, product', $app->get(Settings::class)->get('plugin.prime-builder.other_types'));
+        $bundle = $app->get(Settings::class)->get('plugin.prime-builder.configuration');
+        self::assertSame(true, $bundle['posts']);
+        self::assertSame(1100, $bundle['breakpoint_tablet']);
+        self::assertSame('#123456', $bundle['kit_primary']);
+        self::assertSame('portfolio, product', $bundle['other_types']);
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/edit/3')->status());
+        $screen = $this->send($app, 'GET', '/admin/prime-builder/settings');
+        self::assertStringContainsString('value="#123456"', $screen->body());
+    }
+
+    public function testSettingsBundleIsAtomicAndReadsOlderIndividualKeys(): void
+    {
+        $app = $this->activated('admin');
+        $settings = $app->get(Settings::class);
+        $settings->set('plugin.prime-builder.kit_primary', '#336699');
+        $settings->set('plugin.prime-builder.breakpoint_tablet', 1200);
+        $legacy = $this->editorConfig($app, 1);
+        self::assertSame('#336699', $legacy['kitColors']['primary']);
+        self::assertSame(1200, $legacy['tabletBreakpoint']);
+        $events = [];
+        $app->get(Hooks::class)->on('settings.updated', static function (string $name, mixed $old, mixed $new) use (&$events): void {
+            if (str_starts_with($name, 'plugin.prime-builder.')) {
+                $events[] = [$name, $old, $new];
+            }
+        });
+        $fields = [
+            '_csrf_token' => $app->get(Csrf::class)->token(), 'pages' => '1', 'posts' => '1', 'other_types' => 'portfolio',
+            'breakpoint_tablet' => '1100', 'breakpoint_mobile' => '700',
+            'kit_primary' => '#123456', 'kit_text' => '#abcdef', 'kit_font_size' => '18',
+        ];
+        $pdo = $this->db($app)->pdo();
+        $trigger = "CREATE TRIGGER reject_builder_settings BEFORE INSERT ON pc_settings WHEN NEW.name = 'plugin.prime-builder.configuration' BEGIN SELECT RAISE(ABORT, 'injected failure'); END";
+        $pdo->exec($trigger);
+        $failed = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields));
+        self::assertSame(500, $failed->status());
+        self::assertSame(false, $settings->has('plugin.prime-builder.configuration'));
+        self::assertSame('#336699', $settings->get('plugin.prime-builder.kit_primary'));
+        self::assertSame([], $events);
+        $pdo->exec('DROP TRIGGER reject_builder_settings');
+        $saved = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields));
+        self::assertSame(302, $saved->status());
+        $bundle = $settings->get('plugin.prime-builder.configuration');
+        self::assertSame(1, count($events));
+        self::assertSame(['plugin.prime-builder.configuration', null, $bundle], $events[0]);
+        self::assertSame('#123456', $bundle['kit_primary']);
+        self::assertSame(1100, $bundle['breakpoint_tablet']);
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('#123456', $config['kitColors']['primary']);
+        self::assertSame(1100, $config['tabletBreakpoint']);
+        $page = $app->get(ContentTypeRegistry::class)->get('post');
+        self::assertNotNull($page);
+        self::assertSame('prime-builder', $app->get(Hooks::class)->apply('content.editor', 'blocks', $page));
+        $pdo->exec($trigger);
+        $fields['kit_primary'] = '#ffffff';
+        $fields['breakpoint_tablet'] = '1300';
+        $failed = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields));
+        self::assertSame(500, $failed->status());
+        self::assertSame($bundle, $settings->get('plugin.prime-builder.configuration'));
+        self::assertSame(1, count($events));
+        $pdo->exec('DROP TRIGGER reject_builder_settings');
     }
 
     public function testEditorAndTemplateAccessHaveSeparateCapabilities(): void

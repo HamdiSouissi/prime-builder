@@ -10,6 +10,7 @@ use Prime\Content\ContentType;
 use Prime\Http\Request;
 use Prime\Http\Response;
 use Prime\Plugins\PluginContext;
+use PrimeBuilder\Configuration;
 use Throwable;
 
 /** Settings have their own capability: the CMS-wide settings API does not enforce section capabilities. */
@@ -34,7 +35,7 @@ final class Settings
     {
         $values = [];
         foreach (self::DEFAULTS as $name => $default) {
-            $value = $this->plugin->settings()->get($name, $default);
+            $value = Configuration::get($this->plugin->settings(), $name, $default);
             $values[$name] = is_scalar($value) ? $value : $default;
         }
         return $this->form($request, $values);
@@ -95,12 +96,8 @@ final class Settings
             return $this->form($request, $values, $errors);
         }
 
-        // Validate all fields before any writes; the CMS connection rolls back on errors.
-        $this->plugin->db()->transaction(function () use ($values): void {
-            foreach ($values as $name => $value) {
-                $this->plugin->settings()->set($name, $value);
-            }
-        });
+        // One CMS setting avoids a series of pre-commit cache mutations and hook emissions.
+        Configuration::save($this->plugin->settings(), $values);
         try {
             $this->plugin->app()->get(CacheManager::class)->clearPages();
         } catch (Throwable) {

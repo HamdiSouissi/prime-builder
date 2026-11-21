@@ -54,7 +54,7 @@ if (($argv[1] ?? '') === 'seed') {
         $statement = $pdo->prepare("INSERT INTO `{$prefix}role_capabilities` (`role_id`, `capability`) VALUES (?, ?)");
         $statement->execute($roleParameters);
     }
-    expectCount('plugin setting', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}settings` WHERE `name` = ?", ['plugin.prime-builder.kit_primary']), 1);
+    expectCount('plugin setting', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}settings` WHERE `name` = ?", ['plugin.prime-builder.configuration']), 1);
     expectCount('plugin capability', countRows($pdo, $roleCapability, $roleParameters), 1);
     expectCount('installed plugin', countRows($pdo, $plugin, ['prime-builder']), 1);
     echo "Lifecycle fixtures present before uninstall.\n";

@@ -20,6 +20,7 @@ use Prime\Http\Request;
 use Prime\Http\Response;
 use Prime\I18n\Translator;
 use Prime\Plugins\PluginContext;
+use PrimeBuilder\Configuration;
 use PrimeBuilder\Document\Converter;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Library;
@@ -143,11 +144,11 @@ final class Documents
             'previewUrl' => $entry->previewUrl(),
             'publicCssUrl' => $this->plugin->url('css/public.css'),
             'kitCssUrl' => '/prime-builder/kit/' . substr(hash('sha256', Kit::fromSettings($this->plugin->settings())), 0, 16) . '.css',
-            'kitColors' => ['primary' => $this->plugin->settings()->get('kit_primary', '#c9441f'), 'text' => $this->plugin->settings()->get('kit_text', '#1a1d29')],
+            'kitColors' => ['primary' => Configuration::get($this->plugin->settings(), 'kit_primary', '#c9441f'), 'text' => Configuration::get($this->plugin->settings(), 'kit_text', '#1a1d29')],
             'mediaCssUrl' => asset('admin/css/admin.css'),
             'mediaMessages' => array_filter($this->plugin->app()->get(Translator::class)->messages(), static fn (string $key): bool => str_starts_with($key, 'admin.js.media.'), ARRAY_FILTER_USE_KEY),
-            'tabletBreakpoint' => max(600, min(2000, (int) $this->plugin->settings()->get('breakpoint_tablet', 1024))),
-            'mobileBreakpoint' => max(320, min(1600, (int) $this->plugin->settings()->get('breakpoint_mobile', 767))),
+            'tabletBreakpoint' => max(600, min(2000, (int) Configuration::get($this->plugin->settings(), 'breakpoint_tablet', 1024))),
+            'mobileBreakpoint' => max(320, min(1600, (int) Configuration::get($this->plugin->settings(), 'breakpoint_mobile', 767))),
             'editUrl' => $entry->editUrl(),
             'revisionsUrl' => '/admin/content/' . rawurlencode($entry->type) . '/' . $entry->id . '/revisions',
             'status' => $entry->status,
@@ -315,7 +316,7 @@ final class Documents
             if ($data === null) {
                 return Response::text('', 404);
             }
-            $css = (new Compiler((int) $this->plugin->settings()->get('breakpoint_tablet', 1024), (int) $this->plugin->settings()->get('breakpoint_mobile', 767)))->compile($data);
+            $css = (new Compiler((int) Configuration::get($this->plugin->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($this->plugin->settings(), 'breakpoint_mobile', 767)))->compile($data);
             if (!hash_equals(substr(hash('sha256', $css), 0, 16), $matches[2])) {
                 return Response::text('', 404);
             }

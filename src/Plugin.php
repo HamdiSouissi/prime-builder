@@ -50,11 +50,11 @@ final class Plugin extends AbstractPlugin
                 'page' => 'pages', 'post' => 'posts', default => null
             };
             if ($key === null) {
-                $other = $context->settings()->get('other_types', '');
+                $other = Configuration::get($context->settings(), 'other_types', '');
                 $names = is_string($other) ? array_map('trim', explode(',', $other)) : [];
                 return in_array($type->name, $names, true) ? 'prime-builder' : $editor;
             }
-            $value = $context->settings()->get($key, $key === 'pages');
+            $value = Configuration::get($context->settings(), $key, $key === 'pages');
             return in_array($value, [true, 1, '1', 'true'], true) ? 'prime-builder' : $editor;
         });
         $context->editors()->register('prime-builder', 'plugin::prime-builder.editor.label', static function (array $state) use ($context): string {
@@ -141,7 +141,7 @@ final class Plugin extends AbstractPlugin
             if ($data === null) {
                 return;
             }
-            $css = (new Compiler((int) $context->settings()->get('breakpoint_tablet', 1024), (int) $context->settings()->get('breakpoint_mobile', 767)))->compile($data);
+            $css = (new Compiler((int) Configuration::get($context->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767)))->compile($data);
             $file = $page->entry->id . '-' . substr(hash('sha256', $css), 0, 16) . '.css';
             $type = $context->app()->get(ContentTypeRegistry::class)->get($page->entry->type);
             if (!$page->isPreview && $type !== null && $type->public && \Prime\Site\UrlResolver::isPubliclyVisible($page->entry)) {
@@ -185,8 +185,8 @@ final class Plugin extends AbstractPlugin
             $checks[] = ['id' => 'prime-builder.status', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.label'), 'status' => 'ok', 'value' => t('plugin::prime-builder.system.active')];
             $assetsPresent = is_file($context->path('assets/js/editor.js')) && is_file($context->path('assets/css/editor.css')) && is_file($context->path('assets/css/public.css'));
             $checks[] = ['id' => 'prime-builder.assets', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.assets'), 'status' => $assetsPresent ? 'ok' : 'error', 'value' => t($assetsPresent ? 'plugin::prime-builder.system.present' : 'plugin::prime-builder.system.missing')];
-            $tablet = (int) $context->settings()->get('breakpoint_tablet', 1024);
-            $mobile = (int) $context->settings()->get('breakpoint_mobile', 767);
+            $tablet = (int) Configuration::get($context->settings(), 'breakpoint_tablet', 1024);
+            $mobile = (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767);
             $breakpointsValid = $tablet >= 600 && $tablet <= 2000 && $mobile >= 320 && $mobile < $tablet;
             $checks[] = ['id' => 'prime-builder.breakpoints', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.breakpoints'), 'status' => $breakpointsValid ? 'ok' : 'warning', 'value' => t($breakpointsValid ? 'plugin::prime-builder.system.valid' : 'plugin::prime-builder.system.adjusted')];
             return $checks;

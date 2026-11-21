@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PrimeBuilder\Styles;
 
 use Prime\Plugins\PluginSettings;
+use PrimeBuilder\Configuration;
 
 /** A small, allowlisted site kit. User input is never interpreted as arbitrary CSS. */
 final class Kit
@@ -12,9 +13,9 @@ final class Kit
     public static function fromSettings(PluginSettings $settings): string
     {
         return self::compile([
-            'primary' => $settings->get('kit_primary', '#c9441f'),
-            'text' => $settings->get('kit_text', '#1a1d29'),
-            'font_size' => $settings->get('kit_font_size', 16),
+            'primary' => Configuration::get($settings, 'kit_primary', '#c9441f'),
+            'text' => Configuration::get($settings, 'kit_text', '#1a1d29'),
+            'font_size' => Configuration::get($settings, 'kit_font_size', 16),
         ]);
     }
 
