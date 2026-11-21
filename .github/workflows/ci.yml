@@ -1,0 +1,116 @@
+name: Prime Builder CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  javascript:
+    name: JavaScript model
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test
+
+  php:
+    name: PHP validation, static analysis and translations
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: prime_ci_secret
+          MYSQL_DATABASE: prime_builder
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -pprime_ci_secret"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, gd, exif, pdo_mysql, pdo_sqlite, zip, fileinfo, openssl, intl
+          coverage: none
+      - name: Clone CMS and install plugin
+        run: |
+          git clone --depth 1 --branch main https://github.com/HamdiSouissi/prime-cms.git cms
+          mkdir -p cms/content/plugins/prime-builder
+          rsync -a --exclude='.git' builder/ cms/content/plugins/prime-builder/
+      - name: Install CMS test dependencies
+        working-directory: cms
+        run: composer install --no-interaction --prefer-dist --no-progress
+      - name: PHPUnit
+        working-directory: cms
+        run: vendor/bin/phpunit --bootstrap tests/bootstrap.php content/plugins/prime-builder/tests
+      - name: PHPStan level 8
+        working-directory: cms
+        run: vendor/bin/phpstan analyse --configuration content/plugins/prime-builder/phpstan.neon --no-progress
+      - name: PHP-CS-Fixer
+        working-directory: cms
+        run: vendor/bin/php-cs-fixer fix --config content/plugins/prime-builder/.php-cs-fixer.dist.php --dry-run --diff
+      - name: Install CMS for language check
+        working-directory: cms
+        run: |
+          php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Builder-Corail-2027!'
+          php bin/prime plugin:activate prime-builder
+      - name: Translation catalogue
+        working-directory: cms
+        run: php bin/prime lang:check --strict
+
+  e2e:
+    name: Playwright and axe
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: prime_ci_secret
+          MYSQL_DATABASE: prime_builder
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -pprime_ci_secret"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, gd, exif, pdo_mysql, zip, fileinfo, openssl, intl
+          coverage: none
+      - name: Install CMS and activate plugin
+        run: |
+          git clone --depth 1 --branch main https://github.com/HamdiSouissi/prime-cms.git cms
+          mkdir -p cms/content/plugins/prime-builder
+          rsync -a --exclude='.git' builder/ cms/content/plugins/prime-builder/
+          cd cms
+          php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Builder-Corail-2027!'
+          php bin/prime plugin:activate prime-builder
+          OUT=$(php bin/prime content:create --type=page --title='Test Prime Builder' --slug=test-prime-builder --status=draft --body='{"version":1,"blocks":[]}')
+          echo "$OUT"
+          echo "E2E_ENTRY_ID=$(echo "$OUT" | grep -oE '#[0-9]+' | head -1 | tr -d '#')" >> "$GITHUB_ENV"
+          php -S 0.0.0.0:8080 -t public public/router.php > /tmp/prime-builder-server.log 2>&1 &
+      - name: Install browser tooling
+        working-directory: builder/tests/e2e
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Playwright
+        working-directory: builder/tests/e2e
+        run: npm test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: prime-builder-e2e-failure
+          path: |
+            builder/tests/e2e/test-results
+            /tmp/prime-builder-server.log
