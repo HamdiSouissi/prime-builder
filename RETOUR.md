@@ -1,5 +1,17 @@
 # Retour de mission — Prime Builder 0.1.0
 
+## Suite n° 2 — jalon A accepté
+
+Le demandeur a accepté le jalon A au commit `7f5c26b62d01604d51d4420ea756504c77eb4e72`. Sur cette révision, le [run 44943357270](https://github.com/HamdiSouissi/prime-builder/actions/runs/44943357270) est `completed` / `success` : les sept jobs `lint`, `cs`, `phpunit`, `js`, `i18n`, `smoke` et `e2e` sont verts. Synthèses relevées dans ce run :
+
+- PHPStan : `[OK] No errors` ; PHP-CS-Fixer : `Found 0 of 30 files that can be fixed in 0.576 seconds, 78.00 MB memory used`.
+- PHPUnit : `OK (38 tests, 466 assertions)` ; Node : `# tests 14`, `# pass 14`, `# fail 0` ; Playwright : `27 passed (1.5m)`.
+- Traductions : `Catalogue de traduction cohérent.` ; smoke : `Smoke: all routes, public content and document CSS passed.`
+
+Le demandeur rapporte également une vérification locale distincte sur MySQL (`OK (38 tests, 445 assertions)`) et la conversion réussie de la page d’accueil de démonstration. Ces résultats sont ceux du relecteur, pas une nouvelle exécution de notre environnement.
+
+La suite demandée enchaîne B (catalogue), C (widgets globaux, dynamique et conditions), D (Theme Builder), E (formulaires), F (popups), puis G (finitions). `PRIME-BUILDER-suite-1.md`, cité pour les détails de ces jalons, n’est pas présent dans le dépôt ni dans les pièces jointes disponibles : ne pas considérer ses critères détaillés comme vérifiés avant de l’obtenir. Le cahier des charges complet et les précisions de la suite n° 2 restent applicables.
+
 > **Livraison partielle, non prête pour la production.** Le socle existe et les écrans livrés ont été ouverts, mais l’éditeur ne couvre pas tout le §3.3 et le catalogue, le Theme Builder, les formulaires, les popups et les fonctions dynamiques demandés ne sont pas complets. Les modèles de contact ne sont pas des formulaires. Les résultats ci-dessous sont ceux réellement observés, pas une certification de sécurité ou d’accessibilité.
 
 ## 1. Dépôt, branche et révision vérifiée
