@@ -87,7 +87,7 @@ vendor/bin/phpunit --bootstrap tests/bootstrap.php content/plugins/prime-builder
 # et PRIME_TEST_DB_PASSWORD dans l’environnement :
 PB_TEST_MYSQL=1 vendor/bin/phpunit --bootstrap tests/bootstrap.php content/plugins/prime-builder/tests
 vendor/bin/phpstan analyse --configuration content/plugins/prime-builder/phpstan.neon --no-progress
-vendor/bin/php-cs-fixer fix --config content/plugins/prime-builder/.php-cs-fixer.dist.php --dry-run --diff
+vendor/bin/php-cs-fixer fix content/plugins/prime-builder --config .php-cs-fixer.dist.php --dry-run --diff --no-ansi
 php bin/prime lang:check --strict
 
 # Depuis le dépôt du plugin
@@ -98,9 +98,10 @@ cd tests/e2e
 npm ci --no-audit --no-fund
 npx playwright install --with-deps chromium
 # Fournir E2E_BASE_URL, E2E_ENTRY_ID, E2E_LEGACY_ENTRY_ID,
-# E2E_MOUSE_ENTRY_ID et E2E_KEYBOARD_ENTRY_ID, et si nécessaire les identifiants
-# E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD. Les deux derniers identifiants pointent
-# vers des pages de test vierges dont les slugs sont parcours-souris et parcours-clavier.
+# E2E_MOUSE_ENTRY_ID, E2E_KEYBOARD_ENTRY_ID et E2E_DRAG_ENTRY_ID, et si nécessaire
+# E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD. Les trois identifiants de parcours pointent
+# vers des pages de test vierges ; les deux premières ont les slugs
+# parcours-souris et parcours-clavier.
 npm test
 ```
 

@@ -3,3 +3,4 @@
 .pb-gallery-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:1rem}.pb-gallery-grid img{width:100%;height:auto;display:block}.pb-video video,.pb-audio audio{display:block;max-width:100%;width:100%}.pb-media-transcript{margin-top:1rem}
 .pb-post-list{padding-inline-start:1.25rem}.pb-post-list li+li{margin-top:.75rem}.pb-post-list p{margin:.25rem 0 0}
 .pb-layout .pb-element[hidden]{display:none!important}
+html[data-pb-editor-preview] .pb-element[data-pb-drop=before]{box-shadow:0 -3px #c9441f}html[data-pb-editor-preview] .pb-element[data-pb-drop=after]{box-shadow:0 3px #c9441f}html[data-pb-editor-preview] .pb-element[data-pb-drop=inside]{outline:2px dashed #c9441f!important;outline-offset:2px}html[data-pb-editor-preview] .pb-element[data-pb-drop-axis=horizontal][data-pb-drop=before]{box-shadow:-3px 0 #c9441f}html[data-pb-editor-preview] .pb-element[data-pb-drop-axis=horizontal][data-pb-drop=after]{box-shadow:3px 0 #c9441f}

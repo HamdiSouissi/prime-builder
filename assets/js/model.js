@@ -62,10 +62,26 @@ export function add(elements, element, parentId = null, containerTypes = ['conta
   (parent && containerTypes.includes(parent.type) ? parent.children : next).push(clone(element));
   return next;
 }
-export function insertAfter(elements, elementId, element) {
+export function insertRelative(elements, elementId, element, position) {
   const next = clone(elements);
+  if (!['before', 'after'].includes(position)) return next;
   const target = locate(next, elementId);
-  if (target) target.list.splice(target.index + 1, 0, clone(element));
+  if (target) target.list.splice(target.index + (position === 'after' ? 1 : 0), 0, clone(element));
+  return next;
+}
+export function insertAfter(elements, elementId, element) {
+  return insertRelative(elements, elementId, element, 'after');
+}
+export function moveRelative(elements, elementId, targetId, position) {
+  const next = clone(elements);
+  if (!['before', 'after'].includes(position)) return next;
+  const source = locate(next, elementId);
+  if (!source || elementId === targetId || find(source.element.children || [], targetId) || !locate(next, targetId)) return next;
+  const [element] = source.list.splice(source.index, 1);
+  // The destination's index can change when both elements share a parent.
+  const destination = locate(next, targetId);
+  if (!destination) return clone(elements);
+  destination.list.splice(destination.index + (position === 'after' ? 1 : 0), 0, element);
   return next;
 }
 export function update(elements, elementId, patch) {

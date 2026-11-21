@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { History, add, changedElement, createElement, duplicate, find, inheritedStyle, insertAfter, moveInto, remove, reorder, update } from '../../assets/js/model.js';
+import { History, add, changedElement, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, update } from '../../assets/js/model.js';
 
 test('preview diff selects a single changed subtree and rejects structural or multiple changes', () => {
   const parent = createElement('container'), first = createElement('heading'), second = createElement('text');
@@ -45,6 +45,29 @@ test('inserting after a nested element is immutable and preserves its siblings',
   assert.deepEqual(initial[0].children.map(node => node.id), [first.id, last.id]);
   assert.deepEqual(insertAfter(initial, 'missing', inserted), initial);
 });
+test('relative drag operations preserve order across parents and reject cycles', () => {
+  const parent = createElement('container'), child = createElement('heading');
+  const first = createElement('text'), last = createElement('button');
+  const initial = add(add(add(add([], parent), child, parent.id), first), last);
+  const before = moveRelative(initial, last.id, first.id, 'before');
+  assert.deepEqual(before.map(node => node.id), [parent.id, last.id, first.id]);
+  const after = moveRelative(before, last.id, first.id, 'after');
+  assert.deepEqual(after.map(node => node.id), [parent.id, first.id, last.id]);
+  const nested = moveRelative(after, last.id, child.id, 'before');
+  assert.deepEqual(nested[0].children.map(node => node.id), [last.id, child.id]);
+  const out = moveRelative(nested, last.id, parent.id, 'after');
+  assert.deepEqual(out.map(node => node.id), [parent.id, last.id, first.id]);
+  assert.deepEqual(moveRelative(initial, parent.id, child.id, 'after'), initial);
+  assert.deepEqual(moveRelative(initial, first.id, first.id, 'before'), initial);
+  assert.deepEqual(moveRelative(initial, first.id, 'missing', 'after'), initial);
+  assert.deepEqual(moveRelative(initial, first.id, last.id, 'invalid'), initial);
+  const added = createElement('image');
+  assert.deepEqual(insertRelative(initial, child.id, added, 'before')[0].children.map(node => node.id), [added.id, child.id]);
+  assert.deepEqual(insertRelative(initial, 'missing', added, 'after'), initial);
+  assert.deepEqual(initial.map(node => node.id), [parent.id, first.id, last.id]);
+  assert.deepEqual(initial[0].children.map(node => node.id), [child.id]);
+});
+
 test('duplicating a subtree changes every identifier', () => {
   const parent = createElement('container'), child = createElement('heading');
   const tree = duplicate(add(add([], parent), child, parent.id), parent.id);

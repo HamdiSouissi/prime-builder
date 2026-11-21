@@ -4,6 +4,7 @@ import AxeBuilder from '@axe-core/playwright';
 const id = process.env.E2E_ENTRY_ID || '1';
 const mouseId = process.env.E2E_MOUSE_ENTRY_ID || '';
 const keyboardId = process.env.E2E_KEYBOARD_ENTRY_ID || '';
+const dragId = process.env.E2E_DRAG_ENTRY_ID || '';
 async function login(page) {
   await page.goto('/admin/login');
   await page.locator('input[name=email]').fill(process.env.E2E_ADMIN_EMAIL || 'builder@prime.test');
@@ -561,6 +562,113 @@ test('existing canvas elements can be dragged into a container', async ({ page }
   await expect(container).toBeVisible();
   await source.dragTo(container, { targetPosition: { x: 5, y: 5 } });
   await expect(frame.locator('.pb-container .pb-heading').filter({ hasText: 'Déplacé dans le canevas' })).toBeVisible();
+});
+
+test('drag ordering, nesting and keyboard alternatives persist in canvas and navigator', async ({ page }) => {
+  expect(dragId).toMatch(/^[1-9][0-9]*$/);
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${dragId}`);
+  async function addHeading(name, first = false) {
+    if (!first) await page.locator('[data-pb-panel="widgets"]').click();
+    await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+    await page.getByLabel('Texte', { exact: true }).fill(name);
+  }
+  await addHeading('Premier', true);
+  await addHeading('Deuxième');
+  await addHeading('Troisième');
+  const frame = page.frameLocator('[data-pb-frame]');
+  for (const name of ['Premier', 'Deuxième', 'Troisième']) await expect(frame.locator('.pb-heading').filter({ hasText: name })).toBeVisible();
+  const first = await frame.locator('.pb-heading').filter({ hasText: 'Premier' }).getAttribute('data-pb-id');
+  const second = await frame.locator('.pb-heading').filter({ hasText: 'Deuxième' }).getAttribute('data-pb-id');
+  const third = await frame.locator('.pb-heading').filter({ hasText: 'Troisième' }).getAttribute('data-pb-id');
+  await page.locator('[data-pb-panel="widgets"]').click();
+  await page.getByRole('button', { name: 'Ajouter Conteneur' }).click();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await page.getByLabel('Marge intérieure', { exact: true }).fill('50');
+  const container = frame.locator('.pb-container');
+  await expect(container).toBeVisible();
+  const group = await container.getAttribute('data-pb-id');
+  const one = frame.locator(`[data-pb-id="${first}"]`);
+  const three = frame.locator(`[data-pb-id="${third}"]`);
+  const rootOrder = () => frame.locator('.pb-layout > .pb-element').evaluateAll(nodes => nodes.map(node => node.dataset.pbId));
+  const groupOrder = () => frame.locator(`[data-pb-id="${group}"] > .pb-element`).evaluateAll(nodes => nodes.map(node => node.dataset.pbId));
+  await expect.poll(rootOrder).toEqual([first, second, third, group]);
+
+  await three.dragTo(one, { targetPosition: { x: 100, y: 2 } });
+  await expect.poll(rootOrder).toEqual([third, first, second, group]);
+  await expect(page.locator('[data-pb-live]')).toContainText('avant');
+  await page.locator('[data-pb-panel="navigator"]').click();
+  const row = elementId => page.locator(`[data-pb-tree-id="${elementId}"]`);
+  const secondBox = await row(second).boundingBox();
+  await row(first).dragTo(row(second), { targetPosition: { x: 100, y: secondBox.height - 2 } });
+  await expect.poll(rootOrder).toEqual([third, second, first, group]);
+  await expect(page.locator('[data-pb-live]')).toContainText('après');
+  await row(first).dragTo(row(group), { targetPosition: { x: 5, y: 5 } });
+  await expect.poll(groupOrder).toEqual([first]);
+  await row(group).dragTo(row(first), { targetPosition: { x: 100, y: 2 } });
+  await expect(page.locator('[data-pb-live]')).toHaveText('Ce déplacement n’est pas possible.');
+  await expect.poll(groupOrder).toEqual([first]);
+
+  // The same nesting and ordering are available without dragging.
+  await row(third).locator('[data-pb-tree-select]').focus();
+  await page.keyboard.press('Enter');
+  const parent = page.getByLabel('Déplacer vers');
+  await parent.focus();
+  await page.keyboard.press('End');
+  await expect(parent).toHaveValue(group);
+  await expect.poll(groupOrder).toEqual([first, third]);
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-pb-action="move_up"]')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect.poll(groupOrder).toEqual([third, first]);
+  await expect(page.locator('[data-pb-live]')).toContainText('Monter');
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-pb-action="move_down"]')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect.poll(groupOrder).toEqual([first, third]);
+  await expect(page.locator('[data-pb-live]')).toContainText('Descendre');
+
+  // Drag a widget from the parent document into the iframe, before a sibling.
+  await page.locator('[data-pb-panel="widgets"]').click();
+  const card = page.getByRole('button', { name: 'Ajouter Séparateur' });
+  await card.scrollIntoViewIfNeeded();
+  const sourceBox = await card.boundingBox();
+  const targetBox = await one.boundingBox();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + 100, targetBox.y + 2, { steps: 20 });
+  await expect(one).toHaveAttribute('data-pb-drop', 'before');
+  await page.mouse.up();
+  await expect.poll(async () => (await groupOrder()).length).toBe(3);
+  const inserted = await groupOrder();
+  expect(inserted.slice(1)).toEqual([first, third]);
+  await expect(frame.locator(`[data-pb-id="${inserted[0]}"]`)).toHaveClass('pb-element pb-separator');
+
+  // Horizontal flex containers use left/right placement instead of top/bottom.
+  await page.locator('[data-pb-panel="navigator"]').click();
+  await row(group).locator('[data-pb-tree-select]').click();
+  await page.getByLabel('Direction').selectOption('row');
+  await expect(container).toHaveCSS('flex-direction', 'row');
+  const horizontalBox = await one.boundingBox();
+  await three.dragTo(one, { targetPosition: { x: 2, y: horizontalBox.height / 2 } });
+  await expect.poll(groupOrder).toEqual([inserted[0], third, first]);
+  await page.locator('[data-pb-panel="navigator"]').click();
+  await row(group).locator('[data-pb-tree-select]').click();
+  await page.getByLabel('Disposition').selectOption('grid');
+  await page.getByLabel('Colonnes').fill('2');
+  await expect(container).toHaveCSS('display', 'grid');
+  const gridTarget = await three.boundingBox();
+  await one.dragTo(three, { targetPosition: { x: 2, y: gridTarget.height / 2 } });
+  await expect.poll(groupOrder).toEqual([inserted[0], first, third]);
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto(`/admin/prime-builder/edit/${dragId}`);
+  await expect.poll(groupOrder).toEqual([inserted[0], first, third]);
+  await page.locator('[data-pb-panel="navigator"]').click();
+  await expectAccessible(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
 });
 
 test('responsive controls show inherited values and their source', async ({ page }) => {

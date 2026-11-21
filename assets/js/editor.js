@@ -1,4 +1,4 @@
-import { History, add, changedElement, createElement, duplicate, find, id, inheritedStyle, insertAfter, moveInto, remove, reorder, update } from './model.js';
+import { History, add, changedElement, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, update } from './model.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -86,10 +86,11 @@ function markDirty() {
 }
 function commit(elements, rebuild = false, action = ui.history_change) {
   const target = changedElement(history.present, elements);
-  if (!history.commit(elements, action)) return;
+  if (!history.commit(elements, action)) return false;
   markDirty();
   if (rebuild) renderPanel();
   schedulePreview(target);
+  return true;
 }
 function ensureLayout() {
   if (!foreign) return true;
@@ -144,6 +145,70 @@ function renderWidgets() {
 function elementLabel(element) {
   return element.label?.trim() || config.widgets[element.type]?.label || element.type;
 }
+let dropMarker = null;
+function builderDrag(transfer) {
+  return transfer && [...transfer.types].some(type => ['text/prime-builder-element', 'text/prime-builder-widget'].includes(type));
+}
+function clearDropMarker() {
+  dropMarker?.removeAttribute('data-pb-drop');
+  dropMarker?.removeAttribute('data-pb-drop-axis');
+  dropMarker = null;
+}
+function markDrop(node, placement) {
+  if (dropMarker !== node) clearDropMarker();
+  dropMarker = node;
+  node.dataset.pbDrop = placement.position;
+  node.dataset.pbDropAxis = placement.axis;
+}
+function dropPosition(event, element, node) {
+  const rect = node.getBoundingClientRect();
+  const parentStyle = node.classList.contains('pb-element') && node.parentElement ? node.ownerDocument.defaultView.getComputedStyle(node.parentElement) : null;
+  const horizontal = parentStyle && ((parentStyle.display === 'flex' && parentStyle.flexDirection.startsWith('row')) ||
+    (parentStyle.display === 'grid' && parentStyle.gridTemplateColumns.split(' ').filter(Boolean).length > 1));
+  const axis = horizontal ? 'horizontal' : 'vertical';
+  const start = horizontal ? rect.left : rect.top;
+  const size = horizontal ? rect.width : rect.height;
+  const point = horizontal ? event.clientX : event.clientY;
+  const edge = Math.min(12, Math.max(4, size * 0.2));
+  // The top-left gutter also permits dropping inside a short or empty container.
+  const gutter = event.clientX <= rect.left + 12 && event.clientY <= rect.top + 12;
+  if (isContainer(element) && (gutter || (point >= start + edge && point <= start + size - edge))) return { position: 'inside', axis };
+  return { position: point < start + size / 2 ? 'before' : 'after', axis };
+}
+function applyDrop(transfer, targetId, position, canvas) {
+  if (!ensureLayout()) return;
+  const target = targetId ? find(history.present, targetId) : null;
+  if (targetId && !target) return;
+  const inside = target && position === 'inside' && isContainer(target);
+  if (position === 'inside' && target && !inside) return;
+  const sourceId = transfer.getData('text/prime-builder-element');
+  const type = transfer.getData('text/prime-builder-widget');
+  let element, next, action;
+  if (sourceId) {
+    element = find(history.present, sourceId);
+    if (!element) return;
+    next = target ? (inside ? moveInto(history.present, sourceId, target.id, containerTypes) : moveRelative(history.present, sourceId, target.id, position))
+      : moveInto(history.present, sourceId, null, containerTypes);
+    const destination = target ? `${ui[`drop_${position}`]} ${elementLabel(target)}` : ui.root;
+    action = `${ui.move_to} : ${elementLabel(element)} — ${destination}`;
+  } else {
+    if (!type || !config.widgets[type] || config.widgets[type].hidden) return;
+    element = newElement(type);
+    next = target ? (inside ? add(history.present, element, target.id, containerTypes) : insertRelative(history.present, target.id, element, position))
+      : add(history.present, element, null, containerTypes);
+    action = `${ui.add} : ${config.widgets[type].label}`;
+  }
+  const previous = { selected, panel, tab };
+  selected = element.id; tab = 'content';
+  if (canvas || !sourceId) panel = 'settings';
+  if (!commit(next, true, action)) {
+    ({ selected, panel, tab } = previous);
+    $('[data-pb-live]').textContent = ui.drop_invalid;
+    return;
+  }
+  $('[data-pb-live]').textContent = action;
+  if (!sourceId) ($('[data-pb-fields] input, [data-pb-fields] textarea, [data-pb-fields] select') || parentSelect)?.focus({ preventScroll: true });
+}
 function treeControl(label, path) {
   const button = document.createElement('button'); button.type = 'button'; button.className = 'pb-tree-control';
   button.setAttribute('aria-label', label); button.title = label;
@@ -159,16 +224,22 @@ function renderTree() {
   function build(elements) {
     const list = document.createElement('ul'); list.className = 'pb-tree';
     for (const element of elements) {
-      const item = document.createElement('li'); const row = document.createElement('div'); row.className = 'pb-tree-row'; row.dataset.selected = String(selected === element.id); row.dataset.hidden = String(element.hidden === true);
+      const item = document.createElement('li'); const row = document.createElement('div'); row.className = 'pb-tree-row'; row.dataset.pbTreeId = element.id; row.dataset.selected = String(selected === element.id); row.dataset.hidden = String(element.hidden === true);
       const name = elementLabel(element);
       row.draggable = renaming !== element.id;
       row.addEventListener('dragstart', event => { event.stopPropagation(); event.dataTransfer.setData('text/prime-builder-element', element.id); event.dataTransfer.effectAllowed = 'move'; });
-      row.addEventListener('dragover', event => { if (isContainer(element)) event.preventDefault(); });
-      row.addEventListener('drop', event => {
-        if (!isContainer(element)) return;
+      row.addEventListener('dragover', event => {
+        if (!builderDrag(event.dataTransfer)) return;
         event.preventDefault(); event.stopPropagation();
-        const source = event.dataTransfer.getData('text/prime-builder-element');
-        if (source) commit(moveInto(history.present, source, element.id, containerTypes), true, ui.move_to);
+        event.dataTransfer.dropEffect = [...event.dataTransfer.types].includes('text/prime-builder-widget') ? 'copy' : 'move';
+        markDrop(row, dropPosition(event, element, row));
+      });
+      row.addEventListener('dragleave', event => { if (!row.contains(event.relatedTarget)) clearDropMarker(); });
+      row.addEventListener('drop', event => {
+        if (!builderDrag(event.dataTransfer)) return;
+        event.preventDefault(); event.stopPropagation();
+        const { position } = dropPosition(event, element, row);
+        clearDropMarker(); applyDrop(event.dataTransfer, element.id, position, false);
       });
       if (element.children?.length) {
         const closed = collapsed.has(element.id);
@@ -230,6 +301,19 @@ function renderTree() {
   }
   target.append(build(history.present));
 }
+const treeDropArea = $('[data-pb-tree]');
+treeDropArea.addEventListener('dragover', event => {
+  if (!builderDrag(event.dataTransfer)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = [...event.dataTransfer.types].includes('text/prime-builder-widget') ? 'copy' : 'move';
+  clearDropMarker();
+});
+treeDropArea.addEventListener('drop', event => {
+  if (!builderDrag(event.dataTransfer)) return;
+  event.preventDefault();
+  clearDropMarker(); applyDrop(event.dataTransfer, null, 'inside', false);
+});
+document.addEventListener('dragend', clearDropMarker);
 function freshIds(elements, removeAnchors = false) {
   const copy = structuredClone(elements);
   const visit = node => {
@@ -568,12 +652,15 @@ function performElementAction(action) {
     return;
   }
   const label = `${ui[action] || ui.history_change} : ${elementLabel(element)}`;
-  if (action === 'paste_style' && clipboard && !readOnly) commit(update(history.present, element.id, { styles: structuredClone(clipboard.styles || {}) }), false, label);
-  if (action === 'reset_style' && !readOnly) commit(update(history.present, element.id, { styles: {} }), false, label);
-  if (action === 'duplicate') commit(duplicate(history.present, element.id), false, label);
-  if (action === 'move_up') commit(reorder(history.present, element.id, -1), false, label);
-  if (action === 'move_down') commit(reorder(history.present, element.id, 1), false, label);
-  if (action === 'remove') { commit(remove(history.present, element.id), false, label); selected = null; panel = 'widgets'; }
+  let changed = false;
+  if (action === 'paste_style' && clipboard && !readOnly) changed = commit(update(history.present, element.id, { styles: structuredClone(clipboard.styles || {}) }), false, label);
+  if (action === 'reset_style' && !readOnly) changed = commit(update(history.present, element.id, { styles: {} }), false, label);
+  if (action === 'duplicate') changed = commit(duplicate(history.present, element.id), false, label);
+  if (action === 'move_up') changed = commit(reorder(history.present, element.id, -1), false, label);
+  if (action === 'move_down') changed = commit(reorder(history.present, element.id, 1), false, label);
+  if (action === 'remove') { changed = commit(remove(history.present, element.id), false, label); selected = null; panel = 'widgets'; }
+  if (changed) $('[data-pb-live]').textContent = label;
+  else if (action === 'move_up' || action === 'move_down') $('[data-pb-live]').textContent = ui.drop_invalid;
   renderPanel();
 }
 function cssLength(value, width = false) {
@@ -694,6 +781,7 @@ function schedulePreview(target = null) {
 function attachFrameEvents() {
   const doc = frame.contentDocument;
   if (!doc) return;
+  doc.documentElement.dataset.pbEditorPreview = '';
   doc.addEventListener('keydown', shortcuts);
   doc.addEventListener('click', event => {
     const target = event.target.closest('[data-pb-id]');
@@ -716,23 +804,24 @@ function attachFrameEvents() {
     event.dataTransfer.setData('text/prime-builder-element', target.dataset.pbId);
     event.dataTransfer.effectAllowed = 'move';
   });
-  doc.addEventListener('dragover', event => event.preventDefault());
-  doc.addEventListener('drop', event => {
+  doc.addEventListener('dragover', event => {
+    if (!builderDrag(event.dataTransfer)) return;
     event.preventDefault();
-    if (!event.dataTransfer) return;
+    event.dataTransfer.dropEffect = [...event.dataTransfer.types].includes('text/prime-builder-widget') ? 'copy' : 'move';
     const target = event.target.closest('[data-pb-id]');
-    const node = target ? find(history.present, target.dataset.pbId) : null;
-    const source = event.dataTransfer.getData('text/prime-builder-element');
-    if (source && (!node || isContainer(node))) {
-      selected = source; panel = 'settings'; tab = 'content';
-      commit(moveInto(history.present, source, node?.id || null, containerTypes), true, ui.move_to);
-      return;
-    }
-    const type = event.dataTransfer.getData('text/prime-builder-widget');
-    if (!type) return;
-    selected = isContainer(node) ? node.id : null;
-    addWidget(type);
+    const element = target ? find(history.present, target.dataset.pbId) : null;
+    if (target && element) markDrop(target, dropPosition(event, element, target));
+    else clearDropMarker();
   });
+  doc.addEventListener('drop', event => {
+    if (!builderDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    const target = event.target.closest('[data-pb-id]');
+    const element = target ? find(history.present, target.dataset.pbId) : null;
+    const position = target && element ? dropPosition(event, element, target).position : 'inside';
+    clearDropMarker(); applyDrop(event.dataTransfer, element?.id || null, position, true);
+  });
+  doc.addEventListener('dragend', clearDropMarker);
   schedulePreview();
 }
 async function save() {
@@ -875,8 +964,12 @@ $('[data-pb-save]').addEventListener('click', save);
 status.addEventListener('change', () => { updateSchedule(); markDirty(); });
 schedule.addEventListener('input', markDirty);
 parentSelect.addEventListener('change', () => {
-  if (!selected) return;
-  commit(moveInto(history.present, selected, parentSelect.value || null, containerTypes), false, ui.move_to);
+  const element = find(history.present, selected);
+  if (!element) return;
+  const destination = parentSelect.selectedOptions[0]?.textContent || ui.root;
+  const label = `${ui.move_to} : ${elementLabel(element)} — ${destination}`;
+  const changed = commit(moveInto(history.present, selected, parentSelect.value || null, containerTypes), false, label);
+  $('[data-pb-live]').textContent = changed ? label : ui.drop_invalid;
   renderParentOptions(find(history.present, selected)); parentSelect.focus();
 });
 frame.addEventListener('load', attachFrameEvents);
