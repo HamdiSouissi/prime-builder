@@ -258,6 +258,45 @@ final class IntegrationTest extends TestCase
         self::assertSame(200, $app->get(Kernel::class)->handle($request)->status());
     }
 
+    public function testBearerTokenCannotRetainRevokedAccountPermissions(): void
+    {
+        $app = $this->activated(null);
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.edit'), (2, 'content.publish')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $token = $this->tokens($app)->issue($this->user($app, 2), 'builder', ['*'])['token'];
+        $restricted = $this->tokens($app)->issue($this->user($app, 2), 'restricted', ['prime_builder.edit'])['token'];
+        self::assertSame(404, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $restricted)->status());
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
+
+        // A token issued before a role change must not retain publication or ownership rights.
+        $pdo->exec("DELETE FROM pc_role_capabilities WHERE role_id = 2 AND capability = 'content.publish'");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document(), 'status' => 'published'], $token)->status());
+        self::assertSame('draft', $app->get(EntryRepository::class)->find(3)?->status);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
+        $pdo->exec("DELETE FROM pc_role_capabilities WHERE role_id = 2 AND capability = 'content.edit_own'");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        self::assertSame(404, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
+        self::assertSame(404, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/render', ['data' => ['version' => 1, 'elements' => []]], $token)->status());
+        self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/3/live', token: $token)->status());
+        $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'content.edit_own')");
+        $pdo->exec("DELETE FROM pc_role_capabilities WHERE role_id = 2 AND capability = 'prime_builder.edit'");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/render', ['data' => ['version' => 1, 'elements' => []]], $token)->status());
+        self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/3/live', token: $token)->status());
+        $pdo->exec("UPDATE pc_users SET status = 'disabled' WHERE id = 2");
+        self::assertSame(401, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
+
+        // The CMS expands '*' on issuance. A literal wildcard in storage must not make
+        // the restricted User an administrator in the plugin if old data contains one.
+        $admin = $this->tokens($app)->issue($this->user($app, 1), 'wildcard regression', ['*']);
+        $statement = $pdo->prepare('UPDATE pc_api_tokens SET abilities = ? WHERE id = ?');
+        $statement->execute(['["*"]', $admin['id']]);
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/2', ['content' => $this->document()], $admin['token'])->status());
+    }
+
     public function testSettingsRequirePluginCapabilityAndCannotBeChangedThroughCoreApi(): void
     {
         $app = $this->activated('contributor');
