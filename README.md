@@ -60,7 +60,7 @@ Raccourcis : `Ctrl/⌘ S` enregistrer, `Ctrl/⌘ K` ouvrir les commandes, `Ctrl/
 
 ## Éléments et modèles disponibles
 
-Les 30 widgets visibles incluent notamment : conteneur, titre, texte, image, bouton, séparateur, espace, citation, alerte, progression, ancre, liste, accordéon, carte, boîte à icône, compteur, onglets, galerie, vidéo, audio, articles récents, contenu actuel et bloc Prime. S’y ajoutent des versions simples d’icône, liste d’icônes, boîte image, témoignage, bascule, liens sociaux et note par étoiles. Les médias locaux peuvent être choisis avec le sélecteur du CMS ; la vidéo accepte une piste WebVTT et une transcription. Les onglets restent lisibles sans JavaScript ; la bascule utilise le contrôle natif `details`/`summary`.
+Les 23 widgets inclus sont : conteneur, titre, texte, image, bouton, séparateur, espace, citation, alerte, progression, ancre, liste, accordéon, carte, boîte à icône, compteur, onglets, galerie, vidéo, audio, articles récents, contenu actuel et bloc Prime. Les médias locaux peuvent être choisis avec le sélecteur du CMS ; la vidéo accepte une piste WebVTT et une transcription. Les onglets restent lisibles sans JavaScript.
 
 - **Articles récents** affiche au maximum 12 articles publics ; sans JavaScript ou si l’API est indisponible, un lien vers l’archive est conservé à la place de titres potentiellement périmés.
 - **Contenu actuel** affiche titre, extrait, auteur ou date. La valeur sauvegardée peut être ancienne si JavaScript ou l’API est indisponible.

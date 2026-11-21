@@ -18,8 +18,6 @@ final class Registry
     {
         $text = ['type' => 'text', 'max' => 1000];
         $url = ['type' => 'url', 'max' => 2048];
-        $icon = ['type' => 'enum', 'values' => ['star', 'check', 'heart', 'spark']];
-        $dimension = ['type' => 'integer', 'min' => 1, 'max' => 10000];
         $fields = [
             'container' => ['layout' => ['type' => 'enum', 'values' => ['flex', 'grid']], 'direction' => ['type' => 'enum', 'values' => ['column', 'row']], 'columns' => ['type' => 'integer', 'min' => 1, 'max' => 6]],
             'heading' => ['text' => $text, 'level' => ['type' => 'integer', 'min' => 1, 'max' => 6]],
@@ -35,14 +33,7 @@ final class Registry
             'list' => ['items' => ['type' => 'multiline', 'max' => 5000], 'list_type' => ['type' => 'enum', 'values' => ['unordered', 'ordered']]],
             'accordion' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000]],
             'card' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000], 'image_url' => $url, 'alt' => $text, 'url' => ['type' => 'href', 'max' => 2048], 'button_text' => $text],
-            'icon_box' => ['icon' => $icon, 'title' => $text, 'text' => ['type' => 'rich', 'max' => 5000]],
-            'icon' => ['icon' => $icon, 'accessible_label' => $text],
-            'icon_list' => ['icon' => $icon, 'items' => ['type' => 'multiline', 'max' => 5000]],
-            'image_box' => ['image_url' => $url, 'alt' => $text, 'width' => $dimension, 'height' => $dimension, 'title' => $text, 'text' => ['type' => 'rich', 'max' => 10000], 'url' => ['type' => 'href', 'max' => 2048], 'button_text' => $text],
-            'testimonial' => ['text' => ['type' => 'rich', 'max' => 5000], 'author' => $text, 'job_title' => $text, 'image_url' => $url, 'alt' => $text, 'width' => $dimension, 'height' => $dimension],
-            'toggle' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000], 'initial' => ['type' => 'enum', 'values' => ['closed', 'open']]],
-            'social' => ['label' => $text, 'facebook' => ['type' => 'href', 'max' => 2048], 'instagram' => ['type' => 'href', 'max' => 2048], 'linkedin' => ['type' => 'href', 'max' => 2048], 'youtube' => ['type' => 'href', 'max' => 2048], 'mastodon' => ['type' => 'href', 'max' => 2048]],
-            'star_rating' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 5]],
+            'icon_box' => ['icon' => ['type' => 'enum', 'values' => ['star', 'check', 'heart', 'spark']], 'title' => $text, 'text' => ['type' => 'rich', 'max' => 5000]],
             'counter' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 1000000000], 'prefix' => $text, 'suffix' => $text, 'title' => $text],
             'gallery' => ['images' => ['type' => 'media_list', 'max' => 10000]],
             'video' => ['url' => $url, 'captions' => $url, 'caption_language' => ['type' => 'enum', 'values' => ['fr', 'en']], 'transcript' => ['type' => 'rich', 'max' => 20000]],
