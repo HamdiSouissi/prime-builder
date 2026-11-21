@@ -3,6 +3,10 @@ on:
   push:
   pull_request:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   javascript:
     name: JavaScript model
@@ -63,7 +67,7 @@ jobs:
       - name: Install CMS for language check
         working-directory: cms
         run: |
-          php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Builder-Corail-2027!' 2>&1 | tee /tmp/prime-install.log
+          php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Cascade-Corail-900!Orbit' 2>&1 | tee /tmp/prime-install.log
           php bin/prime plugin:activate prime-builder 2>&1 | tee -a /tmp/prime-install.log
       - name: Report installation output on failure
         if: failure()
@@ -111,7 +115,7 @@ jobs:
           rsync -a --exclude='.git' builder/ cms/content/plugins/prime-builder/
       - name: Install CMS
         working-directory: cms
-        run: php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Builder-Corail-2027!' 2>&1 | tee /tmp/prime-install.log
+        run: php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Cascade-Corail-900!Orbit' 2>&1 | tee /tmp/prime-install.log
       - name: Activate plugin and prepare page
         working-directory: cms
         run: |

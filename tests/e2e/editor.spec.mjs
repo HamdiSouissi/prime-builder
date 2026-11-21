@@ -5,7 +5,7 @@ const id = process.env.E2E_ENTRY_ID || '1';
 async function login(page) {
   await page.goto('/admin/login');
   await page.locator('input[name=email]').fill(process.env.E2E_ADMIN_EMAIL || 'builder@prime.test');
-  await page.locator('input[name=password]').fill(process.env.E2E_ADMIN_PASSWORD || 'Builder-Corail-2027!');
+  await page.locator('input[name=password]').fill(process.env.E2E_ADMIN_PASSWORD || 'Cascade-Corail-900!Orbit');
   await Promise.all([page.waitForURL(/\/admin\/?$/), page.locator('form button[type=submit]').click()]);
 }
 async function expectAccessible(page) {
