@@ -249,8 +249,12 @@ final class IntegrationTest extends TestCase
 
         $this->appLogin($app);
         self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/2', ['content' => $this->document()])->status());
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/documents/2/render', ['data' => ['version' => 1, 'elements' => []]])->status());
         $csrf = (new Csrf($app->get(Session::class)))->token();
-        $request = Request::create('PATCH', '/api/prime-builder/v1/documents/2', headers: ['Content-Type' => 'application/json', 'Accept' => 'application/json', 'X-Prime-CSRF' => $csrf], rawBody: (string) json_encode(['content' => $this->document()]));
+        $headers = ['Content-Type' => 'application/json', 'Accept' => 'application/json', 'X-Prime-CSRF' => $csrf];
+        $request = Request::create('PATCH', '/api/prime-builder/v1/documents/2', headers: $headers, rawBody: (string) json_encode(['content' => $this->document()]));
+        self::assertSame(200, $app->get(Kernel::class)->handle($request)->status());
+        $request = Request::create('POST', '/api/prime-builder/v1/documents/2/render', headers: $headers, rawBody: (string) json_encode(['data' => ['version' => 1, 'elements' => []]]));
         self::assertSame(200, $app->get(Kernel::class)->handle($request)->status());
     }
 
@@ -367,12 +371,38 @@ final class IntegrationTest extends TestCase
     {
         $app = $this->activated('contributor');
         $db = $this->db($app)->pdo();
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder')->status());
         self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/edit/3')->status());
         $token = $this->tokens($app)->issue($this->user($app, 2), 'editor', ['*'])['token'];
         self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
         self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/render', ['data' => ['version' => 1, 'elements' => []]], $token)->status());
         $db->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.edit')");
         $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        self::assertSame(200, $this->send($app, 'GET', '/admin/prime-builder')->status());
+        self::assertSame(404, $this->send($app, 'GET', '/admin/prime-builder/edit/2')->status());
+        // Tokens retain the capabilities granted at issuance; issue a new one after the role change.
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
+        $token = $this->tokens($app)->issue($this->user($app, 2), 'builder editor', ['*'])['token'];
+        $otherBefore = $app->get(EntryRepository::class)->find(2)?->content;
+        self::assertSame(404, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/2', ['content' => $this->document()], $token)->status());
+        self::assertSame($otherBefore, $app->get(EntryRepository::class)->find(2)?->content);
+        self::assertSame(404, $this->send($app, 'POST', '/api/prime-builder/v1/documents/2/render', ['data' => ['version' => 1, 'elements' => []]], $token)->status());
+        self::assertSame(200, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/render', ['data' => ['version' => 1, 'elements' => []]], $token)->status());
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $this->document()], $token)->status());
+
+        // Public routes return 404 for another user's draft, even when its layout is valid.
+        $app->get(\Prime\Content\EntryService::class)->update(2, ['content' => $this->document()], $this->user($app, 1));
+        $css = (new Compiler())->compile($this->document()['blocks'][0]['data']);
+        $cssUrl = '/prime-builder/css/2-' . substr(hash('sha256', $css), 0, 16) . '.css';
+        self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/2/live', token: $token)->status());
+        self::assertSame(404, $this->send($app, 'GET', $cssUrl)->status());
+        $adminToken = $this->tokens($app)->issue($this->user($app, 1), 'builder admin', ['*'])['token'];
+        self::assertSame(200, $this->send($app, 'GET', '/api/prime-builder/v1/documents/2/live', token: $adminToken)->status());
+        $this->appLogin($app);
+        $privateCss = $this->send($app, 'GET', $cssUrl);
+        self::assertSame(200, $privateCss->status());
+        self::assertStringContainsString('no-store', (string) $privateCss->header('Cache-Control'));
         $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
         $config = $this->editorConfig($app, 3);
         self::assertSame(false, $config['canTemplates']);
