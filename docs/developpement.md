@@ -91,4 +91,4 @@ npx playwright install --with-deps chromium
 npm test
 ```
 
-La CI clone le CMS, installe MySQL 8 et les dépendances de développement, crée des contenus de test, démarre le serveur, puis exécute ces contrôles. Les résultats Playwright et le journal du serveur sont publiés comme artefact. Les scans axe sont limités aux violations sérieuses/critiques des écrans exercés : ils ne remplacent pas un audit WCAG manuel. Le `RETOUR.md` donne les résultats observés et les limites du prototype.
+La CI clone le CMS, installe MySQL 8 et les dépendances de développement, crée des contenus de test, démarre le serveur, puis exécute ces contrôles. Le job navigateur installe le plugin à partir d’un ZIP via la CLI et vérifie ensuite la désactivation, la désinstallation et la conservation du contenu dans une instance jetable ; il ne teste pas le téléversement ZIP dans l’administration. Les résultats Playwright et le journal du serveur sont publiés comme artefact. Les scans axe sont limités aux violations sérieuses/critiques des écrans exercés : ils ne remplacent pas un audit WCAG manuel. Le `RETOUR.md` donne les résultats observés et les limites du prototype.

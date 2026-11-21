@@ -7,9 +7,9 @@ Le dépôt contient un **prototype fonctionnel mais incomplet**, pas la totalit�
 ## 2. Branche, sources et état distant
 
 - Branche de travail : `arena/2d5ecf33-prime-builder`, créée depuis `95c54eb9021c990373685e06f3a5e7994b775e48`.
-- Tête distante observée par `git ls-remote` avant cette mise à jour du rapport : `fa8554bb00a7c08633a46cd995ef2a44091990fb`. Ce rapport et d’éventuelles corrections ultérieures ajoutent des commits ; pour la tête actuelle, exécuter `git ls-remote origin refs/heads/arena/2d5ecf33-prime-builder`.
+- Tête distante observée par `git ls-remote` avant cette mise à jour du rapport : `bd9730cb1445712bbf57092ede8f3fe3f013fa08`. Ce rapport et d’éventuelles corrections ultérieures ajoutent des commits ; pour la tête actuelle, exécuter `git ls-remote origin refs/heads/arena/2d5ecf33-prime-builder`.
 - Référence locale Prime CMS : `3c7e26d7632ab4c78d486dc254c5242a77296131`, version du noyau 1.0.0. Le code du CMS n’a pas été modifié ; une copie du plugin a été placée dans son dossier de plugins pour les essais.
-- Dernier succès CI complet confirmé avant cette mise à jour : [run 44923367616](https://github.com/HamdiSouissi/prime-builder/actions/runs/44923367616), commit `fa8554bb00a7c08633a46cd995ef2a44091990fb`. Les trois jobs et la requête publique après désactivation ont réussi.
+- Dernier succès CI complet confirmé avant cette mise à jour : [run 44923960284](https://github.com/HamdiSouissi/prime-builder/actions/runs/44923960284), commit `bd9730cb1445712bbf57092ede8f3fe3f013fa08`. Les trois jobs, l’installation ZIP et les contrôles après désactivation et désinstallation ont réussi.
 
 ## 3. Intégration et édition
 
@@ -45,7 +45,9 @@ Le HTML statique est enregistré par le CMS. Dans l’essai local HTTP-WASM, apr
 
 ## 7. Tests et CI observés
 
-Le [run 44923367616](https://github.com/HamdiSouissi/prime-builder/actions/runs/44923367616) a terminé avec succès les trois jobs : modèle JavaScript, PHPUnit réel/PHPStan niveau 8/PHP-CS-Fixer/traductions strictes, et Playwright/axe ; l’étape de requête publique après désactivation a aussi réussi. Le workflow clone le CMS, installe MySQL 8, exécute les contrôles et conserve les captures ainsi que le journal serveur dans l’artefact `prime-builder-e2e-results` (ID `14714094815`). Le dépôt déclare 29 méthodes de test PHP, 8 tests du modèle JS et 13 scénarios Playwright ; les nombres détaillés dans les journaux distants ne sont pas reproduits ici.
+Le [run 44923960284](https://github.com/HamdiSouissi/prime-builder/actions/runs/44923960284) a terminé avec succès les trois jobs : modèle JavaScript, PHPUnit réel/PHPStan niveau 8/PHP-CS-Fixer/traductions strictes, et Playwright/axe. Sur un CMS de test avec MySQL 8, le job navigateur a installé le ZIP par la CLI, activé le plugin, puis vérifié après désactivation et désinstallation les réponses publiques et le repli `<h2>dynamic</h2>`. La désinstallation a aussi été vérifiée pour les fichiers du plugin, les assets publiés, les instantanés CSS, un réglage, une capacité attribuée et la conservation du contenu et du droit administrateur. Les captures et le journal serveur sont conservés dans l’artefact `prime-builder-e2e-results` (ID `14714652462`). Le dépôt déclare 29 méthodes de test PHP, 8 tests du modèle JS et 13 scénarios Playwright ; les nombres détaillés dans les journaux distants ne sont pas reproduits ici.
+
+En local, le ZIP du commit `bd9730c` a aussi été inspecté et installé par `PluginInstaller` dans une fixture PHP-WASM/SQLite : 83 entrées, aucun avertissement. Ce n’est pas une preuve du parcours de téléversement depuis l’interface d’administration, qui n’a pas été testé séparément.
 
 Le [run 44922704633](https://github.com/HamdiSouissi/prime-builder/actions/runs/44922704633) a échoué au test navigateur ajouté pour les CSS historiques : son sélecteur visait à la fois le CSS de base et le CSS du document. Les jobs PHP et JavaScript ont réussi ; le sélecteur a ensuite été corrigé dans `b5cf80f`, dont le run `44923074044` a réussi. Ne pas interpréter cet ancien échec comme un succès.
 
