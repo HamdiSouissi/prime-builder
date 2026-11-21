@@ -56,7 +56,7 @@ Le CMS installe le ZIP inactif. Voir son aide avant d’utiliser `--replace` ou 
 
 Raccourcis : `Ctrl/⌘ S` enregistrer, `Ctrl/⌘ K` ouvrir les commandes, `Ctrl/⌘ Z` annuler et `Ctrl/⌘ Y` ou `Ctrl/⌘ Maj Z` rétablir hors des champs de texte. Les modifications non enregistrées déclenchent un avertissement ; une copie locale par utilisateur et contenu peut être proposée à la réouverture. Ce stockage navigateur n’est pas une sauvegarde serveur.
 
-**Attention à la conversion :** à l’ouverture, le constructeur tente de convertir les blocs Prime existants dans leur ordre, sans écrire avant l’enregistrement. Les blocs pris en charge deviennent des blocs Prime éditables ; les autres sont conservés en lecture seule lorsque leur HTML enregistré peut être retrouvé sans ambiguïté. Si ce n’est pas possible, l’enregistrement est désactivé pour éviter une perte. Cette conversion ne couvre pas tous les contenus et ne remplace pas une sauvegarde préalable. Les fragments conservés sont liés au contenu et à la clé `APP_KEY` du site.
+**Attention à la conversion :** à l’ouverture, le constructeur tente de convertir les blocs Prime existants dans leur ordre, sans écrire avant l’enregistrement. Les blocs pris en charge deviennent des blocs Prime éditables si leur rendu est identique au fragment enregistré ; les autres sont conservés en lecture seule lorsque leur HTML peut être retrouvé sans ambiguïté. Les ancres de titres convertis sont conservées. Si ce n’est pas possible, l’enregistrement est désactivé pour éviter une perte. Cette conversion ne couvre pas tous les contenus et ne remplace pas une sauvegarde préalable. Les fragments conservés sont liés au contenu et à la clé `APP_KEY` du site.
 
 ## Éléments et modèles disponibles
 

@@ -60,7 +60,12 @@ export function duplicate(elements, elementId) {
   const found = locate(next, elementId);
   if (!found) return next;
   const copy = clone(found.element);
-  const renew = node => { node.id = id(); (node.children || []).forEach(renew); };
+  const renew = node => {
+    node.id = id();
+    // Converted headings keep their historic anchor; a duplicate must not reuse it.
+    if (node.type === 'prime_block' && node.settings) delete node.settings.block_anchor;
+    (node.children || []).forEach(renew);
+  };
   renew(copy);
   found.list.splice(found.index + 1, 0, copy);
   return next;

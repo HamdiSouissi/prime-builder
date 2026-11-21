@@ -28,6 +28,14 @@ test('duplicating a subtree changes every identifier', () => {
   assert.notEqual(tree[0].id, tree[1].id);
   assert.notEqual(tree[0].children[0].id, tree[1].children[0].id);
 });
+test('duplicating a converted heading does not duplicate its public anchor', () => {
+  const heading = createElement('prime_block');
+  heading.settings = { block_type: 'heading', block_data: '{"text":"Bonjour"}', block_anchor: 'bonjour' };
+  const tree = duplicate([heading], heading.id);
+  assert.equal(tree[0].settings.block_anchor, 'bonjour');
+  assert.equal(Object.hasOwn(tree[1].settings, 'block_anchor'), false);
+  assert.equal(heading.settings.block_anchor, 'bonjour');
+});
 test('moving a container into its descendant is rejected', () => {
   const a = createElement('container'), b = createElement('container');
   const tree = add(add([], a), b, a.id);

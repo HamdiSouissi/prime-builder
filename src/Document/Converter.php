@@ -66,9 +66,22 @@ final class Converter
                 }
                 $json = json_encode((object) $data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                 $normalized = $bridge->normalize($type, $json);
-                if ($normalized !== null) {
+                $nodeId = $this->id();
+                $anchor = null;
+                if ($type === 'heading' && preg_match('/^<h[234](?: id="([a-z0-9-]+)")? class="pc-block pc-block--heading">/', $fragments[$index], $matches) === 1) {
+                    // Core makes repeated heading anchors unique; retain the exact public URL fragment.
+                    $anchor = $matches[1] ?? '';
+                }
+                // Normalization or a different render context can change output, even for an allowed type.
+                // Only make a block editable when its reconstructed HTML is byte-for-byte identical.
+                $sameHtml = $normalized !== null && ($type !== 'heading' || $anchor !== null)
+                    && $bridge->render($type, $normalized, $nodeId, $entry, $anchor) === $fragments[$index];
+                if ($sameHtml) {
                     $widget = 'prime_block';
                     $settings = ['block_type' => $type, 'block_data' => $normalized];
+                    if ($anchor !== null) {
+                        $settings['block_anchor'] = $anchor;
+                    }
                 } else {
                     $payload = $this->originals?->protect($entry->id, $type, $fragments[$index]);
                     if ($payload === null) {
@@ -77,7 +90,7 @@ final class Converter
                     $widget = 'original_content';
                     $settings = ['payload' => $payload];
                 }
-                $children[] = ['id' => $this->id(), 'type' => $widget, 'settings' => $settings, 'styles' => [], 'children' => []];
+                $children[] = ['id' => $nodeId, 'type' => $widget, 'settings' => $settings, 'styles' => [], 'children' => []];
             }
             $layout = ['version' => 1, 'elements' => [[
                 'id' => $this->id(), 'type' => 'container',

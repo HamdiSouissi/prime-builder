@@ -397,6 +397,8 @@ final class IntegrationTest extends TestCase
         $converted = $config['document'];
         $children = $converted['blocks'][0]['data']['elements'][0]['children'];
         self::assertSame(['prime_block', 'original_content', 'prime_block'], array_column($children, 'type'));
+        self::assertStringContainsString('id="troisieme-contenu"', $beforeHtml);
+        self::assertSame('troisieme-contenu', $children[2]['settings']['block_anchor']);
         $protected = $children[1]['settings']['payload'];
         self::assertStringNotContainsString('Contenu original', $protected);
         $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
@@ -411,6 +413,7 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('Premier contenu', $after->contentHtml);
         self::assertStringContainsString('<p data-legacy="original">Contenu original conservé</p>', $after->contentHtml);
         self::assertStringContainsString('Troisième contenu', $after->contentHtml);
+        self::assertStringContainsString('id="troisieme-contenu"', $after->contentHtml);
         self::assertSame(true, strpos($after->contentHtml, 'Premier contenu') < strpos($after->contentHtml, 'Contenu original conservé'));
         self::assertSame(true, strpos($after->contentHtml, 'Contenu original conservé') < strpos($after->contentHtml, 'Troisième contenu'));
 
@@ -428,6 +431,42 @@ final class IntegrationTest extends TestCase
         $styled = $converted;
         $styled['blocks'][0]['data']['elements'][0]['children'][1]['styles'] = ['desktop' => ['color' => '#000000']];
         self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $styled], $token)->status());
+    }
+
+    public function testConversionRetainsHeadingAnchorsAndProtectsChangedNormalizedOutput(): void
+    {
+        $app = $this->activated('admin');
+        $repository = $app->get(EntryRepository::class);
+        $entry = $repository->find(1);
+        self::assertNotNull($entry);
+        $legacy = ['version' => 1, 'blocks' => [
+            ['id' => 'first', 'type' => 'heading', 'data' => ['level' => 2, 'text' => 'Répétition', 'anchor' => 'repete']],
+            ['id' => 'second', 'type' => 'heading', 'data' => ['level' => 2, 'text' => 'Répétition', 'anchor' => 'repete']],
+            ['id' => 'link', 'type' => 'paragraph', 'data' => ['text' => '<a href="#repete-2">Vers le second</a>']],
+            // Legacy raw list data can render differently after core normalization.
+            ['id' => 'list', 'type' => 'list', 'data' => ['style' => 'unordered', 'items' => ['Ancien format']]],
+        ]];
+        $renderer = new \Prime\Editor\Renderer($app->get(BlockRegistry::class), $app->get(\Prime\Security\HtmlSanitizer::class));
+        $html = $renderer->renderHtml($legacy, $entry);
+        self::assertStringContainsString('id="repete-2"', $html);
+        self::assertStringContainsString('<ul class="pc-block pc-block--list"></ul>', $html);
+        $statement = $this->db($app)->pdo()->prepare('UPDATE pc_entries SET content = ?, content_html = ? WHERE id = 1');
+        $statement->execute([(string) json_encode($legacy, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $html]);
+
+        $config = $this->editorConfig($app, 1);
+        self::assertSame(false, $config['conversionFailed']);
+        $children = $config['document']['blocks'][0]['data']['elements'][0]['children'];
+        self::assertSame(['prime_block', 'prime_block', 'prime_block', 'original_content'], array_column($children, 'type'));
+        self::assertSame('repete', $children[0]['settings']['block_anchor']);
+        self::assertSame('repete-2', $children[1]['settings']['block_anchor']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $config['document'], 'source_hash' => $config['sourceHash']], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $after = $repository->find(1);
+        self::assertNotNull($after);
+        foreach (explode("\n", $html) as $fragment) {
+            self::assertStringContainsString($fragment, $after->contentHtml);
+        }
     }
 
     public function testUnknownBlockBoundariesFailClosedAndStaleDocumentIsRejected(): void

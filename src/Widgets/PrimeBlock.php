@@ -52,7 +52,7 @@ final class PrimeBlock
         }
     }
 
-    public function render(string $type, string $json, string $id, ?Entry $entry): string
+    public function render(string $type, string $json, string $id, ?Entry $entry, ?string $anchor = null): string
     {
         $normalized = $this->normalize($type, $json);
         $definition = $this->definition($type);
@@ -66,8 +66,8 @@ final class PrimeBlock
         return ($definition->renderer)($data, $this->sanitizer, [
             'entry' => $entry,
             'allowUnfilteredHtml' => false,
-            // Namespacing prevents identical headings across widgets from producing duplicate IDs.
-            'anchor' => 'pb-' . $id,
+            // New widgets are namespaced; converted headings can retain their original public anchor.
+            'anchor' => $anchor ?? 'pb-' . $id,
         ]);
     }
 }

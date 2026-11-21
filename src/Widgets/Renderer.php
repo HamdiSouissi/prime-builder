@@ -158,7 +158,7 @@ final class Renderer
             'video', 'audio' => $this->renderMedia($type, $settings),
             'posts' => $this->content?->posts($settings, $this->live) ?? '',
             'current_content' => $this->content?->current($settings, $this->entry) ?? '',
-            'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry),
+            'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry, is_string($settings['block_anchor'] ?? null) ? $settings['block_anchor'] : null),
             'original_content' => $this->renderOriginal($settings),
             default => '',
         };

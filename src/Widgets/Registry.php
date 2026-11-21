@@ -40,7 +40,7 @@ final class Registry
             'audio' => ['url' => $url, 'transcript' => ['type' => 'rich', 'max' => 20000]],
             'posts' => ['limit' => ['type' => 'integer', 'min' => 1, 'max' => 12], 'show_excerpt' => ['type' => 'enum', 'values' => ['show', 'hide']]],
             'current_content' => ['source' => ['type' => 'enum', 'values' => ['title', 'excerpt', 'published', 'author']]],
-            'prime_block' => ['block_type' => ['type' => 'enum', 'values' => PrimeBlock::ALLOWED], 'block_data' => ['type' => 'json_object', 'max' => 20000]],
+            'prime_block' => ['block_type' => ['type' => 'enum', 'values' => PrimeBlock::ALLOWED], 'block_data' => ['type' => 'json_object', 'max' => 20000], 'block_anchor' => ['type' => 'text', 'max' => 100]],
             'original_content' => ['payload' => ['type' => 'protected', 'max' => 1048576]],
             'tabs' => [
                 'label' => $text,

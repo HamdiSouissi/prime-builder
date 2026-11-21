@@ -157,6 +157,7 @@ return [
         'separator' => 'Séparateur',
         'block_type' => 'Type de bloc Prime',
         'block_data' => 'Données du bloc (objet JSON)',
+        'block_anchor' => 'Ancre conservée du titre (facultatif)',
         'paragraph' => 'Paragraphe',
         'code' => 'Code',
         'table' => 'Tableau',

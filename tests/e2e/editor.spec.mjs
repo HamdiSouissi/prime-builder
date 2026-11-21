@@ -357,6 +357,7 @@ test('existing three-block page is converted without losing its saved HTML', asy
   await expect(content).toContainText('Premier contenu');
   await expect(content.locator('[data-legacy="original"]')).toHaveText('Contenu original conservé');
   await expect(content).toContainText('Troisième contenu');
+  await expect(content.locator('#troisieme-contenu')).toHaveText('Troisième contenu');
   const text = await content.innerText();
   expect(text.indexOf('Premier contenu')).toBeLessThan(text.indexOf('Contenu original conservé'));
   expect(text.indexOf('Contenu original conservé')).toBeLessThan(text.indexOf('Troisième contenu'));
