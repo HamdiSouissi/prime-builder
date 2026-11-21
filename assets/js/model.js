@@ -6,6 +6,8 @@ export function createElement(type) {
     container: { layout: 'flex', direction: 'column', columns: 1 },
     heading: { text: '', level: 2 }, text: { text: '' }, image: { url: '', alt: '', width: 800, height: 600 },
     button: { text: '', url: '' }, quote: { text: '', author: '' }, alert: { text: '' }, progress: { text: '', value: 0 }, anchor: { anchor: '' },
+    list: { items: '', list_type: 'unordered' }, accordion: { title: '', text: '' }, card: { title: '', text: '', image_url: '', alt: '', url: '', button_text: '' },
+    icon_box: { icon: 'star', title: '', text: '' }, counter: { value: 0, prefix: '', suffix: '', title: '' }, tabs: { label: '', title_1: '', text_1: '', title_2: '', text_2: '', title_3: '', text_3: '' },
   };
   return { id: id(), type, settings: clone(defaults[type] || {}), styles: {}, children: [] };
 }

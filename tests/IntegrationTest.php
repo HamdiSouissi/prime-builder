@@ -18,7 +18,9 @@ use Prime\Kernel\Application;
 use Prime\Plugins\AssetPublisher;
 use Prime\Plugins\PluginManager;
 use Prime\Security\Csrf;
+use Prime\Site\PageContext;
 use Prime\Tests\Support\ApiTestFixture;
+use Prime\Themes\ThemeAssetRegistry;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 
@@ -69,6 +71,26 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('color:#c9441f', $stylesheet->body());
         self::assertStringContainsString('immutable', (string) $stylesheet->header('Cache-Control'));
         self::assertSame(404, $this->send($app, 'GET', '/prime-builder/css/1-0000000000000000.css')->status());
+    }
+
+    public function testInteractiveScriptIsLoadedOnlyForPagesWithTabs(): void
+    {
+        $app = $this->activated(null);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'][] = ['id' => 'tabs', 'type' => 'tabs', 'settings' => ['title_1' => 'Un', 'title_2' => 'Deux'], 'styles' => [], 'children' => []];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertStringContainsString('/assets/plugins/prime-builder/js/tabs.js', $assets->renderScripts());
+
+        $assets = new ThemeAssetRegistry();
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/tabs.js', $assets->renderScripts());
     }
 
     public function testGlobalKitIsFingerprintedAndSafe(): void

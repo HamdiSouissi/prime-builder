@@ -74,7 +74,10 @@ jobs:
         run: if test -f /tmp/prime-install.log; then echo "::error title=Install log (base64)::$(base64 -w0 /tmp/prime-install.log)"; fi
       - name: Translation catalogue
         working-directory: cms
-        run: php bin/prime lang:check --strict
+        run: php bin/prime lang:check --strict 2>&1 | tee /tmp/prime-lang.log
+      - name: Report language check on failure
+        if: failure()
+        run: if test -f /tmp/prime-lang.log; then echo "::error title=Language log (base64)::$(base64 -w0 /tmp/prime-lang.log)"; fi
 
   e2e:
     name: Playwright and axe

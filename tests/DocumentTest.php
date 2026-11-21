@@ -110,6 +110,24 @@ final class DocumentTest extends TestCase
         }
     }
 
+    public function testNewWidgetsProduceSafeReadableFallbacks(): void
+    {
+        $list = $this->element('list', 'list');
+        $list['settings'] = ['items' => "Premier\nSecond <script>alert(1)</script>", 'list_type' => 'ordered'];
+        $accordion = $this->element('accordion', 'accordion');
+        $accordion['settings'] = ['title' => 'Détails', 'text' => '<p>Contenu <strong>important</strong></p>'];
+        $tabs = $this->element('tabs', 'tabs');
+        $tabs['settings'] = ['title_1' => 'Premier', 'text_1' => '<p>Un</p>', 'title_2' => 'Second', 'text_2' => '<p>Deux</p>'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$list, $accordion, $tabs]]);
+        self::assertSame([], $result['errors']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertStringContainsString('<ol><li>Premier</li>', $html);
+        self::assertStringContainsString('<details><summary>Détails</summary>', $html);
+        self::assertStringContainsString('<h3 data-pb-tab-heading>Premier</h3><p>Un</p>', $html);
+        self::assertStringContainsString('<h3 data-pb-tab-heading>Second</h3><p>Deux</p>', $html);
+        self::assertStringNotContainsString('<script>', $html);
+    }
+
     public function testCrashingExtensionDoesNotBreakOtherElements(): void
     {
         $hooks = new Hooks();

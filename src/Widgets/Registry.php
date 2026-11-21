@@ -30,15 +30,29 @@ final class Registry
             'alert' => ['text' => ['type' => 'rich', 'max' => 5000]],
             'progress' => ['text' => $text, 'value' => ['type' => 'integer', 'min' => 0, 'max' => 100]],
             'anchor' => ['anchor' => ['type' => 'slug', 'max' => 64]],
+            'list' => ['items' => ['type' => 'multiline', 'max' => 5000], 'list_type' => ['type' => 'enum', 'values' => ['unordered', 'ordered']]],
+            'accordion' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000]],
+            'card' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000], 'image_url' => $url, 'alt' => $text, 'url' => ['type' => 'href', 'max' => 2048], 'button_text' => $text],
+            'icon_box' => ['icon' => ['type' => 'enum', 'values' => ['star', 'check', 'heart', 'spark']], 'title' => $text, 'text' => ['type' => 'rich', 'max' => 5000]],
+            'counter' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 1000000000], 'prefix' => $text, 'suffix' => $text, 'title' => $text],
+            'tabs' => [
+                'label' => $text,
+                'title_1' => $text, 'text_1' => ['type' => 'rich', 'max' => 10000],
+                'title_2' => $text, 'text_2' => ['type' => 'rich', 'max' => 10000],
+                'title_3' => $text, 'text_3' => ['type' => 'rich', 'max' => 10000],
+            ],
         ];
         $definitions = [];
         foreach ($fields as $type => $schema) {
             $definitions[$type] = [
                 'label' => 'plugin::prime-builder.widgets.' . $type,
-                'category' => $type === 'container' ? 'structure' : 'base',
+                'category' => $type === 'container' ? 'structure' : (in_array($type, ['accordion', 'card', 'icon_box', 'counter', 'tabs'], true) ? 'pro' : 'base'),
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];
+            if ($type === 'tabs') {
+                $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
+            }
         }
         $filtered = $this->hooks?->apply('prime_builder.widgets', $definitions) ?? $definitions;
         if (!is_array($filtered)) {

@@ -120,7 +120,7 @@ final class Validator
             return null;
         }
         return match ($type) {
-            'text' => trim(strip_tags($value)),
+            'text', 'multiline' => trim(strip_tags($value)),
             'rich' => $this->sanitizer->sanitizeBasic($value),
             'href' => $value === '' ? '' : $this->sanitizer->sanitizeHref($value),
             'url' => $value === '' ? '' : $this->sanitizer->sanitizeResourceUrl($value),

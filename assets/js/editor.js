@@ -178,8 +178,9 @@ function makeField(name, schema, current, onChange) {
     input = document.createElement('select');
     if (current == null) { const option = text('option', '—'); option.value = ''; input.append(option); }
     for (const value of schema.values) { const option = text('option', ui[value] || value); option.value = value; input.append(option); }
-  } else if (schema.type === 'rich') {
+  } else if (schema.type === 'rich' || schema.type === 'multiline') {
     input = document.createElement('textarea');
+    if (schema.max != null) input.maxLength = schema.max;
   } else {
     input = document.createElement('input');
     input.type = schema.type === 'integer' ? 'number' : 'text';

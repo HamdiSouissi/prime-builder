@@ -41,7 +41,7 @@ final class Renderer
                 continue;
             }
             try {
-                $content = $this->renderWidget($type, $settings, $definitions[$type]);
+                $content = $this->renderWidget($type, $settings, $definitions[$type], $id);
                 if (($definitions[$type]['container'] ?? false) === true) {
                     $content .= $this->renderElements($children, $definitions);
                 }
@@ -57,7 +57,7 @@ final class Renderer
      * @param array<string, mixed> $settings
      * @param array<string, mixed> $definition
      */
-    private function renderWidget(string $type, array $settings, array $definition): string
+    private function renderWidget(string $type, array $settings, array $definition, string $id): string
     {
         $text = self::escape(is_string($settings['text'] ?? null) ? $settings['text'] : '');
         $rich = $this->sanitizer->sanitizeBasic(is_string($settings['text'] ?? null) ? $settings['text'] : '');
@@ -85,8 +85,86 @@ final class Renderer
             'alert' => '<div class="pb-alert-content">' . $rich . '</div>',
             'progress' => '<label>' . $text . ' <progress max="100" value="' . $value . '">' . $value . '%</progress></label>',
             'anchor' => isset($settings['anchor']) && preg_match('/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/', (string) $settings['anchor']) === 1 ? '<span id="' . self::escape((string) $settings['anchor']) . '"></span>' : '',
+            'list' => $this->renderList($settings),
+            'accordion' => '<details><summary>' . self::escape($this->fieldText($settings, 'title', t('plugin::prime-builder.widgets.accordion'))) . '</summary><div class="pb-accordion-content">' . $rich . '</div></details>',
+            'card' => $this->renderCard($settings),
+            'icon_box' => $this->renderIconBox($settings),
+            'counter' => '<div class="pb-counter-value">' . self::escape($this->fieldText($settings, 'prefix')) . max(0, min(1000000000, (int) ($settings['value'] ?? 0))) . self::escape($this->fieldText($settings, 'suffix')) . '</div><p>' . self::escape($this->fieldText($settings, 'title')) . '</p>',
+            'tabs' => $this->renderTabs($settings, $id),
             default => '',
         };
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function fieldText(array $settings, string $key, string $fallback = ''): string
+    {
+        return is_string($settings[$key] ?? null) && trim($settings[$key]) !== '' ? $settings[$key] : $fallback;
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderList(array $settings): string
+    {
+        $tag = ($settings['list_type'] ?? '') === 'ordered' ? 'ol' : 'ul';
+        $lines = preg_split('/\R/u', $this->fieldText($settings, 'items')) ?: [];
+        $items = '';
+        foreach (array_slice($lines, 0, 50) as $line) {
+            if (trim($line) !== '') {
+                $items .= '<li>' . self::escape(trim($line)) . '</li>';
+            }
+        }
+        return '<' . $tag . '>' . $items . '</' . $tag . '>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderCard(array $settings): string
+    {
+        $image = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'image_url'));
+        $link = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
+        $html = '<article class="pb-card-content">';
+        if ($image !== null) {
+            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '" loading="lazy" decoding="async">';
+        }
+        $title = $this->fieldText($settings, 'title');
+        if ($title !== '') {
+            $html .= '<h3>' . self::escape($title) . '</h3>';
+        }
+        $html .= $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text'));
+        if ($link !== null) {
+            $html .= '<a class="pb-button-link" href="' . self::escape($link) . '">' . self::escape($this->fieldText($settings, 'button_text', t('plugin::prime-builder.ui.read_more'))) . '</a>';
+        }
+        return $html . '</article>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderIconBox(array $settings): string
+    {
+        $icons = ['star' => '★', 'check' => '✓', 'heart' => '♥', 'spark' => '✦'];
+        $icon = $settings['icon'] ?? 'star';
+        $symbol = is_string($icon) ? ($icons[$icon] ?? $icons['star']) : $icons['star'];
+        $title = $this->fieldText($settings, 'title');
+        return '<div class="pb-icon-box-content"><span class="pb-icon-box-symbol" aria-hidden="true">' . $symbol . '</span>'
+            . ($title !== '' ? '<h3>' . self::escape($title) . '</h3>' : '')
+            . $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text')) . '</div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderTabs(array $settings, string $id): string
+    {
+        $label = $this->fieldText($settings, 'label', t('plugin::prime-builder.widgets.tabs'));
+        $html = '<div data-pb-tabs data-pb-tabs-label="' . self::escape($label) . '">';
+        for ($i = 1; $i <= 3; $i++) {
+            $title = $this->fieldText($settings, 'title_' . $i);
+            $body = $this->fieldText($settings, 'text_' . $i);
+            if ($i === 3 && $title === '' && $body === '') {
+                continue;
+            }
+            if ($title === '') {
+                $title = t('plugin::prime-builder.ui.tab_default') . ' ' . $i;
+            }
+            $html .= '<section data-pb-tab-panel id="pb-tab-' . self::escape($id) . '-' . $i . '"><h3 data-pb-tab-heading>' . self::escape($title) . '</h3>'
+                . $this->sanitizer->sanitizeBasic($body) . '</section>';
+        }
+        return $html . '</div>';
     }
 
     public static function escape(string $value): string

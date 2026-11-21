@@ -83,3 +83,34 @@ test('template library supports insertion and JSON export/import', async ({ page
   await page.locator('[data-pb-import]').setInputFiles(await file.path());
   await expect(page.locator('[data-pb-save-state]')).toHaveText('Modèle importé.');
 });
+
+test('tabs work with keyboard and remain readable without JavaScript', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Onglets' }).click();
+  await page.getByLabel('Nom du groupe').fill('Choisir une vue');
+  await page.getByLabel('Titre du premier onglet').fill('Rouge');
+  await page.getByLabel('Contenu du premier onglet').fill('<p>Contenu rouge</p>');
+  await page.getByLabel('Titre du deuxième onglet').fill('Bleu');
+  await page.getByLabel('Contenu du deuxième onglet').fill('<p>Contenu bleu</p>');
+  await page.locator('[data-pb-status]').selectOption('published');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto('/test-prime-builder');
+  const tabs = page.getByRole('tablist', { name: 'Choisir une vue' });
+  const first = tabs.getByRole('tab', { name: 'Rouge' });
+  const second = tabs.getByRole('tab', { name: 'Bleu' });
+  await first.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(second).toBeFocused();
+  await expect(second).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel', { name: 'Bleu' })).toContainText('Contenu bleu');
+  await expectAccessible(page);
+
+  const withoutJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+  const fallback = await withoutJs.newPage();
+  await fallback.goto('/test-prime-builder');
+  await expect(fallback.getByText('Contenu rouge')).toBeVisible();
+  await expect(fallback.getByText('Contenu bleu')).toBeVisible();
+  await withoutJs.close();
+});
