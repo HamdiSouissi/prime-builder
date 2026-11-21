@@ -140,7 +140,10 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Playwright
         working-directory: builder/tests/e2e
-        run: npm test
+        run: npm test 2>&1 | tee /tmp/prime-builder-e2e.log
+      - name: Report browser test output on failure
+        if: failure()
+        run: if test -f /tmp/prime-builder-e2e.log; then echo "::error title=Browser test log (base64)::$(tail -140 /tmp/prime-builder-e2e.log | base64 -w0)"; fi
       - name: Fresh public request with the plugin disabled
         working-directory: cms
         run: |
