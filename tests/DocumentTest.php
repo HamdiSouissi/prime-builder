@@ -10,6 +10,7 @@ use Prime\Security\HtmlSanitizer;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
+use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
@@ -19,6 +20,7 @@ require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
 require_once dirname(__DIR__) . '/src/Document/Validator.php';
 require_once dirname(__DIR__) . '/src/Styles/Compiler.php';
 require_once dirname(__DIR__) . '/src/Styles/Kit.php';
+require_once dirname(__DIR__) . '/src/Styles/Snapshots.php';
 
 final class DocumentTest extends TestCase
 {
@@ -81,6 +83,26 @@ final class DocumentTest extends TestCase
         $node['styles']['desktop']['width'] = '2001px';
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
         self::assertStringNotContainsString('body{', (new Compiler())->compile(['elements' => [$node]]));
+    }
+
+    public function testStyleSnapshotsAreAddressedByHashAndPrunedSafely(): void
+    {
+        $directory = sys_get_temp_dir() . '/pb_snapshots_' . bin2hex(random_bytes(6));
+        $store = new Snapshots($directory);
+        $css = '.pb-layout{color:#123456}';
+        $name = '12-' . substr(hash('sha256', $css), 0, 16) . '.css';
+        self::assertSame(true, $store->remember($name, $css));
+        self::assertSame($css, $store->read($name));
+        self::assertSame(false, $store->remember('../' . $name, $css));
+        self::assertSame(false, $store->remember($name, 'different'));
+        file_put_contents($directory . '/' . $name, 'tampered');
+        self::assertSame(null, $store->read($name));
+        file_put_contents($directory . '/' . $name, $css);
+        touch($directory . '/' . $name, time() - 367 * 86400);
+        self::assertSame(1, $store->prune());
+        self::assertSame(null, $store->read($name));
+        $store->clear();
+        self::assertSame(false, is_dir($directory));
     }
 
     public function testMaliciousUrlsAndCssAreRejected(): void

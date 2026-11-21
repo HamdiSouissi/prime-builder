@@ -25,6 +25,7 @@ use PrimeBuilder\Document\Library;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
+use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
@@ -238,14 +239,23 @@ final class Documents
 
     public function kitStylesheet(Request $request, string $file): Response
     {
-        $css = Kit::fromSettings($this->plugin->settings());
-        if (!hash_equals(substr(hash('sha256', $css), 0, 16) . '.css', $file)) {
+        if (preg_match('/^[a-f0-9]{16}\.css$/D', $file) !== 1) {
             return Response::text('', 404);
+        }
+        $snapshots = new Snapshots($this->plugin->app()->storagePath('prime-builder/styles'));
+        $css = $snapshots->read('kit-' . $file);
+        $persisted = $css !== null;
+        if ($css === null) {
+            $css = Kit::fromSettings($this->plugin->settings());
+            if (!hash_equals(substr(hash('sha256', $css), 0, 16) . '.css', $file)) {
+                return Response::text('', 404);
+            }
+            $persisted = $snapshots->remember('kit-' . $file, $css);
         }
         return new Response($css, 200, [
             'Content-Type' => 'text/css; charset=UTF-8',
             'X-Content-Type-Options' => 'nosniff',
-            'Cache-Control' => 'public, max-age=31536000, immutable',
+            'Cache-Control' => $persisted ? 'public, max-age=31536000, immutable' : 'no-store',
         ]);
     }
 
@@ -264,18 +274,24 @@ final class Documents
         if (!$public && $this->entry($entry->id, $user) === null) {
             return Response::text('', 404);
         }
-        $data = Layout::fromDocument($entry->decodedContent());
-        if ($data === null) {
-            return Response::text('', 404);
-        }
-        $css = (new Compiler((int) $this->plugin->settings()->get('breakpoint_tablet', 1024), (int) $this->plugin->settings()->get('breakpoint_mobile', 767)))->compile($data);
-        if (!hash_equals(substr(hash('sha256', $css), 0, 16), $matches[2])) {
-            return Response::text('', 404);
+        $snapshots = new Snapshots($this->plugin->app()->storagePath('prime-builder/styles'));
+        $css = $public ? $snapshots->read($file) : null;
+        $persisted = $css !== null;
+        if ($css === null) {
+            $data = Layout::fromDocument($entry->decodedContent());
+            if ($data === null) {
+                return Response::text('', 404);
+            }
+            $css = (new Compiler((int) $this->plugin->settings()->get('breakpoint_tablet', 1024), (int) $this->plugin->settings()->get('breakpoint_mobile', 767)))->compile($data);
+            if (!hash_equals(substr(hash('sha256', $css), 0, 16), $matches[2])) {
+                return Response::text('', 404);
+            }
+            $persisted = $public && $snapshots->remember($file, $css);
         }
         return new Response($css, 200, [
             'Content-Type' => 'text/css; charset=UTF-8',
             'X-Content-Type-Options' => 'nosniff',
-            'Cache-Control' => $public ? 'public, max-age=31536000, immutable' : 'private, no-store',
+            'Cache-Control' => $public && $persisted ? 'public, max-age=31536000, immutable' : 'private, no-store',
         ]);
     }
 }

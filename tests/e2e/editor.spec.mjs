@@ -213,6 +213,38 @@ test('a non-privileged Prime block is previewed and persisted', async ({ page })
   await expect(page.locator('.pb-prime_block .pc-block--paragraph').last()).toHaveText('Bonjour Prime');
 });
 
+test('fingerprinted styles survive a public edit and protect drafts', async ({ page, browser }) => {
+  await login(page);
+  async function saveColor(color, status = 'published') {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    return page.evaluate(async ({ entryId, color, status }) => {
+      const csrf = document.querySelector('meta[name="csrf-token"]').content;
+      const data = { version: 1, elements: [{ id: 'historical', type: 'heading', settings: { text: 'Couleur', level: 2 }, styles: { desktop: { color } }, children: [] }] };
+      const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+        body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data }] }, status, published_at: '' }),
+      });
+      return response.status;
+    }, { entryId: id, color, status });
+  }
+  expect(await saveColor('#123456')).toBe(200);
+  await page.goto('/test-prime-builder');
+  const oldUrl = await page.locator('link[href*="/prime-builder/css/"]').getAttribute('href');
+  const anonymous = await browser.newContext({ baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+  const original = await anonymous.request.get(oldUrl);
+  expect(original.status()).toBe(200);
+  expect(original.headers()['cache-control']).toContain('immutable');
+  const originalCss = await original.text();
+  expect(originalCss).toContain('color:#123456');
+  expect(await saveColor('#654321')).toBe(200);
+  const old = await anonymous.request.get(oldUrl);
+  expect(old.status()).toBe(200);
+  expect(await old.text()).toBe(originalCss);
+  expect(await saveColor('#654321', 'draft')).toBe(200);
+  expect((await anonymous.request.get(oldUrl)).status()).toBe(404);
+  await anonymous.close();
+});
+
 test('built-in default widgets save and remain accessible together', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);

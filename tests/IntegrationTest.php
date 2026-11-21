@@ -169,6 +169,45 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('Nouvelle valeur', $provider->posts(['limit' => 12], true));
     }
 
+    public function testHistoricalStylesRemainImmutableAndStillRespectVisibility(): void
+    {
+        $app = $this->activated(null);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $oldCss = (new Compiler())->compile($document['blocks'][0]['data']);
+        $oldUrl = '/prime-builder/css/1-' . substr(hash('sha256', $oldCss), 0, 16) . '.css';
+        $oldResponse = $this->send($app, 'GET', $oldUrl);
+        self::assertSame(200, $oldResponse->status());
+        self::assertStringContainsString('immutable', (string) $oldResponse->header('Cache-Control'));
+        $document['blocks'][0]['data']['elements'][0]['styles']['desktop']['color'] = '#345678';
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $newCss = (new Compiler())->compile($document['blocks'][0]['data']);
+        $newUrl = '/prime-builder/css/1-' . substr(hash('sha256', $newCss), 0, 16) . '.css';
+        self::assertSame($oldCss, $this->send($app, 'GET', $oldUrl)->body());
+        self::assertSame($newCss, $this->send($app, 'GET', $newUrl)->body());
+        $this->db($app)->pdo()->exec("UPDATE pc_entries SET status = 'draft' WHERE id = 1");
+        self::assertSame(404, $this->send($app, 'GET', $oldUrl)->status());
+        self::assertSame(404, $this->send($app, 'GET', $newUrl)->status());
+        $this->appLogin($app);
+        $private = $this->send($app, 'GET', $newUrl);
+        self::assertSame(200, $private->status());
+        self::assertStringContainsString('no-store', (string) $private->header('Cache-Control'));
+    }
+
+    public function testHistoricalKitAndOwnedPruneTask(): void
+    {
+        $app = $this->activated(null);
+        $original = Kit::compile([]);
+        $url = '/prime-builder/kit/' . substr(hash('sha256', $original), 0, 16) . '.css';
+        self::assertSame($original, $this->send($app, 'GET', $url)->body());
+        $app->get(Settings::class)->set('plugin.prime-builder.kit_primary', '#123456');
+        self::assertSame($original, $this->send($app, 'GET', $url)->body());
+        $schedule = $app->get(Hooks::class)->apply('scheduler.register', new \Prime\Scheduler\Schedule());
+        self::assertSame(true, $schedule->has('prime-builder.prune-styles'));
+        self::assertSame('prime-builder', $schedule->get('prime-builder.prune-styles')->owner);
+    }
+
     public function testPrimeBlockPersistsCoreHtmlWithoutAllowingPrivilegedBlocks(): void
     {
         $app = $this->activated(null);
@@ -224,6 +263,10 @@ final class IntegrationTest extends TestCase
         $settings->set('plugin.prime-builder.kit_primary', '#123456');
         $pdo = $this->db($app)->pdo();
         $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.edit')");
+        $kitUrl = '/prime-builder/kit/' . substr(hash('sha256', Kit::compile(['primary' => '#123456'])), 0, 16) . '.css';
+        self::assertSame(200, $this->send($app, 'GET', $kitUrl)->status());
+        $snapshotDirectory = $app->storagePath('prime-builder/styles');
+        self::assertSame(true, is_dir($snapshotDirectory));
         $manager = $app->get(PluginManager::class);
         $manager->deactivate('prime-builder');
         $entry = $app->get(EntryRepository::class)->find(1);
@@ -233,6 +276,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(false, $settings->has('plugin.prime-builder.kit_primary'));
         self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM pc_role_capabilities WHERE capability LIKE 'prime!_builder.%' ESCAPE '!'")->fetchColumn());
         self::assertSame(false, is_dir($this->assets . '/prime-builder'));
+        self::assertSame(false, is_dir($snapshotDirectory));
         $saved = $app->get(EntryRepository::class)->find(1);
         self::assertNotNull($saved);
         self::assertStringContainsString('<h2>Bonjour</h2>', $saved->contentHtml);

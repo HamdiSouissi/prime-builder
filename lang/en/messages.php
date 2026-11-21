@@ -7,6 +7,7 @@ return [
         'description' => 'Visual page builder for Prime CMS.',
     ],
     'menu' => 'Prime Builder',
+    'scheduler' => ['prune_styles' => 'Prune old Prime Builder stylesheets'],
     'block' => [
         'title' => 'Prime Builder layout',
         'description' => 'Content composed with Prime Builder.',

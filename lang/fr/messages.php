@@ -7,6 +7,7 @@ return [
         'description' => 'Constructeur visuel de pages pour Prime CMS.',
     ],
     'menu' => 'Prime Builder',
+    'scheduler' => ['prune_styles' => 'Purger les anciennes feuilles de style Prime Builder'],
     'block' => [
         'title' => 'Mise en page Prime Builder',
         'description' => 'Contenu composé dans Prime Builder.',

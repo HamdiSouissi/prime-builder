@@ -17,6 +17,7 @@ use Prime\Hooks\Hooks;
 use Prime\Http\Router;
 use Prime\Plugins\AbstractPlugin;
 use Prime\Plugins\PluginContext;
+use Prime\Scheduler\Schedule;
 use Prime\Security\HtmlSanitizer;
 use Prime\Settings\SettingsRegistry;
 use Prime\Site\PageContext;
@@ -28,6 +29,7 @@ use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
+use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
@@ -154,13 +156,28 @@ final class Plugin extends AbstractPlugin
         $context->api()->get('/documents/{id}/live', [$controller::class, 'live'], public: true);
         // PluginContext is not a container service, so API controllers need an explicit binding.
         $context->app()->container()->singleton(Documents::class, static fn (): Documents => $controller);
+        $context->hooks()->filter('scheduler.register', static function (mixed $schedule) use ($context): mixed {
+            if ($schedule instanceof Schedule) {
+                $schedule->call(
+                    name: 'prime-builder.prune-styles',
+                    action: static fn (): int => (new Snapshots($context->app()->storagePath('prime-builder/styles')))->prune(),
+                    expression: '30 4 * * *',
+                    description: t('plugin::prime-builder.scheduler.prune_styles'),
+                    owner: 'prime-builder',
+                );
+            }
+            return $schedule;
+        });
         $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context): void {
             if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
                 return;
             }
             $kitCss = Kit::fromSettings($context->settings());
+            $snapshots = new Snapshots($context->app()->storagePath('prime-builder/styles'));
+            $kitHash = substr(hash('sha256', $kitCss), 0, 16);
+            $snapshots->remember('kit-' . $kitHash . '.css', $kitCss);
             $assets->style('prime-builder-base', $context->url('css/public.css'));
-            $assets->style('prime-builder-kit', '/prime-builder/kit/' . substr(hash('sha256', $kitCss), 0, 16) . '.css', ['prime-builder-base']);
+            $assets->style('prime-builder-kit', '/prime-builder/kit/' . $kitHash . '.css', ['prime-builder-base']);
             if ($page->entry === null) {
                 return;
             }
@@ -169,7 +186,12 @@ final class Plugin extends AbstractPlugin
                 return;
             }
             $css = (new Compiler((int) $context->settings()->get('breakpoint_tablet', 1024), (int) $context->settings()->get('breakpoint_mobile', 767)))->compile($data);
-            $assets->style('prime-builder-document', '/prime-builder/css/' . $page->entry->id . '-' . substr(hash('sha256', $css), 0, 16) . '.css', ['prime-builder-kit']);
+            $file = $page->entry->id . '-' . substr(hash('sha256', $css), 0, 16) . '.css';
+            $type = $context->app()->get(ContentTypeRegistry::class)->get($page->entry->type);
+            if (!$page->isPreview && $type !== null && $type->public && \Prime\Site\UrlResolver::isPubliclyVisible($page->entry)) {
+                $snapshots->remember($file, $css);
+            }
+            $assets->style('prime-builder-document', '/prime-builder/css/' . $file, ['prime-builder-kit']);
             $types = [];
             $collect = static function (array $elements) use (&$collect, &$types): void {
                 foreach ($elements as $element) {
@@ -228,5 +250,6 @@ final class Plugin extends AbstractPlugin
     public function uninstall(PluginContext $context): void
     {
         $context->notices()->clearAll();
+        (new Snapshots($context->app()->storagePath('prime-builder/styles')))->clear();
     }
 }
