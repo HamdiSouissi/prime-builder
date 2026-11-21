@@ -9,6 +9,14 @@ export function createElement(type) {
   };
   return { id: id(), type, settings: clone(defaults[type] || {}), styles: {}, children: [] };
 }
+export function inheritedStyle(styles, device, name) {
+  const preceding = device === 'mobile' ? ['tablet', 'desktop'] : device === 'tablet' ? ['desktop'] : [];
+  for (const mode of preceding) {
+    const values = styles?.[mode];
+    if (values && typeof values === 'object' && Object.hasOwn(values, name)) return { mode, value: values[name] };
+  }
+  return null;
+}
 export function find(elements, id) {
   for (const element of elements) {
     if (element.id === id) return element;

@@ -482,6 +482,37 @@ test('existing canvas elements can be dragged into a container', async ({ page }
   await expect(frame.locator('.pb-container .pb-heading').filter({ hasText: 'Déplacé dans le canevas' })).toBeVisible();
 });
 
+test('responsive controls show inherited values and their source', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('Héritage responsive');
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  const font = page.getByLabel('Taille du texte', { exact: true });
+  const heading = page.frameLocator('[data-pb-frame]').getByRole('heading', { name: 'Héritage responsive' });
+  await expect(font).toHaveAccessibleDescription('Valeur héritée du parent ou valeur par défaut.');
+  await font.fill('32');
+  await expect(font).toHaveAccessibleDescription('Défini pour Ordinateur.');
+  await page.getByLabel('Couleur globale du texte').selectOption('kit:primary');
+  await page.getByRole('button', { name: 'Tablette', exact: true }).click();
+  await expect(font).toHaveValue('');
+  await expect(font).toHaveAccessibleDescription('Hérité de Ordinateur : 32px');
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toHaveAccessibleDescription('Hérité de Ordinateur : Couleur principale du kit');
+  await expect(heading).toHaveCSS('font-size', '32px');
+  await font.fill('24');
+  await expect(font).toHaveAccessibleDescription('Défini pour Tablette.');
+  await page.getByRole('button', { name: 'Mobile', exact: true }).click();
+  await expect(font).toHaveAccessibleDescription('Hérité de Tablette : 24px');
+  await expect(heading).toHaveCSS('font-size', '24px');
+  await font.fill('18');
+  await expect(font).toHaveAccessibleDescription('Défini pour Mobile.');
+  await expect(heading).toHaveCSS('font-size', '18px');
+  await font.fill('');
+  await expect(font).toHaveAccessibleDescription('Hérité de Tablette : 24px');
+  await expect(heading).toHaveCSS('font-size', '24px');
+  await expectAccessible(page);
+});
+
 test('color picker uses kit references and spacing has numeric units', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);

@@ -1,4 +1,4 @@
-import { History, add, createElement, duplicate, find, id, insertAfter, moveInto, remove, reorder, update } from './model.js';
+import { History, add, createElement, duplicate, find, id, inheritedStyle, insertAfter, moveInto, remove, reorder, update } from './model.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -464,12 +464,26 @@ function renderSettings() {
         } : {}),
       };
     for (const [name, schema] of Object.entries(schemas)) {
-      fields.append(makeField(name, schema, element.styles?.[device]?.[name], value => {
+      const group = document.createElement('div'); group.className = 'pb-style-field';
+      const hint = text('small', '', 'pb-inherit-hint'); hint.id = id();
+      const showSource = styles => {
+        const own = styles?.[device];
+        if (own && Object.hasOwn(own, name)) { hint.textContent = `${ui.value_defined} ${ui[device]}.`; return; }
+        const inherited = inheritedStyle(styles, device, name);
+        if (!inherited) { hint.textContent = ui.value_default; return; }
+        const value = inherited.value === 'kit:primary' ? ui.kit_primary : inherited.value === 'kit:text' ? ui.kit_text
+          : typeof inherited.value === 'number' && schema.type === 'length' ? `${inherited.value}px` : ui[inherited.value] || String(inherited.value);
+        hint.textContent = `${ui.value_inherited} ${ui[inherited.mode]} : ${value}`;
+      };
+      const field = makeField(name, schema, element.styles?.[device]?.[name], value => {
         const current = find(history.present, selected); if (!current) return;
         const styles = structuredClone(current.styles || {}); styles[device] ||= {};
         if (value === undefined) delete styles[device][name]; else styles[device][name] = value;
         commit(update(history.present, selected, { styles }), false, `${ui[tab]} : ${ui[name] || name}`);
-      }));
+        showSource(styles);
+      });
+      field.querySelectorAll('input,select,textarea').forEach(control => control.setAttribute('aria-describedby', hint.id));
+      showSource(element.styles || {}); group.append(field, hint); fields.append(group);
     }
   }
 }

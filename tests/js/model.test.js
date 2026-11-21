@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { History, add, createElement, duplicate, find, insertAfter, moveInto, remove, reorder, update } from '../../assets/js/model.js';
+import { History, add, createElement, duplicate, find, inheritedStyle, insertAfter, moveInto, remove, reorder, update } from '../../assets/js/model.js';
 
 test('adding creates a new tree without mutating the original', () => {
   const root = createElement('container');
@@ -92,6 +92,15 @@ test('style updates preserve separate responsive values', () => {
   assert.equal(tree[0].styles.mobile.font_size, 20);
 });
 
+test('responsive inheritance finds the nearest previous explicit value, including zero', () => {
+  const styles = { desktop: { padding: 12, color: 'kit:primary' }, tablet: { padding: 0 } };
+  assert.equal(inheritedStyle(styles, 'desktop', 'padding'), null);
+  assert.deepEqual(inheritedStyle(styles, 'tablet', 'padding'), { mode: 'desktop', value: 12 });
+  assert.deepEqual(inheritedStyle(styles, 'mobile', 'padding'), { mode: 'tablet', value: 0 });
+  assert.deepEqual(inheritedStyle(styles, 'mobile', 'color'), { mode: 'desktop', value: 'kit:primary' });
+  assert.equal(inheritedStyle(styles, 'mobile', 'width'), null);
+  assert.equal(inheritedStyle(null, 'mobile', 'width'), null);
+});
 test('extension-defined containers support nesting and safe reparenting', () => {
   const group = { id: 'custom', type: 'third-party-group', settings: {}, styles: {}, children: [] };
   const child = { id: 'child', type: 'heading', settings: {}, styles: {}, children: [] };
