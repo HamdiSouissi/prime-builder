@@ -205,7 +205,7 @@ final class IntegrationTest extends TestCase
         $url = '/prime-builder/kit/' . substr(hash('sha256', $original), 0, 16) . '.css';
         self::assertSame($original, $this->send($app, 'GET', $url)->body());
         $app->get(Settings::class)->set('plugin.prime-builder.kit_primary', '#123456');
-        self::assertSame($original, $this->send($app, 'GET', $url)->body());
+        self::assertSame($original, $this->send($app, 'GET', $url . '?after=1')->body());
         $schedule = $app->get(Hooks::class)->apply('scheduler.register', new \Prime\Scheduler\Schedule());
         self::assertSame(true, $schedule->has('prime-builder.prune-styles'));
         self::assertSame('prime-builder', $schedule->get('prime-builder.prune-styles')->owner);
@@ -366,8 +366,9 @@ final class IntegrationTest extends TestCase
         $legacy = $this->editorConfig($app, 1);
         self::assertSame('#336699', $legacy['kitColors']['primary']);
         self::assertSame(1200, $legacy['tabletBreakpoint']);
-        $events = [];
-        $app->get(Hooks::class)->on('settings.updated', static function (string $name, mixed $old, mixed $new) use (&$events): void {
+        /** @var \ArrayObject<int, list<mixed>> $events */
+        $events = new \ArrayObject();
+        $app->get(Hooks::class)->on('settings.updated', static function (string $name, mixed $old, mixed $new) use ($events): void {
             if (str_starts_with($name, 'plugin.prime-builder.')) {
                 $events[] = [$name, $old, $new];
             }
@@ -386,7 +387,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(500, $failed->status());
         self::assertSame(false, $settings->has('plugin.prime-builder.configuration'));
         self::assertSame('#336699', $settings->get('plugin.prime-builder.kit_primary'));
-        self::assertSame([], $events);
+        self::assertSame([], $events->getArrayCopy());
         $pdo->exec('DROP TRIGGER reject_builder_settings');
         $saved = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields));
         self::assertSame(302, $saved->status());
@@ -488,7 +489,11 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('<h2>Bonjour</h2>', $view->content());
         $manager->uninstall('prime-builder', deleteFiles: false);
         self::assertSame(false, $settings->has('plugin.prime-builder.kit_primary'));
-        self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM pc_role_capabilities WHERE capability LIKE 'prime!_builder.%' ESCAPE '!'")->fetchColumn());
+        $capabilities = $pdo->query("SELECT COUNT(*) FROM pc_role_capabilities WHERE capability LIKE 'prime!_builder.%' ESCAPE '!'");
+        if ($capabilities === false) {
+            throw new \RuntimeException('Could not query remaining capabilities');
+        }
+        self::assertSame(0, (int) $capabilities->fetchColumn());
         self::assertSame(false, is_dir($this->assets . '/prime-builder'));
         self::assertSame(false, is_dir($snapshotDirectory));
         $saved = $app->get(EntryRepository::class)->find(1);
@@ -556,7 +561,9 @@ final class IntegrationTest extends TestCase
         self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/2', ['content' => $converted], $token)->status());
         // The generic CMS writer also cannot render another entry's authenticated fragment.
         $service->update(2, ['content' => $converted], $this->user($app, 1));
-        self::assertStringNotContainsString('Contenu original conservé', $repository->find(2)?->contentHtml ?? '');
+        $other = $repository->find(2);
+        self::assertNotNull($other);
+        self::assertStringNotContainsString('Contenu original conservé', $other->contentHtml);
         $forged = $converted;
         $forged['blocks'][0]['data']['elements'][0]['children'][1]['settings']['payload'] = $app->get(\Prime\Security\Encrypter::class)->encrypt((string) json_encode(['entry' => 1, 'type' => 'html', 'html' => '<script>alert(1)</script>']));
         self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $forged], $token)->status());
@@ -611,8 +618,10 @@ final class IntegrationTest extends TestCase
         $stmt->execute([$content, $html]);
         $config = $this->editorConfig($app, 1);
         self::assertSame(true, $config['conversionFailed']);
-        self::assertSame($content, $app->get(EntryRepository::class)->find(1)?->content);
-        self::assertSame($html, $app->get(EntryRepository::class)->find(1)?->contentHtml);
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertSame($content, $entry->content);
+        self::assertSame($html, $entry->contentHtml);
 
         // A lone unavailable block has an unambiguous saved HTML fragment.
         $single = '{"version":1,"blocks":[{"id":"a","type":"missing/block","data":{}}]}';
@@ -623,7 +632,9 @@ final class IntegrationTest extends TestCase
         $stmt->execute([$single, '<div>Changé ailleurs</div>']);
         $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
         self::assertSame(409, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $config['document'], 'source_hash' => $config['sourceHash']], $token)->status());
-        self::assertSame('<div>Changé ailleurs</div>', $app->get(EntryRepository::class)->find(1)?->contentHtml);
+        $changed = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($changed);
+        self::assertSame('<div>Changé ailleurs</div>', $changed->contentHtml);
     }
 
     /** @return array<string, mixed> */
@@ -632,7 +643,7 @@ final class IntegrationTest extends TestCase
         $response = $this->send($app, 'GET', '/admin/prime-builder/edit/' . $id);
         self::assertSame(200, $response->status(), $response->body());
         self::assertSame(1, preg_match('/<textarea hidden data-pb-config>(.*?)<\/textarea>/s', $response->body(), $matches));
-        $decoded = json_decode(html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'), true);
+        $decoded = json_decode(html_entity_decode($matches[1] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8'), true);
         self::assertSame(true, is_array($decoded));
         return $decoded;
     }

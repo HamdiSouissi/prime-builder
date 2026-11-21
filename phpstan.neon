@@ -2,6 +2,11 @@ parameters:
     level: 8
     paths:
         - src
+        - views
+        - lang
+        - tests
+        - tools
+        - .php-cs-fixer.dist.php
     bootstrapFiles:
-        - ../../../bootstrap/autoload.php
+        - ../../../vendor/autoload.php
     tmpDir: ../../../.phpstan-cache/prime-builder

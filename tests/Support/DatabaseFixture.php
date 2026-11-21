@@ -45,7 +45,11 @@ trait DatabaseFixture
         $mysql->exec("SET time_zone = '+00:00'");
         $mysql->exec("SET SESSION sql_mode = 'STRICT_ALL_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,ONLY_FULL_GROUP_BY'");
 
-        $tables = $source->query("SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name LIKE 'pc_%' ORDER BY name")->fetchAll();
+        $tableQuery = $source->query("SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name LIKE 'pc_%' ORDER BY name");
+        if ($tableQuery === false) {
+            throw new RuntimeException('Could not list fixture tables');
+        }
+        $tables = $tableQuery->fetchAll();
         foreach ($tables as $table) {
             $tableName = (string) $table['name'];
             if (preg_match('/^pc_[a-z_]+$/D', $tableName) !== 1) {
@@ -57,10 +61,14 @@ trait DatabaseFixture
                 (string) $table['sql'],
             );
             $mysql->exec($schema . ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
-            $rows = $source->query('SELECT * FROM `' . $tableName . '`')->fetchAll();
+            $rowsQuery = $source->query('SELECT * FROM `' . $tableName . '`');
+            if ($rowsQuery === false) {
+                throw new RuntimeException('Could not read fixture table');
+            }
+            $rows = $rowsQuery->fetchAll();
             foreach ($rows as $row) {
                 $columns = array_keys($row);
-                $columnSql = implode(', ', array_map(static fn (string $column): string => '`' . $column . '`', $columns));
+                $columnSql = implode(', ', array_map(static fn (int|string $column): string => '`' . $column . '`', $columns));
                 $parameters = implode(', ', array_fill(0, count($columns), '?'));
                 $statement = $mysql->prepare('INSERT INTO `' . $tableName . '` (' . $columnSql . ') VALUES (' . $parameters . ')');
                 $statement->execute(array_values($row));

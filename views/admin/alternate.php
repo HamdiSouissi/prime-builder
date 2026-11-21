@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+/** @var \Prime\View\TemplateContext $this */
 /** @var ?\Prime\Content\Entry $entry */
 /** @var string $contentJson */
 ?>

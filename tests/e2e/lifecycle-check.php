@@ -16,6 +16,7 @@ $pdo = new PDO(
     [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION],
 );
 
+/** @param list<int|string> $parameters */
 function countRows(PDO $pdo, string $sql, array $parameters = []): int
 {
     $statement = $pdo->prepare($sql);
@@ -44,7 +45,11 @@ if (countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}role_capabilities` WHERE `ca
 }
 
 if (($argv[1] ?? '') === 'seed') {
-    $roleId = $pdo->query("SELECT `id` FROM `{$prefix}roles` WHERE `slug` = 'administrator'")->fetchColumn();
+    $roleQuery = $pdo->query("SELECT `id` FROM `{$prefix}roles` WHERE `slug` = 'administrator'");
+    if ($roleQuery === false) {
+        throw new RuntimeException('Could not query administrator role.');
+    }
+    $roleId = $roleQuery->fetchColumn();
     if (!$roleId) {
         throw new RuntimeException('Administrator role not found.');
     }
