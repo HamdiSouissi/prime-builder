@@ -229,7 +229,7 @@ test('fingerprinted styles survive a public edit and protect drafts', async ({ p
   }
   expect(await saveColor('#123456')).toBe(200);
   await page.goto('/test-prime-builder');
-  const oldUrl = await page.locator('link[href*="/prime-builder/css/"]').getAttribute('href');
+  const oldUrl = await page.locator('link[href^="/prime-builder/css/"]').getAttribute('href');
   const anonymous = await browser.newContext({ baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
   const original = await anonymous.request.get(oldUrl);
   expect(original.status()).toBe(200);
