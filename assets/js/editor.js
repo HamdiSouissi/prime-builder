@@ -99,6 +99,8 @@ function addWidget(type) {
   const node = newElement(type);
   selected = node.id; tab = 'content'; panel = 'settings';
   commit(add(history.present, node, isContainer(parent) ? parent.id : null, containerTypes), true);
+  // The widget card is replaced by the settings panel; give keyboard users a useful next focus.
+  ($('[data-pb-fields] input, [data-pb-fields] textarea, [data-pb-fields] select') || parentSelect)?.focus({ preventScroll: true });
 }
 function renderWidgets() {
   const list = $('[data-pb-widget-list]'); list.replaceChildren();

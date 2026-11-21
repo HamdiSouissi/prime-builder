@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
 const id = process.env.E2E_ENTRY_ID || '1';
+const mouseId = process.env.E2E_MOUSE_ENTRY_ID || '';
+const keyboardId = process.env.E2E_KEYBOARD_ENTRY_ID || '';
 async function login(page) {
   await page.goto('/admin/login');
   await page.locator('input[name=email]').fill(process.env.E2E_ADMIN_EMAIL || 'builder@prime.test');
@@ -41,6 +43,80 @@ test('compose and publish a page using the CMS theme', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Une page composée dans Prime Builder' })).toBeVisible();
   await expectAccessible(page);
   await page.screenshot({ path: test.info().outputPath('public-desktop.png'), fullPage: true });
+});
+
+test('build and publish four widgets with the mouse', async ({ page }) => {
+  expect(mouseId).toMatch(/^[1-9][0-9]*$/);
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${mouseId}`);
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('Une page à la souris');
+  await page.locator('[data-pb-panel="widgets"]').click();
+  await page.getByRole('button', { name: 'Ajouter Texte' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('<p>Texte composé à la souris.</p>');
+  await page.locator('[data-pb-panel="widgets"]').click();
+  await page.getByRole('button', { name: 'Ajouter Bouton' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('Lien souris');
+  await page.getByLabel('Adresse URL').fill('/');
+  await page.locator('[data-pb-panel="widgets"]').click();
+  await page.getByRole('button', { name: 'Ajouter Séparateur' }).click();
+  await expect(page.frameLocator('[data-pb-frame]').locator('.pb-element')).toHaveCount(4);
+  await expectAccessible(page);
+  await page.locator('[data-pb-status]').selectOption('published');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto('/parcours-souris');
+  await expect(page.getByRole('heading', { name: 'Une page à la souris' })).toBeVisible();
+  await expect(page.getByText('Texte composé à la souris.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Lien souris' })).toHaveAttribute('href', '/');
+  await expect(page.locator('.pb-separator hr')).toBeVisible();
+  await expect(page.locator('.pb-element')).toHaveCount(4);
+  await expectAccessible(page);
+});
+
+test('build and publish four widgets using keyboard controls', async ({ page }) => {
+  expect(keyboardId).toMatch(/^[1-9][0-9]*$/);
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${keyboardId}`);
+  async function addWithKeyboard(name) {
+    await page.keyboard.press('Control+k');
+    const search = page.getByLabel('Rechercher une commande');
+    await expect(search).toBeFocused();
+    await page.keyboard.insertText(`Ajouter ${name}`);
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('dialog').getByRole('button', { name: `Ajouter ${name}`, exact: true })).toBeFocused();
+    await page.keyboard.press('Enter');
+  }
+  await addWithKeyboard('Titre');
+  await expect(page.getByLabel('Texte', { exact: true })).toBeFocused();
+  await page.keyboard.press('Control+a'); await page.keyboard.insertText('Une page au clavier');
+  await addWithKeyboard('Texte');
+  await expect(page.getByLabel('Texte', { exact: true })).toBeFocused();
+  await page.keyboard.press('Control+a'); await page.keyboard.insertText('Texte composé au clavier.');
+  await addWithKeyboard('Bouton');
+  await expect(page.getByLabel('Texte', { exact: true })).toBeFocused();
+  await page.keyboard.press('Control+a'); await page.keyboard.insertText('Lien clavier');
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Adresse URL')).toBeFocused();
+  await page.keyboard.insertText('/');
+  await addWithKeyboard('Séparateur');
+  await expect(page.getByLabel('Déplacer vers')).toBeFocused();
+  await expect(page.frameLocator('[data-pb-frame]').locator('.pb-element')).toHaveCount(4);
+  await expectAccessible(page);
+  const status = page.locator('[data-pb-status]');
+  for (let i = 0; i < 40 && !await status.evaluate(el => el === document.activeElement); i++) await page.keyboard.press('Tab');
+  await expect(status).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(status).toHaveValue('published');
+  await page.keyboard.press('Control+s');
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto('/parcours-clavier');
+  await expect(page.getByRole('heading', { name: 'Une page au clavier' })).toBeVisible();
+  await expect(page.getByText('Texte composé au clavier.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Lien clavier' })).toHaveAttribute('href', '/');
+  await expect(page.locator('.pb-separator hr')).toBeVisible();
+  await expect(page.locator('.pb-element')).toHaveCount(4);
+  await expectAccessible(page);
 });
 
 test('library templates are available and the editor fits a mobile viewport', async ({ page }) => {

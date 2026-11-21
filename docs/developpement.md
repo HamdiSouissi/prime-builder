@@ -90,7 +90,10 @@ npm test
 cd tests/e2e
 npm ci --no-audit --no-fund
 npx playwright install --with-deps chromium
-# Fournir E2E_BASE_URL, E2E_ENTRY_ID et, au besoin, E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD
+# Fournir E2E_BASE_URL, E2E_ENTRY_ID, E2E_LEGACY_ENTRY_ID,
+# E2E_MOUSE_ENTRY_ID et E2E_KEYBOARD_ENTRY_ID, et si nécessaire les identifiants
+# E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD. Les deux derniers identifiants pointent
+# vers des pages de test vierges dont les slugs sont parcours-souris et parcours-clavier.
 npm test
 ```
 

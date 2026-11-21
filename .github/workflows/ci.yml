@@ -220,6 +220,14 @@ jobs:
           LEGACY_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
           test -n "$LEGACY_ID"
           echo "E2E_LEGACY_ENTRY_ID=$LEGACY_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Parcours souris' --slug=parcours-souris --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          MOUSE_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$MOUSE_ID"
+          echo "E2E_MOUSE_ENTRY_ID=$MOUSE_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Parcours clavier' --slug=parcours-clavier --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          KEYBOARD_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$KEYBOARD_ID"
+          echo "E2E_KEYBOARD_ENTRY_ID=$KEYBOARD_ID" >> "$GITHUB_ENV"
           php -S 0.0.0.0:8080 -t public public/router.php > /tmp/prime-builder-server.log 2>&1 &
       - name: Report installation output on failure
         if: failure()
