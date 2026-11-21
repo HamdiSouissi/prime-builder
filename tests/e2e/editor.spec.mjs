@@ -269,6 +269,46 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   await expectAccessible(page);
 });
 
+test('navigator renames, folds and hides elements with persisted accessible controls', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Conteneur' }).click();
+  await page.locator('[data-pb-panel="widgets"]').click();
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('Titre à masquer');
+  await expect(page.frameLocator('[data-pb-frame]').getByRole('heading', { name: 'Titre à masquer' })).toBeVisible();
+  await page.getByRole('button', { name: 'Structure', exact: true }).click();
+  await page.getByRole('button', { name: 'Renommer : Conteneur' }).last().click();
+  await page.getByRole('textbox', { name: 'Renommer : Conteneur' }).fill('Section test');
+  await page.getByRole('textbox', { name: 'Renommer : Conteneur' }).press('Enter');
+  const collapse = page.getByRole('button', { name: 'Replier : Section test' });
+  await collapse.click();
+  await expect(page.getByRole('button', { name: 'Déplier : Section test' })).toHaveAttribute('aria-expanded', 'false');
+  await page.getByRole('button', { name: 'Déplier : Section test' }).click();
+  await page.getByRole('button', { name: 'Renommer : Titre' }).last().click();
+  await page.getByRole('textbox', { name: 'Renommer : Titre' }).fill('Sous-titre spécial');
+  await page.getByRole('textbox', { name: 'Renommer : Titre' }).press('Enter');
+  await page.getByRole('button', { name: 'Masquer : Sous-titre spécial' }).click();
+  await expect(page.getByRole('button', { name: 'Afficher : Sous-titre spécial' })).toBeFocused();
+  await expect(page.frameLocator('[data-pb-frame]').locator('.pb-heading').filter({ hasText: 'Titre à masquer' })).toHaveAttribute('hidden', '');
+  await expectAccessible(page);
+  await page.locator('[data-pb-status]').selectOption('published');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto('/test-prime-builder');
+  await expect(page.locator('.pb-heading').filter({ hasText: 'Titre à masquer' })).toHaveAttribute('hidden', '');
+  await expect(page.locator('.pb-heading').filter({ hasText: 'Titre à masquer' })).toBeHidden();
+  await expectAccessible(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Structure', exact: true }).click();
+  await page.getByRole('button', { name: 'Afficher : Sous-titre spécial' }).click();
+  await expect(page.frameLocator('[data-pb-frame]').getByRole('heading', { name: 'Titre à masquer' })).toBeVisible();
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto('/test-prime-builder');
+  await expect(page.getByRole('heading', { name: 'Titre à masquer' })).toBeVisible();
+});
+
 test('context menu copies elements and styles with keyboard and restores focus', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);

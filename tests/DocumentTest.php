@@ -52,6 +52,26 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('@media(max-width:767px)', $css);
     }
 
+    public function testNavigatorLabelsAndHiddenElementsAreValidatedAndRendered(): void
+    {
+        $container = $this->element('container', 'section');
+        $container['label'] = '<b>Ma section</b>';
+        $container['hidden'] = true;
+        $container['children'] = [$this->element('heading', 'child')];
+        $container['children'][0]['settings'] = ['text' => 'Contenu masqué'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$container]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame('Ma section', $result['data']['elements'][0]['label']);
+        self::assertSame(true, $result['data']['elements'][0]['hidden']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertStringContainsString('data-pb-id="section" hidden>', $html);
+        self::assertStringContainsString('<h2>Contenu masqué</h2>', $html);
+        self::assertStringNotContainsString('Ma section', $html);
+        $container['hidden'] = 'true';
+        $container['label'] = str_repeat('a', 321);
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$container]])['errors']);
+    }
+
     public function testKitAndCustomBreakpointsAreSafe(): void
     {
         $css = Kit::compile(['primary' => '#123456;body{display:none}', 'text' => '#ABC', 'font_size' => 999]);

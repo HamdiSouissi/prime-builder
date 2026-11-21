@@ -24,6 +24,8 @@ let requestNumber = 0;
 let previewTimer;
 let clipboard = null;
 let contextOpener = null;
+let renaming = null;
+const collapsed = new Set();
 const toolbar = $('[data-pb-selection-toolbar]');
 const contextMenu = $('[data-pb-context-menu]');
 const frame = $('[data-pb-frame]');
@@ -134,15 +136,27 @@ function renderWidgets() {
   }
   if (!list.children.length) list.append(text('p', ui.empty, 'pb-empty'));
 }
+function elementLabel(element) {
+  return element.label?.trim() || config.widgets[element.type]?.label || element.type;
+}
+function treeControl(label, path) {
+  const button = document.createElement('button'); button.type = 'button'; button.className = 'pb-tree-control';
+  button.setAttribute('aria-label', label); button.title = label;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '1.8'); svg.setAttribute('aria-hidden', 'true');
+  const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path'); shape.setAttribute('d', path);
+  svg.append(shape); button.append(svg); return button;
+}
 function renderTree() {
   const target = $('[data-pb-tree]'); target.replaceChildren();
   if (!history.present.length) { target.append(text('p', ui.empty, 'pb-empty')); return; }
   function build(elements) {
     const list = document.createElement('ul'); list.className = 'pb-tree';
     for (const element of elements) {
-      const item = document.createElement('li'); const row = document.createElement('div'); row.className = 'pb-tree-row'; row.dataset.selected = String(selected === element.id);
-      const handle = text('span', '⠿', 'pb-tree-handle'); handle.setAttribute('aria-hidden', 'true');
-      row.draggable = true;
+      const item = document.createElement('li'); const row = document.createElement('div'); row.className = 'pb-tree-row'; row.dataset.selected = String(selected === element.id); row.dataset.hidden = String(element.hidden === true);
+      const name = elementLabel(element);
+      row.draggable = renaming !== element.id;
       row.addEventListener('dragstart', event => { event.stopPropagation(); event.dataTransfer.setData('text/prime-builder-element', element.id); event.dataTransfer.effectAllowed = 'move'; });
       row.addEventListener('dragover', event => { if (isContainer(element)) event.preventDefault(); });
       row.addEventListener('drop', event => {
@@ -151,15 +165,60 @@ function renderTree() {
         const source = event.dataTransfer.getData('text/prime-builder-element');
         if (source) commit(moveInto(history.present, source, element.id, containerTypes), true);
       });
-      const button = text('button', config.widgets[element.type]?.label || element.type); button.type = 'button';
-      button.addEventListener('click', () => { selected = element.id; tab = 'content'; panel = 'settings'; renderPanel(); schedulePreview(); });
+      if (element.children?.length) {
+        const closed = collapsed.has(element.id);
+        const toggle = treeControl(`${closed ? ui.expand_tree : ui.collapse_tree} : ${name}`, closed ? 'M9 6l6 6-6 6' : 'M6 9l6 6 6-6');
+        toggle.dataset.pbTreeCollapse = element.id;
+        toggle.setAttribute('aria-expanded', String(!closed)); toggle.setAttribute('aria-controls', `pb-tree-children-${element.id}`);
+        toggle.addEventListener('click', () => {
+          if (closed) collapsed.delete(element.id); else collapsed.add(element.id);
+          renaming = null; renderTree(); target.querySelector(`[data-pb-tree-collapse="${CSS.escape(element.id)}"]`)?.focus();
+        });
+        row.append(toggle);
+      } else {
+        const spacer = document.createElement('span'); spacer.className = 'pb-tree-spacer'; spacer.setAttribute('aria-hidden', 'true'); row.append(spacer);
+      }
+      if (renaming === element.id) {
+        const input = document.createElement('input'); input.className = 'pb-tree-rename'; input.maxLength = 80;
+        input.value = element.label || ''; input.placeholder = name; input.setAttribute('aria-label', `${ui.rename_element} : ${name}`);
+        const finish = saveName => {
+          renaming = null;
+          if (saveName) commit(update(history.present, element.id, { label: input.value.trim() }));
+          renderTree(); target.querySelector(`[data-pb-tree-rename="${CSS.escape(element.id)}"]`)?.focus();
+        };
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); finish(event.key === 'Enter'); }
+        });
+        const saveName = treeControl(ui.rename_save, 'M4 12l5 5L20 6');
+        const cancelName = treeControl(ui.rename_cancel, 'M6 6l12 12M18 6L6 18');
+        saveName.addEventListener('click', () => finish(true)); cancelName.addEventListener('click', () => finish(false));
+        row.append(input, saveName, cancelName);
+        queueMicrotask(() => { if (input.isConnected) { input.focus(); input.select(); } });
+      } else {
+        const select = text('button', name, 'pb-tree-select'); select.type = 'button'; select.dataset.pbTreeSelect = element.id;
+        select.addEventListener('click', () => { selected = element.id; tab = 'content'; panel = 'settings'; renderPanel(); schedulePreview(); });
+        const rename = treeControl(`${ui.rename_element} : ${name}`, 'M4 20l4-1L19 8l-3-3L5 16l-1 4zM14 7l3 3');
+        rename.dataset.pbTreeRename = element.id;
+        rename.addEventListener('click', () => { renaming = element.id; renderTree(); });
+        const visibility = treeControl(`${element.hidden ? ui.show : ui.hide} : ${name}`, element.hidden
+          ? 'M3 3l18 18M10 6.2A11 11 0 0 1 12 6c6.5 0 10 6 10 6a16 16 0 0 1-3 3.4M6.2 6.9A15 15 0 0 0 2 12s3.5 6 10 6c1.2 0 2.3-.2 3.3-.5'
+          : 'M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z');
+        visibility.dataset.pbTreeVisibility = element.id;
+        visibility.addEventListener('click', () => {
+          commit(update(history.present, element.id, { hidden: !element.hidden }));
+          renderTree(); target.querySelector(`[data-pb-tree-visibility="${CSS.escape(element.id)}"]`)?.focus();
+        });
+        row.append(select, rename, visibility);
+      }
       row.addEventListener('contextmenu', event => {
         event.preventDefault(); event.stopPropagation();
         selected = element.id; tab = 'content'; panel = 'settings'; renderPanel(); schedulePreview();
         openContext(event.clientX, event.clientY, $('[data-pb-context-open]'));
       });
-      row.append(handle, button); item.append(row);
-      if (element.children?.length) item.append(build(element.children));
+      item.append(row);
+      if (element.children?.length) {
+        const children = build(element.children); children.id = `pb-tree-children-${element.id}`; children.hidden = collapsed.has(element.id); item.append(children);
+      }
       list.append(item);
     }
     return list;
@@ -312,7 +371,7 @@ function renderParentOptions(selectedElement) {
       if (node.id === selectedElement.id) { currentParent = parentId; continue; }
       if (isContainer(node)) {
         containerNumber += 1;
-        const name = typeof node.settings?.title === 'string' && node.settings.title.trim() ? node.settings.title.trim() : `${config.widgets[node.type]?.label || node.type} ${containerNumber}`;
+        const name = node.label?.trim() || (typeof node.settings?.title === 'string' && node.settings.title.trim() ? node.settings.title.trim() : `${config.widgets[node.type]?.label || node.type} ${containerNumber}`);
         const option = text('option', `${'— '.repeat(depth)}${name}`);
         option.value = node.id; parentSelect.append(option);
         walk(node.children || [], node.id, depth + 1);
@@ -370,7 +429,7 @@ function renderSettings() {
   if (!element) { panel = 'widgets'; renderPanel(); return; }
   const definition = config.widgets[element.type];
   renderParentOptions(element);
-  $('[data-pb-selected-title]').textContent = definition?.label || element.type;
+  $('[data-pb-selected-title]').textContent = elementLabel(element);
   $$('[data-pb-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.pbTab === tab)));
   const fields = $('[data-pb-fields]'); fields.replaceChildren();
   if (definition?.readOnly) {

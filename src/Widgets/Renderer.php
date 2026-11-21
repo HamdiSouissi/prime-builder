@@ -108,7 +108,8 @@ final class Renderer
                 if (($definitions[$type]['container'] ?? false) === true) {
                     $content .= $this->renderElements($children, $definitions);
                 }
-                $html .= '<div class="pb-element pb-' . self::escape($type) . '" data-pb-id="' . self::escape($id) . '">' . $content . '</div>';
+                $hidden = ($element['hidden'] ?? false) === true ? ' hidden' : '';
+                $html .= '<div class="pb-element pb-' . self::escape($type) . '" data-pb-id="' . self::escape($id) . '"' . $hidden . '>' . $content . '</div>';
             } catch (Throwable $exception) {
                 $this->logger?->error('Prime Builder widget failed', ['widget' => $type, 'message' => $exception->getMessage()]);
             }

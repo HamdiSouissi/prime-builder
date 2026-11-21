@@ -129,7 +129,22 @@ final class Validator
                 $errors[] = t('plugin::prime-builder.validation.structure');
                 $children = [];
             }
-            $result[] = ['id' => $id, 'type' => $type, 'settings' => $settings, 'styles' => $styles, 'children' => $this->elements($children, $depth + 1, $count, $seen, $errors, $definitions)];
+            $element = ['id' => $id, 'type' => $type, 'settings' => $settings, 'styles' => $styles, 'children' => $this->elements($children, $depth + 1, $count, $seen, $errors, $definitions)];
+            if (array_key_exists('label', $item)) {
+                if (!is_string($item['label']) || strlen($item['label']) > 320) {
+                    $errors[] = t('plugin::prime-builder.validation.settings');
+                } else {
+                    $element['label'] = trim(strip_tags($item['label']));
+                }
+            }
+            if (array_key_exists('hidden', $item)) {
+                if (!is_bool($item['hidden'])) {
+                    $errors[] = t('plugin::prime-builder.validation.settings');
+                } else {
+                    $element['hidden'] = $item['hidden'];
+                }
+            }
+            $result[] = $element;
         }
 
         return $result;
