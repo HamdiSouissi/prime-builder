@@ -155,8 +155,10 @@ final class DocumentValidator
                 continue;
             }
 
-            if ($cleanKey === 'custom_css' && is_string($value)) {
-                $clean[$cleanKey] = self::sanitizeCustomCss($value);
+            if ($cleanKey === 'custom_css') {
+                if (is_string($value)) {
+                    $clean[$cleanKey] = self::sanitizeCustomCss($value);
+                }
 
                 continue;
             }
