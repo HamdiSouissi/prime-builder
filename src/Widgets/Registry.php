@@ -40,6 +40,7 @@ final class Registry
             'audio' => ['url' => $url, 'transcript' => ['type' => 'rich', 'max' => 20000]],
             'posts' => ['limit' => ['type' => 'integer', 'min' => 1, 'max' => 12], 'show_excerpt' => ['type' => 'enum', 'values' => ['show', 'hide']]],
             'current_content' => ['source' => ['type' => 'enum', 'values' => ['title', 'excerpt', 'published', 'author']]],
+            'prime_block' => ['block_type' => ['type' => 'enum', 'values' => PrimeBlock::ALLOWED], 'block_data' => ['type' => 'json_object', 'max' => 20000]],
             'tabs' => [
                 'label' => $text,
                 'title_1' => $text, 'text_1' => ['type' => 'rich', 'max' => 10000],
@@ -51,7 +52,7 @@ final class Registry
         foreach ($fields as $type => $schema) {
             $definitions[$type] = [
                 'label' => 'plugin::prime-builder.widgets.' . $type,
-                'category' => $type === 'container' ? 'structure' : (in_array($type, ['accordion', 'card', 'icon_box', 'counter', 'tabs', 'gallery', 'video', 'audio', 'posts', 'current_content'], true) ? 'pro' : 'base'),
+                'category' => $type === 'container' ? 'structure' : (in_array($type, ['accordion', 'card', 'icon_box', 'counter', 'tabs', 'gallery', 'video', 'audio', 'posts', 'current_content', 'prime_block'], true) ? 'pro' : 'base'),
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];

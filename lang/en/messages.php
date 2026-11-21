@@ -74,6 +74,7 @@ return [
         'system' => 'View system diagnostics',
     ],
     'validation' => [
+        'prime_block' => 'The Prime block is invalid or not allowed.',
         'size' => 'The document exceeds the allowed size.',
         'structure' => 'The document structure is invalid.',
         'depth' => 'The maximum depth was exceeded.',
@@ -84,6 +85,7 @@ return [
         'styles' => 'Invalid or disallowed style.',
     ],
     'defaults' => [
+        'prime_block' => 'Text composed with a Prime block.',
         'heading' => 'A heading to customize',
         'text' => 'Add your text here.',
         'button' => 'Learn more',
@@ -104,6 +106,7 @@ return [
         'tab_text_2' => 'Content of the second tab.',
     ],
     'widgets' => [
+        'prime_block' => 'Prime block',
         'posts' => 'Recent posts',
         'current_content' => 'Current content',
         'gallery' => 'Gallery',
@@ -128,6 +131,16 @@ return [
         'anchor' => 'Anchor',
     ],
     'ui' => [
+        'heading' => 'Heading',
+        'list' => 'List',
+        'quote' => 'Quote',
+        'separator' => 'Separator',
+        'block_type' => 'Prime block type',
+        'block_data' => 'Block data (JSON object)',
+        'paragraph' => 'Paragraph',
+        'code' => 'Code',
+        'table' => 'Table',
+        'callout' => 'Callout',
         'limit' => 'Number of posts',
         'show_excerpt' => 'Show excerpts',
         'show' => 'Show',

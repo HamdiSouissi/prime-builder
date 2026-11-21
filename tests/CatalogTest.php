@@ -12,6 +12,7 @@ use PrimeBuilder\Widgets\Registry;
 
 require_once dirname(__DIR__) . '/src/Document/Library.php';
 require_once dirname(__DIR__) . '/src/Document/Validator.php';
+require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 
 final class CatalogTest extends TestCase

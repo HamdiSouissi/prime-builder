@@ -184,7 +184,7 @@ function makeField(name, schema, current, onChange) {
     input = document.createElement('select');
     const option = text('option', ui.default_option); option.value = ''; input.append(option);
     for (const value of schema.values) { const option = text('option', schema.option_labels?.[value] || ui[value] || value); option.value = value; input.append(option); }
-  } else if (schema.type === 'rich' || schema.type === 'multiline' || schema.type === 'media_list') {
+  } else if (schema.type === 'rich' || schema.type === 'multiline' || schema.type === 'media_list' || schema.type === 'json_object') {
     input = document.createElement('textarea');
     if (schema.max != null) input.maxLength = schema.max;
   } else {

@@ -74,6 +74,7 @@ return [
         'system' => 'Consulter le diagnostic système',
     ],
     'validation' => [
+        'prime_block' => 'Le bloc Prime est invalide ou non autorisé.',
         'size' => 'Le document dépasse la taille autorisée.',
         'structure' => 'La structure du document est invalide.',
         'depth' => 'La profondeur maximale est dépassée.',
@@ -84,6 +85,7 @@ return [
         'styles' => 'Style non autorisé ou invalide.',
     ],
     'defaults' => [
+        'prime_block' => 'Un texte composé avec un bloc Prime.',
         'heading' => 'Un titre à personnaliser',
         'text' => 'Ajoutez ici votre texte.',
         'button' => 'En savoir plus',
@@ -104,6 +106,7 @@ return [
         'tab_text_2' => 'Contenu du deuxième onglet.',
     ],
     'widgets' => [
+        'prime_block' => 'Bloc Prime',
         'posts' => 'Articles récents',
         'current_content' => 'Contenu actuel',
         'gallery' => 'Galerie',
@@ -128,6 +131,16 @@ return [
         'anchor' => 'Ancre',
     ],
     'ui' => [
+        'heading' => 'Titre',
+        'list' => 'Liste',
+        'quote' => 'Citation',
+        'separator' => 'Séparateur',
+        'block_type' => 'Type de bloc Prime',
+        'block_data' => 'Données du bloc (objet JSON)',
+        'paragraph' => 'Paragraphe',
+        'code' => 'Code',
+        'table' => 'Tableau',
+        'callout' => 'Encadré',
         'limit' => 'Nombre d’articles',
         'show_excerpt' => 'Afficher les extraits',
         'show' => 'Afficher',

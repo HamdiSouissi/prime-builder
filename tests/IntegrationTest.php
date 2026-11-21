@@ -169,6 +169,25 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('Nouvelle valeur', $provider->posts(['limit' => 12], true));
     }
 
+    public function testPrimeBlockPersistsCoreHtmlWithoutAllowingPrivilegedBlocks(): void
+    {
+        $app = $this->activated(null);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'][0] = [
+            'id' => 'bridge', 'type' => 'prime_block',
+            'settings' => ['block_type' => 'paragraph', 'block_data' => '{"text":"Texte <strong>Prime</strong>"}'],
+            'styles' => [], 'children' => [],
+        ];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('pc-block--paragraph', $entry->contentHtml);
+        self::assertStringContainsString('Texte <strong>Prime</strong>', $entry->contentHtml);
+        $document['blocks'][0]['data']['elements'][0]['settings'] = ['block_type' => 'html', 'block_data' => '{"html":"<script>alert(1)</script>"}'];
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+    }
+
     public function testGlobalKitIsFingerprintedAndSafe(): void
     {
         $app = $this->activated(null);

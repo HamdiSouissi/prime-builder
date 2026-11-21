@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace PrimeBuilder\Document;
 
+use Prime\Editor\BlockRegistry;
 use Prime\Security\HtmlSanitizer;
+use PrimeBuilder\Widgets\PrimeBlock;
 use PrimeBuilder\Widgets\Registry;
 
 /** Normalizes untrusted layout data, placing hard limits on size, depth and node count. */
@@ -14,8 +16,11 @@ final class Validator
     public const MAX_ELEMENTS = 500;
     public const MAX_DEPTH = 12;
 
-    public function __construct(private readonly Registry $registry, private readonly HtmlSanitizer $sanitizer)
-    {
+    public function __construct(
+        private readonly Registry $registry,
+        private readonly HtmlSanitizer $sanitizer,
+        private readonly ?BlockRegistry $blocks = null,
+    ) {
     }
 
     /**
@@ -97,6 +102,17 @@ final class Validator
                 }
                 $settings[$key] = $normalized;
             }
+            if ($type === 'prime_block') {
+                $blockType = is_string($settings['block_type'] ?? null) ? $settings['block_type'] : 'paragraph';
+                $blockData = is_string($settings['block_data'] ?? null) ? $settings['block_data'] : '{}';
+                $normalizedBlock = (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->normalize($blockType, $blockData);
+                if ($normalizedBlock === null) {
+                    $errors[] = t('plugin::prime-builder.validation.prime_block');
+                } else {
+                    $settings['block_type'] = $blockType;
+                    $settings['block_data'] = $normalizedBlock;
+                }
+            }
             $styles = $this->styles($item['styles'] ?? [], $errors);
             $children = $item['children'] ?? [];
             if (!is_array($children) || !array_is_list($children) || (($definition['container'] ?? false) !== true && $children !== [])) {
@@ -121,6 +137,7 @@ final class Validator
         }
         return match ($type) {
             'text', 'multiline' => trim(strip_tags($value)),
+            'json_object' => is_object(json_decode($value)) ? $value : null,
             'media_list' => $this->mediaList($value),
             'rich' => $this->sanitizer->sanitizeBasic($value),
             'href' => $value === '' ? '' : $this->sanitizer->sanitizeHref($value),

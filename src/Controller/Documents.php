@@ -15,6 +15,7 @@ use Prime\Content\Exception\ContentException;
 use Prime\Content\Exception\ContentForbiddenException;
 use Prime\Content\Exception\ContentLockedException;
 use Prime\Content\Exception\ContentValidationException;
+use Prime\Editor\BlockRegistry;
 use Prime\Http\Request;
 use Prime\Http\Response;
 use Prime\I18n\Translator;
@@ -49,6 +50,7 @@ final class Documents
             'card' => ['title' => $copy('card_title'), 'text' => $copy('card_text')],
             'icon_box' => ['icon' => 'star', 'title' => $copy('icon_title'), 'text' => $copy('icon_text')],
             'counter' => ['title' => $copy('counter')],
+            'prime_block' => ['block_type' => 'paragraph', 'block_data' => (string) json_encode(['text' => $copy('prime_block')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)],
             'tabs' => ['label' => $copy('tabs_label'), 'title_1' => $copy('tab_1'), 'text_1' => $copy('tab_text_1'), 'title_2' => $copy('tab_2'), 'text_2' => $copy('tab_text_2')],
         ];
     }
@@ -115,7 +117,7 @@ final class Documents
             ];
         }
         $ui = [];
-        foreach (['widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'history', 'drop', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'media_grid', 'media_error', 'images', 'captions', 'caption_language', 'transcript', 'fr', 'en', 'default_option', 'layout_mode', 'flow', 'grid_columns', 'wrap', 'nowrap', 'justify', 'items_align', 'start', 'end', 'space-between', 'stretch', 'limit', 'show_excerpt', 'show', 'hide', 'source', 'excerpt', 'published'] as $key) {
+        foreach (['widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'history', 'drop', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'media_grid', 'media_error', 'images', 'captions', 'caption_language', 'transcript', 'fr', 'en', 'default_option', 'layout_mode', 'flow', 'grid_columns', 'wrap', 'nowrap', 'justify', 'items_align', 'start', 'end', 'space-between', 'stretch', 'limit', 'show_excerpt', 'show', 'hide', 'source', 'excerpt', 'published', 'block_type', 'block_data', 'paragraph', 'heading', 'list', 'quote', 'separator', 'code', 'table', 'callout'] as $key) {
             $ui[$key] = t('plugin::prime-builder.ui.' . $key);
         }
         $config = [
@@ -196,12 +198,12 @@ final class Documents
         if (!is_array($body) || !is_array($body['data'] ?? null) || strlen($request->rawBody()) > Validator::MAX_BYTES + 8192) {
             return ApiError::response('validation_failed', 422, $request);
         }
-        $validator = new Validator(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class));
+        $validator = new Validator(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->app()->get(BlockRegistry::class));
         $result = $validator->validate($body['data']);
         if ($result['errors'] !== []) {
             return ApiError::response('validation_failed', 422, $request, ['fields' => ['content' => $result['errors']]]);
         }
-        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true);
+        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class));
         return Response::json(['data' => ['html' => $renderer->render($result['data']), 'layout' => $result['data']]]);
     }
 
@@ -224,11 +226,11 @@ final class Documents
         }
         $registry = new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class));
         $sanitizer = $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class);
-        $result = (new Validator($registry, $sanitizer))->validate($data);
+        $result = (new Validator($registry, $sanitizer, $this->plugin->app()->get(BlockRegistry::class)))->validate($data);
         if ($result['errors'] !== []) {
             return ApiError::response('not_found', 404, $request);
         }
-        $renderer = new Renderer($registry, $sanitizer, $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true);
+        $renderer = new Renderer($registry, $sanitizer, $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class));
         return Response::json(['data' => ['widgets' => $renderer->liveWidgets($result['data'])]])
             ->withHeader('Cache-Control', 'no-store, private')
             ->withHeader('X-Content-Type-Options', 'nosniff');

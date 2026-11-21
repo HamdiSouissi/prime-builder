@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PrimeBuilder\Widgets;
 
 use Prime\Content\Entry;
+use Prime\Editor\BlockRegistry;
 use Prime\Log\Logger;
 use Prime\Security\HtmlSanitizer;
 use Throwable;
@@ -19,6 +20,7 @@ final class Renderer
         private readonly ?Content $content = null,
         private readonly ?Entry $entry = null,
         private readonly bool $live = false,
+        private readonly ?BlockRegistry $blocks = null,
     ) {
     }
 
@@ -155,6 +157,7 @@ final class Renderer
             'video', 'audio' => $this->renderMedia($type, $settings),
             'posts' => $this->content?->posts($settings, $this->live) ?? '',
             'current_content' => $this->content?->current($settings, $this->entry) ?? '',
+            'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry),
             default => '',
         };
     }

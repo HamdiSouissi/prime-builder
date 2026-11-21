@@ -13,6 +13,7 @@ use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
+require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
 require_once dirname(__DIR__) . '/src/Document/Validator.php';
@@ -166,6 +167,24 @@ final class DocumentTest extends TestCase
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$gallery]])['errors']);
         $gallery['settings']['images'] = implode("\n", array_fill(0, 21, '/uploads/a.jpg|a'));
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$gallery]])['errors']);
+    }
+
+    public function testPrimeBlockUsesCoreValidatorAndRejectsPrivilegedTypes(): void
+    {
+        $node = $this->element('prime_block', 'bridge');
+        $node['settings'] = ['block_type' => 'paragraph', 'block_data' => '{"text":"Bonjour <strong>Prime</strong><script>alert(1)</script>"}'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $rendered = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertStringContainsString('pc-block--paragraph', $rendered);
+        self::assertStringContainsString('<strong>Prime</strong>', $rendered);
+        self::assertStringNotContainsString('<script', $rendered);
+        $node['settings'] = ['block_type' => 'html', 'block_data' => '{"html":"<script>alert(1)</script>"}'];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $node['settings'] = ['block_type' => 'paragraph', 'block_data' => '["not an object"]'];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $node['settings'] = ['block_type' => 'heading', 'block_data' => '{"text":"Titre","level":9}'];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
     }
 
     public function testCrashingExtensionDoesNotBreakOtherElements(): void

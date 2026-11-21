@@ -12,6 +12,7 @@ use Prime\Content\ContentTypeRegistry;
 use Prime\Content\Entry;
 use Prime\Content\EntryQuery;
 use Prime\Editor\BlockDefinition;
+use Prime\Editor\BlockRegistry;
 use Prime\Hooks\Hooks;
 use Prime\Http\Router;
 use Prime\Plugins\AbstractPlugin;
@@ -98,6 +99,7 @@ final class Plugin extends AbstractPlugin
         }, styles: ['css/alternate.css']);
 
         $registry = new Registry($context->app()->get(Hooks::class));
+        $blocks = $context->app()->get(BlockRegistry::class);
         $content = new Content($context->app()->get(EntryQuery::class), $context->app()->get(ContentTypeRegistry::class), $context->app()->get(UrlGenerator::class));
         $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
         foreach (['content.saved', 'content.updated', 'content.published', 'content.deleted', 'content.trashed', 'content.restored', 'content.status_changed'] as $event) {
@@ -126,9 +128,9 @@ final class Plugin extends AbstractPlugin
             description: 'plugin::prime-builder.block.description',
             icon: 'layout-dashboard',
             category: 'plugins',
-            validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer))->validate($data),
-            renderer: static fn (array $data, HtmlSanitizer $sanitizer, array $renderContext): string => (new Renderer($registry, $sanitizer, $context->logger(), $content, ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null))->render($data),
-            textExtractor: static fn (array $data): string => trim(strip_tags((new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content))->render($data))),
+            validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer, $blocks))->validate($data),
+            renderer: static fn (array $data, HtmlSanitizer $sanitizer, array $renderContext): string => (new Renderer($registry, $sanitizer, $context->logger(), $content, ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null, false, $blocks))->render($data),
+            textExtractor: static fn (array $data): string => trim(strip_tags((new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks))->render($data))),
             keywords: ['builder', 'layout'],
         ));
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
