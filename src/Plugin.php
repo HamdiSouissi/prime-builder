@@ -180,7 +180,7 @@ final class Plugin extends AbstractPlugin
             label: 'plugin::prime-builder.editor.label',
             render: static fn (array $state): string => $context->views()->render('prime-builder::editor/bridge', [
                 'entry' => $state['entry'] ?? null,
-                'contentJson' => $state['contentJson'] ?? '{"version":1,"blocks":[]}',
+                'contentJson' => $state['contentJson'],
             ]),
             scripts: [],
             styles: ['css/admin.css'],
@@ -240,8 +240,9 @@ final class Plugin extends AbstractPlugin
     {
         $context->notices()->add(
             id: 'welcome',
+            type: 'info',
+            title: 'plugin::prime-builder.menu.title',
             message: 'plugin::prime-builder.notices.welcome',
-            type: Notice::INFO,
         );
     }
 }

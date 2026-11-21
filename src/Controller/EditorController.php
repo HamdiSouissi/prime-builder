@@ -51,7 +51,7 @@ final class EditorController
             'entry' => $entry,
             'document' => $pbDoc,
             'widgets' => $this->widgets->metaList(),
-            'csrfToken' => method_exists($csrf, 'token') ? $csrf->token() : '',
+            'csrfToken' => $csrf instanceof Csrf ? $csrf->token() : '',
             'previewUrl' => $previewUrl,
             'pluginUrl' => $this->context->url(''),
         ]);

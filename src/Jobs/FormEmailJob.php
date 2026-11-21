@@ -33,7 +33,7 @@ final class FormEmailJob implements JobHandlerInterface
 
         try {
             $mailer = $this->context->app()->get(Mailer::class);
-            if ($mailer instanceof Mailer && method_exists($mailer, 'sendTemplate')) {
+            if ($mailer instanceof Mailer) {
                 $mailer->sendTemplate($template, $to, $subject, $data);
             }
         } catch (Throwable) {

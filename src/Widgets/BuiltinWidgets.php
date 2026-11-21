@@ -21,7 +21,7 @@ final class BuiltinWidgets
             category: 'basic',
             icon: 'type',
             defaults: ['text' => 'Titre de section', 'tag' => 'h2'],
-            renderer: static function (array $s, array $ctx) use ($e): string {
+            renderer: static function (array $s, array $ctx): string {
                 $tag = in_array($s['tag'] ?? 'h2', ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span'], true) ? (string) $s['tag'] : 'h2';
                 $text = DynamicTags::resolve((string) ($s['text'] ?? 'Titre'), $ctx);
 
@@ -85,7 +85,7 @@ final class BuiltinWidgets
             category: 'basic',
             icon: 'mouse-pointer-click',
             defaults: ['text' => 'En savoir plus', 'url' => '#'],
-            renderer: static function (array $s, array $ctx) use ($e, $u): string {
+            renderer: static function (array $s, array $ctx) use ($u): string {
                 $text = DynamicTags::resolve((string) ($s['text'] ?? 'Bouton'), $ctx);
                 $href = $u($s['url'] ?? '#');
                 $target = !empty($s['new_tab']) ? ' target="_blank" rel="noopener noreferrer"' : '';
