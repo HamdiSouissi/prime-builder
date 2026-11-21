@@ -3,6 +3,12 @@ import { History, add, createElement, duplicate, find, id, moveInto, remove, reo
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
 const ui = config.ui;
+function newElement(type) {
+  const element = createElement(type);
+  const defaults = config.widgetDefaults?.[type];
+  if (defaults) element.settings = { ...element.settings, ...defaults };
+  return element;
+}
 const $ = selector => root.querySelector(selector);
 const $$ = selector => [...root.querySelectorAll(selector)];
 const originalBlocks = config.document.blocks || [];
@@ -52,7 +58,7 @@ function ensureLayout() {
 function addWidget(type) {
   if (!config.widgets[type] || !ensureLayout()) return;
   const parent = find(history.present, selected);
-  const node = createElement(type);
+  const node = newElement(type);
   selected = node.id; tab = 'content'; panel = 'settings';
   commit(add(history.present, node, isContainer(parent) ? parent.id : null, containerTypes), true);
 }
@@ -178,7 +184,7 @@ function makeField(name, schema, current, onChange) {
     input = document.createElement('select');
     if (current == null) { const option = text('option', '—'); option.value = ''; input.append(option); }
     for (const value of schema.values) { const option = text('option', schema.option_labels?.[value] || ui[value] || value); option.value = value; input.append(option); }
-  } else if (schema.type === 'rich' || schema.type === 'multiline') {
+  } else if (schema.type === 'rich' || schema.type === 'multiline' || schema.type === 'media_list') {
     input = document.createElement('textarea');
     if (schema.max != null) input.maxLength = schema.max;
   } else {
@@ -215,7 +221,7 @@ function renderParentOptions(selectedElement) {
   walk(history.present); parentSelect.value = currentParent;
 }
 let mediaDependencies;
-async function openMedia(elementId, urlField) {
+async function openMedia(elementId, urlField, kind = 'image') {
   try {
     if (!mediaDependencies) {
       const stylesheet = new Promise((resolve, reject) => {
@@ -227,12 +233,12 @@ async function openMedia(elementId, urlField) {
     }
     const [picker, i18n] = await mediaDependencies;
     i18n.setTranslations(config.mediaMessages || {});
-    picker.openMediaPicker({ multiple: false, kinds: ['image'], title: ui.choose_media, onSelect: selection => {
+    picker.openMediaPicker({ multiple: false, kinds: [kind], title: ui.choose_media, onSelect: selection => {
       const media = Array.isArray(selection) ? selection[0] : selection;
       const node = find(history.present, elementId);
       if (!node || !media || typeof media.url !== 'string') return;
       const settings = { ...node.settings, [urlField]: media.url };
-      if (typeof media.alt === 'string') settings.alt = media.alt;
+      if (['image', 'card'].includes(node.type) && typeof media.alt === 'string') settings.alt = media.alt;
       if (node.type === 'image') {
         for (const key of ['width', 'height']) if (Number.isInteger(media[key]) && media[key] > 0 && media[key] <= 10000) settings[key] = media[key];
       }
@@ -274,9 +280,9 @@ function renderSettings() {
         if (value === undefined) delete settings[name]; else settings[name] = value;
         commit(update(history.present, selected, { settings }));
       }));
-      if ((element.type === 'image' && name === 'url') || (element.type === 'card' && name === 'image_url')) {
+      if ((['image', 'video', 'audio'].includes(element.type) && name === 'url') || (element.type === 'card' && name === 'image_url')) {
         const choose = text('button', ui.choose_media, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMedia = '';
-        choose.addEventListener('click', () => openMedia(element.id, name)); fields.append(choose);
+        choose.addEventListener('click', () => openMedia(element.id, name, ['video', 'audio'].includes(element.type) ? element.type : 'image')); fields.append(choose);
       }
     }
     if (!fields.children.length) fields.append(text('p', ui.empty, 'pb-empty'));

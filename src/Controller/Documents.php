@@ -33,6 +33,25 @@ final class Documents
     {
     }
 
+    /** @return array<string, array<string, string|int>> */
+    private function widgetDefaults(): array
+    {
+        $copy = static fn (string $key): string => t('plugin::prime-builder.defaults.' . $key);
+        return [
+            'heading' => ['text' => $copy('heading')],
+            'text' => ['text' => $copy('text')],
+            'button' => ['text' => $copy('button')],
+            'quote' => ['text' => $copy('quote')],
+            'alert' => ['text' => $copy('alert')],
+            'list' => ['items' => $copy('list')],
+            'accordion' => ['title' => $copy('accordion_title'), 'text' => $copy('accordion_text')],
+            'card' => ['title' => $copy('card_title'), 'text' => $copy('card_text')],
+            'icon_box' => ['icon' => 'star', 'title' => $copy('icon_title'), 'text' => $copy('icon_text')],
+            'counter' => ['title' => $copy('counter')],
+            'tabs' => ['label' => $copy('tabs_label'), 'title_1' => $copy('tab_1'), 'text_1' => $copy('tab_text_1'), 'title_2' => $copy('tab_2'), 'text_2' => $copy('tab_text_2')],
+        ];
+    }
+
     private function entry(int $id, ?User $user): ?Entry
     {
         $entry = $this->plugin->app()->get(EntryRepository::class)->find($id);
@@ -95,7 +114,7 @@ final class Documents
             ];
         }
         $ui = [];
-        foreach (['widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'history', 'drop', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'media_grid', 'media_error'] as $key) {
+        foreach (['widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'history', 'drop', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'media_grid', 'media_error', 'images', 'captions', 'caption_language', 'transcript', 'fr', 'en'] as $key) {
             $ui[$key] = t('plugin::prime-builder.ui.' . $key);
         }
         $config = [
@@ -115,6 +134,7 @@ final class Documents
             'publishedAt' => $entry->publishedAt,
             'canPublish' => $user instanceof User && $type !== null && $service->canPublish($user, $type),
             'widgets' => $definitions,
+            'widgetDefaults' => $this->widgetDefaults(),
             'library' => (new Library($this->plugin->path('templates')))->all(),
             'ui' => $ui,
         ];

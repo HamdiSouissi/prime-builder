@@ -91,6 +91,8 @@ final class Renderer
             'icon_box' => $this->renderIconBox($settings),
             'counter' => '<div class="pb-counter-value">' . self::escape($this->fieldText($settings, 'prefix')) . max(0, min(1000000000, (int) ($settings['value'] ?? 0))) . self::escape($this->fieldText($settings, 'suffix')) . '</div><p>' . self::escape($this->fieldText($settings, 'title')) . '</p>',
             'tabs' => $this->renderTabs($settings, $id),
+            'gallery' => $this->renderGallery($settings),
+            'video', 'audio' => $this->renderMedia($type, $settings),
             default => '',
         };
     }
@@ -165,6 +167,41 @@ final class Renderer
                 . $this->sanitizer->sanitizeBasic($body) . '</section>';
         }
         return $html . '</div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderGallery(array $settings): string
+    {
+        $lines = preg_split('/\R/u', $this->fieldText($settings, 'images')) ?: [];
+        $html = '<div class="pb-gallery-grid">';
+        foreach (array_slice($lines, 0, 20) as $line) {
+            $parts = explode('|', $line, 2);
+            $url = $this->sanitizer->sanitizeResourceUrl(trim($parts[0]));
+            if ($url !== null) {
+                $html .= '<img src="' . self::escape($url) . '" alt="' . self::escape(trim($parts[1] ?? '')) . '" loading="lazy" decoding="async">';
+            }
+        }
+        return $html . '</div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderMedia(string $type, array $settings): string
+    {
+        $url = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'url'));
+        $transcript = $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'transcript'));
+        if ($url === null) {
+            return $transcript;
+        }
+        $html = '<' . $type . ' controls preload="metadata"><source src="' . self::escape($url) . '">';
+        if ($type === 'video') {
+            $captions = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'captions'));
+            $language = ($settings['caption_language'] ?? 'fr') === 'en' ? 'en' : 'fr';
+            if ($captions !== null) {
+                $html .= '<track kind="captions" src="' . self::escape($captions) . '" srclang="' . $language . '" label="' . self::escape(t('plugin::prime-builder.ui.caption_label')) . '">';
+            }
+        }
+        $html .= '<a href="' . self::escape($url) . '">' . self::escape(t('plugin::prime-builder.ui.download_media')) . '</a></' . $type . '>';
+        return $html . ($transcript !== '' ? '<div class="pb-media-transcript">' . $transcript . '</div>' : '');
     }
 
     public static function escape(string $value): string

@@ -138,3 +138,28 @@ test('image selection uses the Prime media picker', async ({ page }) => {
   await expect(page.getByLabel('Texte alternatif')).toHaveValue('Montagnes');
   await expect(page.getByLabel('Largeur')).toHaveValue('1200');
 });
+
+
+test('built-in default widgets save and remain accessible together', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const response = await page.evaluate(async entryId => {
+    const config = JSON.parse(document.querySelector('[data-pb-config]').value);
+    const { createElement } = await import('/assets/plugins/prime-builder/js/model.js');
+    const elements = Object.keys(config.widgets).map(type => {
+      const element = createElement(type);
+      element.settings = { ...element.settings, ...(config.widgetDefaults[type] || {}) };
+      return element;
+    });
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const result = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements } }] }, status: 'published', published_at: '' }),
+    });
+    return result.status;
+  }, id);
+  expect(response).toBe(200);
+  await page.goto('/test-prime-builder');
+  await expect(page.locator('.pb-element')).toHaveCount(20);
+  await expectAccessible(page);
+});

@@ -128,6 +128,24 @@ final class DocumentTest extends TestCase
         self::assertStringNotContainsString('<script>', $html);
     }
 
+    public function testMediaUrlsAndGalleryAreValidated(): void
+    {
+        $gallery = $this->element('gallery', 'gallery');
+        $gallery['settings'] = ['images' => "/uploads/a.jpg|Vue <b>montagne</b>\n/uploads/b.jpg|"];
+        $video = $this->element('video', 'video');
+        $video['settings'] = ['url' => '/uploads/video.mp4', 'captions' => '/uploads/subtitles.vtt', 'caption_language' => 'en', 'transcript' => '<p>Transcription</p>'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$gallery, $video]]);
+        self::assertSame([], $result['errors']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertStringContainsString('alt="Vue montagne"', $html);
+        self::assertStringContainsString('<track kind="captions"', $html);
+        self::assertStringContainsString('<p>Transcription</p>', $html);
+        $gallery['settings']['images'] = 'javascript:alert(1)|Bad';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$gallery]])['errors']);
+        $gallery['settings']['images'] = implode("\n", array_fill(0, 21, '/uploads/a.jpg|a'));
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$gallery]])['errors']);
+    }
+
     public function testCrashingExtensionDoesNotBreakOtherElements(): void
     {
         $hooks = new Hooks();

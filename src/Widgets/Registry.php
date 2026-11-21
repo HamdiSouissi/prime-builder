@@ -35,6 +35,9 @@ final class Registry
             'card' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000], 'image_url' => $url, 'alt' => $text, 'url' => ['type' => 'href', 'max' => 2048], 'button_text' => $text],
             'icon_box' => ['icon' => ['type' => 'enum', 'values' => ['star', 'check', 'heart', 'spark']], 'title' => $text, 'text' => ['type' => 'rich', 'max' => 5000]],
             'counter' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 1000000000], 'prefix' => $text, 'suffix' => $text, 'title' => $text],
+            'gallery' => ['images' => ['type' => 'media_list', 'max' => 10000]],
+            'video' => ['url' => $url, 'captions' => $url, 'caption_language' => ['type' => 'enum', 'values' => ['fr', 'en']], 'transcript' => ['type' => 'rich', 'max' => 20000]],
+            'audio' => ['url' => $url, 'transcript' => ['type' => 'rich', 'max' => 20000]],
             'tabs' => [
                 'label' => $text,
                 'title_1' => $text, 'text_1' => ['type' => 'rich', 'max' => 10000],
@@ -46,7 +49,7 @@ final class Registry
         foreach ($fields as $type => $schema) {
             $definitions[$type] = [
                 'label' => 'plugin::prime-builder.widgets.' . $type,
-                'category' => $type === 'container' ? 'structure' : (in_array($type, ['accordion', 'card', 'icon_box', 'counter', 'tabs'], true) ? 'pro' : 'base'),
+                'category' => $type === 'container' ? 'structure' : (in_array($type, ['accordion', 'card', 'icon_box', 'counter', 'tabs', 'gallery', 'video', 'audio'], true) ? 'pro' : 'base'),
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];

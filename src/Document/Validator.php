@@ -121,6 +121,7 @@ final class Validator
         }
         return match ($type) {
             'text', 'multiline' => trim(strip_tags($value)),
+            'media_list' => $this->mediaList($value),
             'rich' => $this->sanitizer->sanitizeBasic($value),
             'href' => $value === '' ? '' : $this->sanitizer->sanitizeHref($value),
             'url' => $value === '' ? '' : $this->sanitizer->sanitizeResourceUrl($value),
@@ -128,6 +129,28 @@ final class Validator
             'enum' => in_array($value, is_array($schema['values'] ?? null) ? $schema['values'] : [], true) ? $value : null,
             default => null,
         };
+    }
+
+    private function mediaList(string $value): ?string
+    {
+        if (trim($value) === '') {
+            return '';
+        }
+        $lines = preg_split('/\R/u', trim($value));
+        if (!is_array($lines) || count($lines) > 20) {
+            return null;
+        }
+        $output = [];
+        foreach ($lines as $line) {
+            $parts = explode('|', $line, 2);
+            $url = $this->sanitizer->sanitizeResourceUrl(trim($parts[0]));
+            $alt = trim(strip_tags($parts[1] ?? ''));
+            if ($url === null || strlen($alt) > 300) {
+                return null;
+            }
+            $output[] = $url . '|' . $alt;
+        }
+        return implode("\n", $output);
     }
 
     /**
