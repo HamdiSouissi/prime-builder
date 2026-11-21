@@ -147,7 +147,7 @@ final class DocumentValidator
     ): array {
         $clean = [];
         foreach ($settings as $key => $value) {
-            if (!is_string($key) || $key === '') {
+            if ($key === '') {
                 continue;
             }
             $cleanKey = preg_replace('/[^a-zA-Z0-9_.-]/', '', $key) ?? '';
