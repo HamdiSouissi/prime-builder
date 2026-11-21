@@ -42,6 +42,7 @@ final class Registry
             'current_content' => ['source' => ['type' => 'enum', 'values' => ['title', 'excerpt', 'published', 'author']]],
             'prime_block' => ['block_type' => ['type' => 'enum', 'values' => PrimeBlock::ALLOWED], 'block_data' => ['type' => 'json_object', 'max' => 20000], 'block_anchor' => ['type' => 'text', 'max' => 100]],
             'original_content' => ['payload' => ['type' => 'protected', 'max' => 1048576]],
+            'original_group' => ['payload' => ['type' => 'protected', 'max' => 1048576]],
             'tabs' => [
                 'label' => $text,
                 'title_1' => $text, 'text_1' => ['type' => 'rich', 'max' => 10000],
@@ -57,7 +58,7 @@ final class Registry
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];
-            if ($type === 'original_content') {
+            if (in_array($type, ['original_content', 'original_group'], true)) {
                 $definitions[$type]['hidden'] = true;
                 $definitions[$type]['read_only'] = true;
             }

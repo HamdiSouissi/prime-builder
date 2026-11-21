@@ -17,10 +17,16 @@ if (!is_string($content)) {
     throw new RuntimeException('Fixture entry not found.');
 }
 $document = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
-if (!is_array($document) || ($document['blocks'][1]['type'] ?? null) !== 'html') {
-    throw new RuntimeException('Expected an HTML block in the fixture.');
+$indexes = array_slice($argv, 2);
+if ($indexes === []) {
+    $indexes = ['1'];
 }
-$document['blocks'][1]['type'] = 'missing/block';
+foreach ($indexes as $index) {
+    if (!ctype_digit($index) || !is_array($document) || ($document['blocks'][(int) $index]['type'] ?? null) !== 'html') {
+        throw new RuntimeException('Expected an HTML block at each fixture index.');
+    }
+    $document['blocks'][(int) $index]['type'] = 'missing/block-' . $index;
+}
 $encoded = json_encode($document, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 $update = $pdo->prepare("UPDATE `{$prefix}entries` SET `content` = ? WHERE `id` = ?");
 $update->execute([$encoded, (int) $id]);

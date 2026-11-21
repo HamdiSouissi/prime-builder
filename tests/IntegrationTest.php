@@ -825,11 +825,19 @@ final class IntegrationTest extends TestCase
         }
 
         // Multiple unavailable renderers have no recoverable individual boundaries.
-        $statement->execute([(string) json_encode(['version' => 1, 'blocks' => [$missing, $known, ['id' => 'other', 'type' => 'missing/other', 'data' => []]]]), $unavailableHtml . "\n" . $knownHtml . "\n<div>Autre</div>"]);
-        self::assertSame(true, $this->editorConfig($app, 1)['conversionFailed']);
+        $groupedHtml = $unavailableHtml . "\n" . $knownHtml . "\n<div>Autre</div>";
+        $statement->execute([(string) json_encode(['version' => 1, 'blocks' => [$missing, $known, ['id' => 'other', 'type' => 'missing/other', 'data' => []]]]), $groupedHtml]);
+        $config = $this->editorConfig($app, 1);
+        self::assertSame(false, $config['conversionFailed']);
+        $elements = $config['document']['blocks'][0]['data']['elements'];
+        self::assertSame(['original_group'], array_column($elements, 'type'));
+        $original = $originals->open($elements[0]['settings']['payload']);
+        self::assertNotNull($original);
+        self::assertSame(true, $original['grouped']);
+        self::assertSame($groupedHtml, $original['html']);
     }
 
-    public function testUnknownBlockBoundariesFailClosedAndStaleDocumentIsRejected(): void
+    public function testUnknownBlockBoundariesAreGroupedAndStaleDocumentIsRejected(): void
     {
         $app = $this->activated('admin');
         $pdo = $this->db($app)->pdo();
@@ -838,11 +846,52 @@ final class IntegrationTest extends TestCase
         $stmt = $pdo->prepare('UPDATE pc_entries SET content = ?, content_html = ? WHERE id = 1');
         $stmt->execute([$content, $html]);
         $config = $this->editorConfig($app, 1);
-        self::assertSame(true, $config['conversionFailed']);
+        self::assertSame(false, $config['conversionFailed']);
+        self::assertSame(true, $config['converted']);
+        $elements = $config['document']['blocks'][0]['data']['elements'];
+        self::assertSame(['original_group'], array_column($elements, 'type'));
+        self::assertSame([], $elements[0]['children']);
         $entry = $app->get(EntryRepository::class)->find(1);
         self::assertNotNull($entry);
         self::assertSame($content, $entry->content);
         self::assertSame($html, $entry->contentHtml);
+        $originals = \PrimeBuilder\Widgets\OriginalContent::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($originals);
+        $original = $originals->open($elements[0]['settings']['payload']);
+        self::assertNotNull($original);
+        self::assertSame($html, $original['html']);
+        self::assertSame(true, $original['grouped']);
+
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $config['document']['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        self::assertStringContainsString($html, json_decode($preview->body(), true)['data']['html']);
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $config['document'], 'source_hash' => $config['sourceHash']], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $savedEntry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($savedEntry);
+        self::assertStringContainsString($html, $savedEntry->contentHtml);
+        $view = new EntryView($savedEntry, $app->get(UrlGenerator::class));
+        self::assertStringContainsString($html, $view->content());
+        $reopened = $this->editorConfig($app, 1);
+        self::assertSame(false, $reopened['conversionFailed']);
+        self::assertSame('original_group', $reopened['document']['blocks'][0]['data']['elements'][0]['type']);
+        self::assertSame($html, $originals->open($reopened['document']['blocks'][0]['data']['elements'][0]['settings']['payload'])['html'] ?? null);
+
+        // Grouped data is entry-bound and authenticated; it cannot be relabelled or restyled.
+        $altered = $config['document'];
+        $altered['blocks'][0]['data']['elements'][0]['settings']['payload'] .= 'x';
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $altered], $token)->status());
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/2', ['content' => $config['document']], $token)->status());
+        $altered = $config['document'];
+        $altered['blocks'][0]['data']['elements'][0]['type'] = 'original_content';
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $altered], $token)->status());
+        $altered = $config['document'];
+        $altered['blocks'][0]['data']['elements'][0]['styles'] = ['desktop' => ['color' => '#000']];
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $altered], $token)->status());
+        $altered = $config['document'];
+        $altered['blocks'][0]['data']['elements'][0]['settings']['payload'] = $app->get(\Prime\Security\Encrypter::class)->encrypt((string) json_encode(['entry' => 1, 'type' => 'saved-document', 'html' => '<script>alert(1)</script>', 'grouped' => true]));
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $altered], $token)->status());
 
         // A lone unavailable block has an unambiguous saved HTML fragment.
         $single = '{"version":1,"blocks":[{"id":"a","type":"missing/block","data":{}}]}';

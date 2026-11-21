@@ -896,6 +896,51 @@ test('unavailable block between existing blocks remains read-only and survives s
   await expectAccessible(page);
 });
 
+test('unrecoverable block boundaries remain one read-only group after saving and reopening', async ({ page }) => {
+  const groupId = process.env.E2E_GROUP_ENTRY_ID;
+  expect(groupId).toMatch(/^[1-9][0-9]*$/);
+  await page.goto('/blocs-groupes?before-grouping=1');
+  const before = (await page.locator('.aurora-prose').innerHTML()).trim();
+  expect(before).toContain('Premier bloc d’origine');
+  expect(before).toContain('Milieu conservé');
+  expect(before).toContain('Dernier bloc d’origine');
+  let nativeDialogs = 0;
+  page.on('dialog', dialog => { nativeDialogs += 1; dialog.dismiss(); });
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${groupId}`);
+  const group = await page.evaluate(() => JSON.parse(document.querySelector('[data-pb-config]').value).document.blocks[0].data.elements);
+  expect(group.map(node => node.type)).toEqual(['original_group']);
+  expect(group[0].children).toEqual([]);
+  const warning = page.locator('[data-pb-group-warning]');
+  await expect(warning).toBeVisible();
+  await expect(warning).toHaveAttribute('role', 'status');
+  await expect(warning).toContainText('ne peuvent pas être modifiés, déplacés ou supprimés séparément');
+  await expect(warning).toContainText('contenu dynamique reste figé');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.locator('.pb-original_group')).toHaveCount(1);
+  await expect(frame.locator('.pb-original_group')).toContainText('Milieu conservé');
+  await page.getByRole('button', { name: 'Structure', exact: true }).click();
+  await page.getByRole('button', { name: 'Contenus d’origine groupés', exact: true }).click();
+  await expect(page.locator('[data-pb-fields] input, [data-pb-fields] textarea, [data-pb-fields] select')).toHaveCount(0);
+  await expect(page.locator('[data-pb-fields]')).toContainText('supprimer cet élément affecte tout le groupe');
+  await expectAccessible(page);
+  // The group can be removed as a whole, never as separate original blocks.
+  await page.locator('[data-pb-action="remove"]').click();
+  await expect(warning).toBeHidden();
+  await page.locator('[data-pb-undo]').click();
+  await expect(warning).toBeVisible();
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.reload();
+  await expect(warning).toBeVisible();
+  await expect(page.frameLocator('[data-pb-frame]').locator('.pb-original_group')).toContainText('Dernier bloc d’origine');
+  await page.goto('/blocs-groupes?after-grouping=1');
+  await expect(page.locator('.pb-original_group')).toHaveCount(1);
+  expect((await page.locator('.pb-original_group').innerHTML()).trim()).toBe(before);
+  expect(nativeDialogs).toBe(0);
+  await expectAccessible(page);
+});
+
 test('departure dialog traps and restores focus and closes on Escape', async ({ page }) => {
   let nativeDialogs = 0;
   page.on('dialog', dialog => { nativeDialogs += 1; dialog.dismiss(); });

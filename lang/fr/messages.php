@@ -111,6 +111,7 @@ return [
     ],
     'widgets' => [
         'original_content' => 'Contenu d’origine',
+        'original_group' => 'Contenus d’origine groupés',
         'prime_block' => 'Bloc Prime',
         'posts' => 'Articles récents',
         'current_content' => 'Contenu actuel',
@@ -138,6 +139,7 @@ return [
     'ui' => [
         'conversion_failed' => 'Impossible de convertir ce contenu sans risquer de perdre son HTML enregistré. L’enregistrement est désactivé ; revenez à Prime Editor.',
         'original_read_only' => 'Ce contenu d’origine ne peut pas être modifié ici. Vous pouvez le déplacer ou le supprimer.',
+        'original_group_warning' => 'Les limites des blocs d’origine ne peuvent pas être retrouvées : leur HTML enregistré est conservé ensemble en lecture seule. Ils ne peuvent pas être modifiés, déplacés ou supprimés séparément ; déplacer ou supprimer cet élément affecte tout le groupe. À l’enregistrement, leurs réglages d’origine ne sont pas conservés et leur contenu dynamique reste figé.',
         'unsaved_short' => 'Non enregistré',
         'confirm_title' => 'Confirmer',
         'notice_title' => 'Information',

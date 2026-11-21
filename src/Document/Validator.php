@@ -117,11 +117,17 @@ final class Validator
                     $settings['block_data'] = $normalizedBlock;
                 }
             }
-            if ($type === 'original_content' && (!isset($settings['payload']) || count($settings) !== 1)) {
-                $errors[] = t('plugin::prime-builder.validation.settings');
+            $isOriginal = in_array($type, ['original_content', 'original_group'], true);
+            if ($isOriginal) {
+                $payload = $settings['payload'] ?? null;
+                $original = is_string($payload) ? $this->originals?->open($payload) : null;
+                // The authenticated marker prevents relabelling a whole document as one block.
+                if (count($settings) !== 1 || $original === null || $original['grouped'] !== ($type === 'original_group')) {
+                    $errors[] = t('plugin::prime-builder.validation.settings');
+                }
             }
             $styles = $this->styles($item['styles'] ?? [], $errors);
-            if ($type === 'original_content' && $styles !== []) {
+            if ($isOriginal && $styles !== []) {
                 $errors[] = t('plugin::prime-builder.validation.styles');
             }
             $children = $item['children'] ?? [];

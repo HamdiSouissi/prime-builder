@@ -602,7 +602,7 @@ function renderSettings() {
   $$('[data-pb-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.pbTab === tab)));
   const fields = $('[data-pb-fields]'); fields.replaceChildren();
   if (definition?.readOnly) {
-    fields.append(text('p', ui.original_read_only, 'pb-intro'));
+    fields.append(text('p', element.type === 'original_group' ? ui.original_group_warning : ui.original_read_only, 'pb-intro'));
     return;
   }
   if (tab === 'content') {
@@ -654,7 +654,11 @@ function renderSettings() {
     }
   }
 }
+function hasGroupedOriginal(elements) {
+  return elements.some(element => element.type === 'original_group' || hasGroupedOriginal(element.children || []));
+}
 function renderPanel() {
+  $('[data-pb-group-warning]').hidden = !hasGroupedOriginal(history.present);
   $('[data-pb-widget-panel]').hidden = panel !== 'widgets';
   $('[data-pb-navigator-panel]').hidden = panel !== 'navigator';
   $('[data-pb-settings-panel]').hidden = panel !== 'settings';

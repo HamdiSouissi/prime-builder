@@ -199,17 +199,51 @@ final class DocumentTest extends TestCase
         $validator = new Validator($registry, new HtmlSanitizer(), originals: $originals, entryId: 1);
         foreach (array_keys($registry->all()) as $type) {
             $node = $this->element($type, $type);
-            if ($type === 'original_content') {
-                $node['settings'] = ['payload' => $originals->protect(1, 'legacy', '<p>Conservé</p>')];
+            if (in_array($type, ['original_content', 'original_group'], true)) {
+                $node['settings'] = ['payload' => $originals->protect(1, 'legacy', '<p>Conservé</p>', $type === 'original_group')];
             }
             $result = $validator->validate(['version' => 1, 'elements' => [$node]]);
             self::assertSame([], $result['errors'], $type);
             $html = $renderer->render($result['data']);
             self::assertStringContainsString('data-pb-id="' . $type . '"', $html);
-            if ($type === 'original_content') {
+            if (in_array($type, ['original_content', 'original_group'], true)) {
                 self::assertStringContainsString('<p>Conservé</p>', $html);
             }
         }
+    }
+
+    public function testGroupedFallbackRespectsKeyAndDocumentSizeLimits(): void
+    {
+        $blocks = new \Prime\Editor\BlockRegistry();
+        $sanitizer = new HtmlSanitizer();
+        $registry = new Registry();
+        $originals = OriginalContent::fromAppKey(str_repeat('k', 32));
+        self::assertNotNull($originals);
+        self::assertSame(null, OriginalContent::fromAppKey(''));
+        $content = (string) json_encode(['version' => 1, 'blocks' => [
+            ['id' => 'one', 'type' => 'missing/one', 'data' => []],
+            ['id' => 'two', 'type' => 'missing/two', 'data' => []],
+        ]]);
+        $entry = \Prime\Content\Entry::fromRow(['id' => 1, 'content' => $content, 'content_html' => '<p>Un</p><p>Deux</p>']);
+        $converter = new \PrimeBuilder\Document\Converter($blocks, $sanitizer, $registry, $originals);
+        self::assertNotNull($converter->convert($entry));
+        self::assertSame(null, (new \PrimeBuilder\Document\Converter($blocks, $sanitizer, $registry, null))->convert($entry));
+        $tooLarge = \Prime\Content\Entry::fromRow(['id' => 1, 'content' => $content, 'content_html' => str_repeat('x', Validator::MAX_BYTES + 1)]);
+        self::assertSame(null, $converter->convert($tooLarge));
+        // Even when the raw HTML is under 1 MiB, its encrypted layout must fit the limit.
+        $expandsPastLimit = \Prime\Content\Entry::fromRow(['id' => 1, 'content' => $content, 'content_html' => str_repeat('x', 800000)]);
+        self::assertSame(null, $converter->convert($expandsPastLimit));
+        $noBlocks = \Prime\Content\Entry::fromRow(['id' => 1, 'content_html' => "  \n"]);
+        $converted = $converter->convert($noBlocks);
+        self::assertNotNull($converted);
+        $element = $converted['blocks'][0]['data']['elements'][0];
+        self::assertSame('original_group', $element['type']);
+        self::assertSame("  \n", $originals->open($element['settings']['payload'])['html'] ?? null);
+
+        $validator = new Validator($registry, $sanitizer, $blocks, $originals, 1);
+        $node = $this->element('original_group');
+        $node['settings'] = ['payload' => $originals->protect(1, 'legacy', '<p>Seul</p>')];
+        self::assertNotEmpty($validator->validate(['version' => 1, 'elements' => [$node]])['errors']);
     }
 
     public function testNewWidgetsProduceSafeReadableFallbacks(): void

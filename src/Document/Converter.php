@@ -13,7 +13,7 @@ use PrimeBuilder\Widgets\PrimeBlock;
 use PrimeBuilder\Widgets\Registry;
 use Throwable;
 
-/** Converts only when the individual saved HTML fragments can be recovered without guessing. */
+/** Converts without guessing fragment boundaries; otherwise keeps the saved HTML together. */
 final class Converter
 {
     public function __construct(
@@ -33,7 +33,7 @@ final class Converter
             return $document;
         }
         if ($blocks === []) {
-            return trim($entry->contentHtml) === '' ? Layout::document(['version' => 1, 'elements' => []]) : null;
+            return $entry->contentHtml === '' ? Layout::document(['version' => 1, 'elements' => []]) : $this->grouped($entry);
         }
         // The new container consumes one element of the validator's budget.
         if (count($blocks) >= Validator::MAX_ELEMENTS) {
@@ -45,7 +45,7 @@ final class Converter
             $fragments = $this->fragments($entry, false);
         }
         if ($fragments === null) {
-            return null;
+            return $this->grouped($entry);
         }
 
         $bridge = new PrimeBlock($this->blocks, $this->sanitizer);
@@ -105,11 +105,35 @@ final class Converter
     }
 
     /**
+     * Preserve the actual saved HTML, not a guessed re-render, as one authenticated leaf.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function grouped(Entry $entry): ?array
+    {
+        try {
+            $payload = $this->originals?->protect($entry->id, 'saved-document', $entry->contentHtml, true);
+            if ($payload === null) {
+                return null;
+            }
+            $layout = ['version' => 1, 'elements' => [[
+                'id' => $this->id(), 'type' => 'original_group',
+                'settings' => ['payload' => $payload], 'styles' => [], 'children' => [],
+            ]]];
+            // Encryption expands the input; do not bypass the normal size, node or key checks.
+            $validated = (new Validator($this->registry, $this->sanitizer, $this->blocks, $this->originals, $entry->id))->validate($layout);
+            return $validated['errors'] === [] ? Layout::document($validated['data']) : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * Reproduce the current renderers, including unique heading anchors. With one unavailable
      * renderer, recover its HTML only when all surrounding output matches the saved prefix and
      * suffix. This assumes those other renderers have not changed since the content was saved;
      * the CMS stores only a combined HTML string, not authoritative per-block fragments.
-     * Refuse mismatches or multiple unavailable renderers instead of discarding content.
+     * Signal mismatches or multiple unavailable renderers so they can be preserved together.
      *
      * @return list<string>|null
      */

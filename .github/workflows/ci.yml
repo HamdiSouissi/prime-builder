@@ -233,6 +233,11 @@ jobs:
           test -n "$MISSING_ID"
           php ../builder/tests/e2e/mark-block-missing.php "$MISSING_ID"
           echo "E2E_MISSING_ENTRY_ID=$MISSING_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Blocs groupés' --slug=blocs-groupes --status=published --body='{"version":1,"blocks":[{"id":"first","type":"html","data":{"html":"<p data-legacy=\"first\">Premier bloc d’origine</p>"}},{"id":"middle","type":"paragraph","data":{"text":"Milieu conservé"}},{"id":"last","type":"html","data":{"html":"<p data-legacy=\"last\">Dernier bloc d’origine</p>"}}]}' 2>&1 | tee -a /tmp/prime-install.log
+          GROUP_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$GROUP_ID"
+          php ../builder/tests/e2e/mark-block-missing.php "$GROUP_ID" 0 2
+          echo "E2E_GROUP_ENTRY_ID=$GROUP_ID" >> "$GITHUB_ENV"
           php bin/prime content:create --type=page --title='Parcours souris' --slug=parcours-souris --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
           MOUSE_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
           test -n "$MOUSE_ID"

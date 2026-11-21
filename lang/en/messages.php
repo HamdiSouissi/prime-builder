@@ -111,6 +111,7 @@ return [
     ],
     'widgets' => [
         'original_content' => 'Original content',
+        'original_group' => 'Grouped original content',
         'prime_block' => 'Prime block',
         'posts' => 'Recent posts',
         'current_content' => 'Current content',
@@ -138,6 +139,7 @@ return [
     'ui' => [
         'conversion_failed' => 'This content cannot be converted without risking loss of saved HTML. Saving is disabled; return to Prime Editor.',
         'original_read_only' => 'This original content cannot be edited here. You can move or delete it.',
+        'original_group_warning' => 'The original block boundaries could not be recovered: their saved HTML is kept together as read-only content. The blocks cannot be edited, moved or deleted individually; moving or deleting this element affects the whole group. Saving does not retain their original settings, and dynamic content remains frozen.',
         'unsaved_short' => 'Not saved',
         'confirm_title' => 'Confirm',
         'notice_title' => 'Notice',

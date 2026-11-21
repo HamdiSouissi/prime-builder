@@ -28,6 +28,7 @@ declare(strict_types=1);
         <div class="pb-top-actions"><button type="button" class="pb-button pb-button-quiet" data-pb-command-open aria-haspopup="dialog"><?= $this->e(t('plugin::prime-builder.ui.commands')) ?> <span aria-hidden="true"><?= $this->e(t('plugin::prime-builder.ui.command_hint')) ?></span></button><span class="pb-save-state" data-pb-save-state aria-live="polite"></span><a class="pb-button pb-button-quiet" href="<?= $this->e($entry->editUrl()) ?>"><?= $this->e(t('plugin::prime-builder.ui.back')) ?></a><button type="button" class="pb-button pb-button-primary" data-pb-save><?= $this->e(t('plugin::prime-builder.ui.save')) ?></button></div>
     </header>
     <p class="pb-conversion-warning" data-pb-conversion-warning role="alert" hidden><?= $this->e(t('plugin::prime-builder.ui.conversion_failed')) ?></p>
+    <p class="pb-conversion-warning" data-pb-group-warning role="status" aria-live="polite" hidden><?= $this->e(t('plugin::prime-builder.ui.original_group_warning')) ?></p>
     <div class="pb-workspace">
         <aside class="pb-sidebar" aria-label="<?= $this->e(t('plugin::prime-builder.ui.sidebar')) ?>">
             <div class="pb-panel-head"><div><span class="pb-eyebrow"><?= $this->e(t('plugin::prime-builder.ui.eyebrow')) ?></span><h1><?= $this->e(t('plugin::prime-builder.ui.editor_title')) ?></h1></div><span class="pb-panel-dot" aria-hidden="true"></span></div>

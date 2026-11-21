@@ -30,20 +30,25 @@ final class OriginalContent
         }
     }
 
-    public function protect(int $entryId, string $type, string $html): ?string
+    public function protect(int $entryId, string $type, string $html, bool $grouped = false): ?string
     {
         if ($entryId < 1 || strlen($html) > 1048576) {
             return null;
         }
         try {
-            $json = json_encode(['entry' => $entryId, 'type' => $type, 'html' => $html], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            /** @var array<string, bool|int|string> $data */
+            $data = ['entry' => $entryId, 'type' => $type, 'html' => $html];
+            if ($grouped) {
+                $data['grouped'] = true;
+            }
+            $json = json_encode($data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             return $this->encrypter->encrypt($json);
         } catch (Throwable) {
             return null;
         }
     }
 
-    /** @return array{entry: int, type: string, html: string}|null */
+    /** @return array{entry: int, type: string, html: string, grouped: bool}|null */
     public function open(string $payload): ?array
     {
         if (strlen($payload) > 1048576) {
@@ -51,10 +56,10 @@ final class OriginalContent
         }
         try {
             $value = json_decode($this->encrypter->decrypt($payload), true, 16, JSON_THROW_ON_ERROR);
-            if (!is_array($value) || !is_int($value['entry'] ?? null) || $value['entry'] < 1 || !is_string($value['type'] ?? null) || !is_string($value['html'] ?? null) || strlen($value['html']) > 1048576) {
+            if (!is_array($value) || !is_int($value['entry'] ?? null) || $value['entry'] < 1 || !is_string($value['type'] ?? null) || !is_string($value['html'] ?? null) || strlen($value['html']) > 1048576 || (array_key_exists('grouped', $value) && !is_bool($value['grouped']))) {
                 return null;
             }
-            return ['entry' => $value['entry'], 'type' => $value['type'], 'html' => $value['html']];
+            return ['entry' => $value['entry'], 'type' => $value['type'], 'html' => $value['html'], 'grouped' => $value['grouped'] ?? false];
         } catch (Throwable) {
             return null;
         }
