@@ -1,4 +1,4 @@
-import { History, add, createElement, duplicate, find, id, moveInto, remove, reorder, update } from './model.js';
+import { History, add, createElement, duplicate, find, id, insertAfter, moveInto, remove, reorder, update } from './model.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -22,6 +22,10 @@ let panel = 'widgets';
 let dirty = false;
 let requestNumber = 0;
 let previewTimer;
+let clipboard = null;
+let contextOpener = null;
+const toolbar = $('[data-pb-selection-toolbar]');
+const contextMenu = $('[data-pb-context-menu]');
 const frame = $('[data-pb-frame]');
 const status = $('[data-pb-status]');
 const schedule = $('[data-pb-schedule]');
@@ -149,6 +153,11 @@ function renderTree() {
       });
       const button = text('button', config.widgets[element.type]?.label || element.type); button.type = 'button';
       button.addEventListener('click', () => { selected = element.id; tab = 'content'; panel = 'settings'; renderPanel(); schedulePreview(); });
+      row.addEventListener('contextmenu', event => {
+        event.preventDefault(); event.stopPropagation();
+        selected = element.id; tab = 'content'; panel = 'settings'; renderPanel(); schedulePreview();
+        openContext(event.clientX, event.clientY, $('[data-pb-context-open]'));
+      });
       row.append(handle, button); item.append(row);
       if (element.children?.length) item.append(build(element.children));
       list.append(item);
@@ -157,9 +166,13 @@ function renderTree() {
   }
   target.append(build(history.present));
 }
-function freshIds(elements) {
+function freshIds(elements, removeAnchors = false) {
   const copy = structuredClone(elements);
-  const visit = node => { node.id = id(); (node.children || []).forEach(visit); };
+  const visit = node => {
+    node.id = id();
+    if (removeAnchors && node.type === 'prime_block' && node.settings) delete node.settings.block_anchor;
+    (node.children || []).forEach(visit);
+  };
   copy.forEach(visit);
   return copy;
 }
@@ -412,6 +425,77 @@ function renderPanel() {
   if (panel === 'navigator') renderTree();
   if (panel === 'library') renderLibrary();
   if (panel === 'settings') renderSettings();
+  positionToolbar();
+}
+function positionToolbar() {
+  const doc = frame.contentDocument;
+  const node = selected && doc ? doc.querySelector(`[data-pb-id="${CSS.escape(selected)}"]`) : null;
+  if (!node) { toolbar.hidden = true; return; }
+  const outer = frame.getBoundingClientRect(), inner = node.getBoundingClientRect();
+  const left = Math.max(0, outer.left, outer.left + inner.left);
+  const right = Math.min(innerWidth, outer.right, outer.left + inner.right);
+  const top = Math.max(0, outer.top, outer.top + inner.top);
+  const bottom = Math.min(innerHeight, outer.bottom, outer.top + inner.bottom);
+  if (right <= left || bottom <= top) { toolbar.hidden = true; return; }
+  toolbar.hidden = false;
+  toolbar.style.left = `${Math.max(8, Math.min(innerWidth - toolbar.offsetWidth - 8, right - toolbar.offsetWidth))}px`;
+  toolbar.style.top = `${Math.max(8, Math.min(innerHeight - toolbar.offsetHeight - 8, top - toolbar.offsetHeight))}px`;
+}
+function closeContext(restore = false) {
+  if (contextMenu.hidden) return;
+  contextMenu.hidden = true;
+  $$('[data-pb-context-open], [data-pb-toolbar-menu]').forEach(button => button.setAttribute('aria-expanded', 'false'));
+  if (restore) {
+    const fallback = $('[data-pb-context-open]');
+    const target = contextOpener?.isConnected && contextOpener.getClientRects().length ? contextOpener : fallback;
+    if (target?.getClientRects().length) target.focus();
+  }
+  contextOpener = null;
+}
+function openContext(x, y, opener) {
+  const element = find(history.present, selected);
+  if (!element || !ensureLayout()) return;
+  const readOnly = Boolean(config.widgets[element.type]?.readOnly);
+  contextMenu.querySelector('[data-pb-context="paste"]').disabled = !clipboard;
+  contextMenu.querySelector('[data-pb-context="paste_style"]').disabled = !clipboard || readOnly;
+  contextMenu.querySelector('[data-pb-context="reset_style"]').disabled = readOnly || !Object.keys(element.styles || {}).length;
+  contextOpener = opener;
+  contextMenu.hidden = false;
+  contextMenu.style.left = '0px'; contextMenu.style.top = '0px';
+  contextMenu.style.left = `${Math.max(8, Math.min(innerWidth - contextMenu.offsetWidth - 8, x))}px`;
+  contextMenu.style.top = `${Math.max(8, Math.min(innerHeight - contextMenu.offsetHeight - 8, y))}px`;
+  $$('[data-pb-context-open], [data-pb-toolbar-menu]').forEach(button => button.setAttribute('aria-expanded', 'true'));
+  contextMenu.querySelector('[role="menuitem"]:not([disabled])')?.focus();
+}
+function openContextFrom(button) {
+  const rect = button.getBoundingClientRect();
+  openContext(rect.left, rect.bottom + 4, button);
+}
+function performElementAction(action) {
+  const element = find(history.present, selected);
+  if (!element || !ensureLayout()) return;
+  const readOnly = Boolean(config.widgets[element.type]?.readOnly);
+  if (action === 'copy') {
+    clipboard = structuredClone(element);
+    $('[data-pb-live]').textContent = ui.copied;
+    return;
+  }
+  if (action === 'paste') {
+    if (!clipboard) return;
+    const copy = freshIds([clipboard], true)[0];
+    const next = isContainer(element) ? add(history.present, copy, element.id, containerTypes) : insertAfter(history.present, element.id, copy);
+    selected = copy.id; tab = 'content'; panel = 'settings';
+    commit(next, true);
+    $('[data-pb-live]').textContent = ui.pasted;
+    return;
+  }
+  if (action === 'paste_style' && clipboard && !readOnly) commit(update(history.present, element.id, { styles: structuredClone(clipboard.styles || {}) }));
+  if (action === 'reset_style' && !readOnly) commit(update(history.present, element.id, { styles: {} }));
+  if (action === 'duplicate') commit(duplicate(history.present, element.id));
+  if (action === 'move_up') commit(reorder(history.present, element.id, -1));
+  if (action === 'move_down') commit(reorder(history.present, element.id, 1));
+  if (action === 'remove') { commit(remove(history.present, element.id)); selected = null; panel = 'widgets'; }
+  renderPanel();
 }
 function cssLength(value, width = false) {
   if (Number.isInteger(value) && value >= 0 && value <= 2000) return `${value}px`;
@@ -429,6 +513,7 @@ function applyVisualStyles(doc) {
     for (const element of elements) {
       const node = doc.querySelector(`[data-pb-id="${CSS.escape(element.id)}"]`);
       if (node) {
+        node.draggable = true;
         if (element.type === 'container') {
           node.style.display = element.settings.layout === 'grid' ? 'grid' : 'flex';
           node.style.flexDirection = element.settings.direction === 'row' ? 'row' : 'column';
@@ -496,6 +581,7 @@ async function renderPreview() {
       if (area) area.innerHTML = result.data.html;
     }
     applyVisualStyles(doc);
+    positionToolbar();
   } catch { $('[data-pb-save-state]').textContent = ui.connection_error; }
 }
 function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 180); }
@@ -508,13 +594,36 @@ function attachFrameEvents() {
     if (target) { event.preventDefault(); event.stopPropagation(); selected = target.dataset.pbId; panel = 'settings'; tab = 'content'; renderPanel(); schedulePreview(); }
     else if (event.target.closest('a')) event.preventDefault();
   }, true);
+  doc.addEventListener('contextmenu', event => {
+    const target = event.target.closest('[data-pb-id]');
+    if (!target) return;
+    event.preventDefault(); event.stopPropagation();
+    selected = target.dataset.pbId; panel = 'settings'; tab = 'content'; renderPanel(); schedulePreview();
+    const rect = frame.getBoundingClientRect();
+    openContext(rect.left + event.clientX, rect.top + event.clientY, $('[data-pb-context-open]'));
+  });
+  doc.addEventListener('pointerdown', () => closeContext());
+  doc.addEventListener('scroll', positionToolbar, true);
+  doc.addEventListener('dragstart', event => {
+    const target = event.target.closest('[data-pb-id]');
+    if (!target || !event.dataTransfer) return;
+    event.dataTransfer.setData('text/prime-builder-element', target.dataset.pbId);
+    event.dataTransfer.effectAllowed = 'move';
+  });
   doc.addEventListener('dragover', event => event.preventDefault());
   doc.addEventListener('drop', event => {
     event.preventDefault();
-    const type = event.dataTransfer.getData('text/prime-builder-widget');
-    if (!type) return;
+    if (!event.dataTransfer) return;
     const target = event.target.closest('[data-pb-id]');
     const node = target ? find(history.present, target.dataset.pbId) : null;
+    const source = event.dataTransfer.getData('text/prime-builder-element');
+    if (source && (!node || isContainer(node))) {
+      selected = source; panel = 'settings'; tab = 'content';
+      commit(moveInto(history.present, source, node?.id || null, containerTypes), true);
+      return;
+    }
+    const type = event.dataTransfer.getData('text/prime-builder-widget');
+    if (!type) return;
     selected = isContainer(node) ? node.id : null;
     addWidget(type);
   });
@@ -592,15 +701,42 @@ $$('[data-pb-device]').forEach(button => button.addEventListener('click', () => 
   $('[data-pb-frame-wrap]').style.maxWidth = device === 'desktop' ? '' : `${device === 'tablet' ? config.tabletBreakpoint : Math.min(config.mobileBreakpoint, 375)}px`;
   if (panel === 'settings') renderSettings(); schedulePreview();
 }));
-$$('[data-pb-action]').forEach(button => button.addEventListener('click', () => {
-  if (!selected) return;
-  const action = button.dataset.pbAction;
-  if (action === 'remove') { commit(remove(history.present, selected)); selected = null; panel = 'widgets'; }
-  if (action === 'duplicate') commit(duplicate(history.present, selected));
-  if (action === 'move_up') commit(reorder(history.present, selected, -1));
-  if (action === 'move_down') commit(reorder(history.present, selected, 1));
-  renderPanel();
+$$('[data-pb-action]').forEach(button => button.addEventListener('click', () => performElementAction(button.dataset.pbAction)));
+$$('[data-pb-tool]').forEach(button => button.addEventListener('click', () => performElementAction(button.dataset.pbTool)));
+$$('[data-pb-context-open], [data-pb-toolbar-menu]').forEach(button => button.addEventListener('click', () => {
+  if (contextMenu.hidden) openContextFrom(button); else closeContext(true);
 }));
+contextMenu.addEventListener('click', event => {
+  const button = event.target.closest('[data-pb-context]');
+  if (!button || button.disabled) return;
+  const action = button.dataset.pbContext;
+  closeContext(); performElementAction(action);
+  const nextFocus = panel === 'settings' ? $('[data-pb-context-open]') : $('[data-pb-panel="widgets"]');
+  nextFocus?.focus();
+});
+contextMenu.addEventListener('keydown', event => {
+  const items = [...contextMenu.querySelectorAll('[role="menuitem"]:not([disabled])')];
+  const index = items.indexOf(document.activeElement);
+  if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  } else if (event.key === 'Escape' || event.key === 'Tab') { event.preventDefault(); closeContext(true); }
+});
+toolbar.addEventListener('keydown', event => {
+  const buttons = [...toolbar.querySelectorAll('button')];
+  const index = buttons.indexOf(document.activeElement);
+  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+  }
+});
+document.addEventListener('pointerdown', event => {
+  if (!contextMenu.hidden && !contextMenu.contains(event.target) && !event.target.closest('[data-pb-context-open], [data-pb-toolbar-menu]')) closeContext();
+});
+window.addEventListener('resize', positionToolbar);
+window.addEventListener('scroll', positionToolbar, true);
 function undo() { const before = JSON.stringify(history.present); history.undo(); if (before !== JSON.stringify(history.present)) { markDirty(); renderPanel(); schedulePreview(); } }
 function redo() { const before = JSON.stringify(history.present); history.redo(); if (before !== JSON.stringify(history.present)) { markDirty(); renderPanel(); schedulePreview(); } }
 $('[data-pb-undo]').addEventListener('click', undo);
@@ -647,6 +783,12 @@ $('[data-pb-command-open]').addEventListener('click', openCommands);
 document.querySelector('[data-pb-command-close]').addEventListener('click', () => commandDialog.close());
 commandSearch.addEventListener('input', renderCommands);
 function shortcuts(event) {
+  if (selected && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) && !event.target.closest('input,textarea,select,[contenteditable="true"]')) {
+    event.preventDefault();
+    panel = 'settings'; renderPanel();
+    openContextFrom($('[data-pb-context-open]'));
+    return;
+  }
   if (!(event.ctrlKey || event.metaKey)) return;
   const key = event.key.toLowerCase();
   if (key === 's') { event.preventDefault(); save(); }

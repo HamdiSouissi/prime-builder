@@ -32,6 +32,12 @@ export function add(elements, element, parentId = null, containerTypes = ['conta
   (parent && containerTypes.includes(parent.type) ? parent.children : next).push(clone(element));
   return next;
 }
+export function insertAfter(elements, elementId, element) {
+  const next = clone(elements);
+  const target = locate(next, elementId);
+  if (target) target.list.splice(target.index + 1, 0, clone(element));
+  return next;
+}
 export function update(elements, elementId, patch) {
   const next = clone(elements);
   const element = find(next, elementId);

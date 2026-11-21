@@ -269,6 +269,70 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   await expectAccessible(page);
 });
 
+test('context menu copies elements and styles with keyboard and restores focus', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('Source de copie');
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await page.getByLabel('Couleur du texte', { exact: true }).fill('#123456');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.getByRole('heading', { name: 'Source de copie' })).toBeVisible();
+  const opener = page.locator('[data-pb-context-open]');
+  const menu = page.getByRole('menu', { name: 'Actions de l’élément' });
+  await opener.click();
+  await expect(menu.getByRole('menuitem', { name: 'Copier', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pb-live]')).toHaveText('Élément copié dans le constructeur.');
+  await page.locator('[data-pb-panel="widgets"]').click();
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('Cible de copie');
+  await opener.click();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Coller le style' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  const target = frame.getByRole('heading', { name: 'Cible de copie' });
+  await expect(target).toHaveCSS('color', 'rgb(18, 52, 86)');
+  await opener.click();
+  await menu.getByRole('menuitem', { name: 'Coller', exact: true }).click();
+  await expect(frame.getByRole('heading', { name: 'Source de copie' })).toHaveCount(2);
+  await target.click({ button: 'right' });
+  await expect(menu).toBeVisible();
+  await expectAccessible(page);
+  await menu.getByRole('menuitem', { name: 'Réinitialiser le style' }).click();
+  await expect(target).not.toHaveCSS('color', 'rgb(18, 52, 86)');
+  await opener.click();
+  await menu.getByRole('menuitem', { name: 'Dupliquer' }).click();
+  await expect(target).toHaveCount(2);
+  await opener.click();
+  await menu.getByRole('menuitem', { name: 'Supprimer' }).click();
+  await expect(target).toHaveCount(1);
+  await target.click({ button: 'right' });
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(opener).toBeFocused();
+});
+
+test('existing canvas elements can be dragged into a container', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Conteneur' }).click();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await page.getByLabel('Marge intérieure', { exact: true }).fill('40');
+  await page.locator('[data-pb-panel="widgets"]').click();
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('Déplacé dans le canevas');
+  await page.getByLabel('Déplacer vers').selectOption('');
+  const frame = page.frameLocator('[data-pb-frame]');
+  const source = frame.locator('.pb-heading').filter({ hasText: 'Déplacé dans le canevas' });
+  const container = frame.locator('.pb-container').last();
+  await expect(source).toHaveAttribute('draggable', 'true');
+  await expect(container).toBeVisible();
+  await source.dragTo(container, { targetPosition: { x: 5, y: 5 } });
+  await expect(frame.locator('.pb-container .pb-heading').filter({ hasText: 'Déplacé dans le canevas' })).toBeVisible();
+});
+
 test('color picker uses kit references and spacing has numeric units', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);

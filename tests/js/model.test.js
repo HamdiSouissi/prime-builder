@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { History, add, createElement, duplicate, find, moveInto, remove, reorder, update } from '../../assets/js/model.js';
+import { History, add, createElement, duplicate, find, insertAfter, moveInto, remove, reorder, update } from '../../assets/js/model.js';
 
 test('adding creates a new tree without mutating the original', () => {
   const root = createElement('container');
@@ -20,6 +20,15 @@ test('update, remove, and reorder operate on nested elements', () => {
   assert.equal(tree[0].children[0].id, b.id);
   tree = remove(tree, a.id);
   assert.equal(find(tree, a.id), null);
+});
+test('inserting after a nested element is immutable and preserves its siblings', () => {
+  const parent = createElement('container'), first = createElement('heading'), last = createElement('text');
+  const initial = add(add(add([], parent), first, parent.id), last, parent.id);
+  const inserted = createElement('button');
+  const next = insertAfter(initial, first.id, inserted);
+  assert.deepEqual(next[0].children.map(node => node.id), [first.id, inserted.id, last.id]);
+  assert.deepEqual(initial[0].children.map(node => node.id), [first.id, last.id]);
+  assert.deepEqual(insertAfter(initial, 'missing', inserted), initial);
 });
 test('duplicating a subtree changes every identifier', () => {
   const parent = createElement('container'), child = createElement('heading');
