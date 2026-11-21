@@ -82,7 +82,7 @@ final class Plugin extends AbstractPlugin
             category: 'plugins',
             validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer, $blocks, $originals))->validate($data),
             renderer: static fn (array $data, HtmlSanitizer $sanitizer, array $renderContext): string => (new Renderer($registry, $sanitizer, $context->logger(), $content, ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null, false, $blocks, $originals))->render($data),
-            textExtractor: static fn (array $data): string => Str::plainText((new Renderer($registry, $context->app()->get(HtmlSanizer::class), $context->logger(), $content, null, false, $blocks, $originals))->render($data)),
+            textExtractor: static fn (array $data): string => Str::plainText((new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals))->render($data)),
             keywords: ['builder', 'layout'],
         ));
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
