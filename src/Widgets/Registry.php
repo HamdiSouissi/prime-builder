@@ -38,6 +38,8 @@ final class Registry
             'gallery' => ['images' => ['type' => 'media_list', 'max' => 10000]],
             'video' => ['url' => $url, 'captions' => $url, 'caption_language' => ['type' => 'enum', 'values' => ['fr', 'en']], 'transcript' => ['type' => 'rich', 'max' => 20000]],
             'audio' => ['url' => $url, 'transcript' => ['type' => 'rich', 'max' => 20000]],
+            'posts' => ['limit' => ['type' => 'integer', 'min' => 1, 'max' => 12], 'show_excerpt' => ['type' => 'enum', 'values' => ['show', 'hide']]],
+            'current_content' => ['source' => ['type' => 'enum', 'values' => ['title', 'excerpt', 'published', 'author']]],
             'tabs' => [
                 'label' => $text,
                 'title_1' => $text, 'text_1' => ['type' => 'rich', 'max' => 10000],
@@ -49,12 +51,14 @@ final class Registry
         foreach ($fields as $type => $schema) {
             $definitions[$type] = [
                 'label' => 'plugin::prime-builder.widgets.' . $type,
-                'category' => $type === 'container' ? 'structure' : (in_array($type, ['accordion', 'card', 'icon_box', 'counter', 'tabs', 'gallery', 'video', 'audio'], true) ? 'pro' : 'base'),
+                'category' => $type === 'container' ? 'structure' : (in_array($type, ['accordion', 'card', 'icon_box', 'counter', 'tabs', 'gallery', 'video', 'audio', 'posts', 'current_content'], true) ? 'pro' : 'base'),
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];
             if ($type === 'tabs') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
+            } elseif (in_array($type, ['posts', 'current_content'], true)) {
+                $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/content.js';
             }
         }
         $filtered = $this->hooks?->apply('prime_builder.widgets', $definitions) ?? $definitions;

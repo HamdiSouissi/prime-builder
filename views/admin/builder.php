@@ -13,7 +13,7 @@ declare(strict_types=1);
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="<?= $this->e(csrf_token()) ?>">
-    <title><?= $this->e(t('plugin::prime-builder.ui.title')) ?> — <?= $this->e($entry->title) ?></title>
+    <title><?= $this->e(t('plugin::prime-builder.ui.editor_title')) ?> — <?= $this->e($entry->title) ?></title>
     <link rel="stylesheet" data-pb-editor-css href="<?= $this->e($cssUrl) ?>">
     <script type="module" src="<?= $this->e($jsUrl) ?>"></script>
 </head>
@@ -27,7 +27,7 @@ declare(strict_types=1);
     </header>
     <div class="pb-workspace">
         <aside class="pb-sidebar" aria-label="<?= $this->e(t('plugin::prime-builder.ui.sidebar')) ?>">
-            <div class="pb-panel-head"><div><span class="pb-eyebrow"><?= $this->e(t('plugin::prime-builder.ui.eyebrow')) ?></span><h1><?= $this->e(t('plugin::prime-builder.ui.title')) ?></h1></div><span class="pb-panel-dot" aria-hidden="true"></span></div>
+            <div class="pb-panel-head"><div><span class="pb-eyebrow"><?= $this->e(t('plugin::prime-builder.ui.eyebrow')) ?></span><h1><?= $this->e(t('plugin::prime-builder.ui.editor_title')) ?></h1></div><span class="pb-panel-dot" aria-hidden="true"></span></div>
             <nav class="pb-panel-nav" aria-label="<?= $this->e(t('plugin::prime-builder.ui.panels')) ?>"><button type="button" class="pb-nav-active" data-pb-panel="widgets" aria-pressed="true"><?= $this->e(t('plugin::prime-builder.ui.widgets')) ?></button><button type="button" data-pb-panel="navigator" aria-pressed="false"><?= $this->e(t('plugin::prime-builder.ui.navigator')) ?></button><button type="button" data-pb-panel="library" aria-pressed="false"><?= $this->e(t('plugin::prime-builder.ui.library')) ?></button></nav>
             <section class="pb-panel-content" data-pb-widget-panel>
                 <label class="pb-search"><span aria-hidden="true">⌕</span><span class="pb-sr-only"><?= $this->e(t('plugin::prime-builder.ui.search')) ?></span><input type="search" data-pb-search placeholder="<?= $this->e(t('plugin::prime-builder.ui.search')) ?>"></label>

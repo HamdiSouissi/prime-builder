@@ -24,6 +24,7 @@ use PrimeBuilder\Document\Library;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
+use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
@@ -114,7 +115,7 @@ final class Documents
             ];
         }
         $ui = [];
-        foreach (['widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'history', 'drop', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'media_grid', 'media_error', 'images', 'captions', 'caption_language', 'transcript', 'fr', 'en', 'default_option', 'layout_mode', 'flow', 'grid_columns', 'wrap', 'nowrap', 'justify', 'items_align', 'start', 'end', 'space-between', 'stretch'] as $key) {
+        foreach (['widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'history', 'drop', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'media_grid', 'media_error', 'images', 'captions', 'caption_language', 'transcript', 'fr', 'en', 'default_option', 'layout_mode', 'flow', 'grid_columns', 'wrap', 'nowrap', 'justify', 'items_align', 'start', 'end', 'space-between', 'stretch', 'limit', 'show_excerpt', 'show', 'hide', 'source', 'excerpt', 'published'] as $key) {
             $ui[$key] = t('plugin::prime-builder.ui.' . $key);
         }
         $config = [
@@ -200,8 +201,37 @@ final class Documents
         if ($result['errors'] !== []) {
             return ApiError::response('validation_failed', 422, $request, ['fields' => ['content' => $result['errors']]]);
         }
-        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger());
+        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true);
         return Response::json(['data' => ['html' => $renderer->render($result['data']), 'layout' => $result['data']]]);
+    }
+
+    public function live(Request $request, string $id): Response
+    {
+        $entry = $this->plugin->app()->get(EntryRepository::class)->find((int) $id);
+        if (!$entry instanceof Entry) {
+            return ApiError::response('not_found', 404, $request);
+        }
+        $type = $this->plugin->app()->get(ContentTypeRegistry::class)->get($entry->type);
+        $public = $type !== null && $type->public && \Prime\Site\UrlResolver::isPubliclyVisible($entry);
+        $apiUser = $request->attribute('api.user');
+        $user = $apiUser instanceof User ? $apiUser : $this->plugin->app()->get(Auth::class)->user($request);
+        if (!$public && $this->entry($entry->id, $user) === null) {
+            return ApiError::response('not_found', 404, $request);
+        }
+        $data = Layout::fromDocument($entry->decodedContent());
+        if ($data === null) {
+            return ApiError::response('not_found', 404, $request);
+        }
+        $registry = new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class));
+        $sanitizer = $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class);
+        $result = (new Validator($registry, $sanitizer))->validate($data);
+        if ($result['errors'] !== []) {
+            return ApiError::response('not_found', 404, $request);
+        }
+        $renderer = new Renderer($registry, $sanitizer, $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true);
+        return Response::json(['data' => ['widgets' => $renderer->liveWidgets($result['data'])]])
+            ->withHeader('Cache-Control', 'no-store, private')
+            ->withHeader('X-Content-Type-Options', 'nosniff');
     }
 
     public function kitStylesheet(Request $request, string $file): Response

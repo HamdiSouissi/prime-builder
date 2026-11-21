@@ -113,6 +113,62 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/tabs.js', $assets->renderScripts());
     }
 
+    public function testLiveContentHasSafeFallbackAndNeverListsDraftPosts(): void
+    {
+        $app = $this->activated(null);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'recent', 'type' => 'posts', 'settings' => ['limit' => 3, 'show_excerpt' => 'show'], 'styles' => [], 'children' => []],
+            ['id' => 'again', 'type' => 'posts', 'settings' => ['limit' => 1, 'show_excerpt' => 'hide'], 'styles' => [], 'children' => []],
+            ['id' => 'current', 'type' => 'current_content', 'settings' => ['source' => 'title'], 'styles' => [], 'children' => []],
+        ];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('Voir les articles récents', $entry->contentHtml);
+        self::assertStringNotContainsString('Résumé', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $live->status(), $live->body());
+        self::assertStringContainsString('no-store', (string) $live->header('Cache-Control'));
+        $widgets = json_decode($live->body(), true)['data']['widgets'];
+        self::assertStringContainsString('Article publié', $widgets['recent']);
+        self::assertStringContainsString('Résumé', $widgets['recent']);
+        self::assertStringNotContainsString('Brouillon admin', $widgets['recent']);
+        self::assertStringNotContainsString('Brouillon contributeur', $widgets['recent']);
+        self::assertStringContainsString('Article publié', $widgets['current']);
+        self::assertStringNotContainsString('Résumé', $widgets['again']);
+
+        // Current values are refreshed after the main entry changes.
+        $app->get(\Prime\Content\EntryService::class)->update(1, ['title' => 'Titre actualisé'], $this->user($app, 1));
+        $updated = json_decode($this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live')->body(), true)['data']['widgets'];
+        self::assertStringContainsString('Titre actualisé', $updated['current']);
+        self::assertStringContainsString('Titre actualisé', $updated['recent']);
+
+        // A draft layout cannot be fetched without the same per-entry edit checks.
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/2', ['content' => $document], $token)->status());
+        self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/2/live')->status());
+        self::assertSame(200, $this->send($app, 'GET', '/api/prime-builder/v1/documents/2/live', token: $token)->status());
+    }
+
+    public function testRecentPostsUseOneBoundedSharedQueryAndEscapeTitles(): void
+    {
+        $app = $this->activated(null);
+        $provider = $app->get(\PrimeBuilder\Widgets\Content::class);
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec("UPDATE pc_entries SET title = '<img src=x onerror=alert(1)>' WHERE id = 1");
+        $first = $provider->posts(['limit' => 12], true);
+        self::assertStringContainsString('&lt;img', $first);
+        self::assertStringNotContainsString('<img', $first);
+        $pdo->exec("UPDATE pc_entries SET title = 'Nouvelle valeur' WHERE id = 1");
+        self::assertSame($first, $provider->posts(['limit' => 12], true));
+        $provider->invalidate();
+        self::assertStringContainsString('Nouvelle valeur', $provider->posts(['limit' => 12], true));
+    }
+
     public function testGlobalKitIsFingerprintedAndSafe(): void
     {
         $app = $this->activated(null);

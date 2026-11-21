@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PrimeBuilder\Widgets;
 
+use Prime\Content\Entry;
 use Prime\Log\Logger;
 use Prime\Security\HtmlSanitizer;
 use Throwable;
@@ -11,15 +12,74 @@ use Throwable;
 /** Render safe, useful static HTML so saved pages remain readable without this plugin. */
 final class Renderer
 {
-    public function __construct(private readonly Registry $registry, private readonly HtmlSanitizer $sanitizer, private readonly ?Logger $logger = null)
-    {
+    public function __construct(
+        private readonly Registry $registry,
+        private readonly HtmlSanitizer $sanitizer,
+        private readonly ?Logger $logger = null,
+        private readonly ?Content $content = null,
+        private readonly ?Entry $entry = null,
+        private readonly bool $live = false,
+    ) {
     }
 
     /** @param array<string, mixed> $data */
     public function render(array $data): string
     {
         $elements = is_array($data['elements'] ?? null) ? $data['elements'] : [];
-        return '<div class="pb-layout">' . $this->renderElements($elements, $this->registry->all()) . '</div>';
+        $refresh = $this->entry !== null && $this->containsLive($elements)
+            ? ' data-pb-live="/api/prime-builder/v1/documents/' . $this->entry->id . '/live"'
+            : '';
+        return '<div class="pb-layout"' . $refresh . '>' . $this->renderElements($elements, $this->registry->all()) . '</div>';
+    }
+
+    /** @param array<mixed> $elements */
+    private function containsLive(array $elements): bool
+    {
+        foreach ($elements as $element) {
+            if (!is_array($element)) {
+                continue;
+            }
+            if (in_array($element['type'] ?? null, ['posts', 'current_content'], true)) {
+                return true;
+            }
+            if (is_array($element['children'] ?? null) && $this->containsLive($element['children'])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Collect live widget bodies by stable element ID. Values are server-generated HTML.
+     *
+     * @param array<string, mixed> $data
+     * @return array<string, string>
+     */
+    public function liveWidgets(array $data): array
+    {
+        $output = [];
+        $walk = function (array $elements) use (&$walk, &$output): void {
+            foreach ($elements as $element) {
+                if (!is_array($element)) {
+                    continue;
+                }
+                $id = $element['id'] ?? null;
+                $type = $element['type'] ?? null;
+                $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
+                if (is_string($id) && preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $id) === 1 && $this->content !== null) {
+                    if ($type === 'posts') {
+                        $output[$id] = $this->content->posts($settings, true);
+                    } elseif ($type === 'current_content') {
+                        $output[$id] = $this->content->current($settings, $this->entry);
+                    }
+                }
+                if (is_array($element['children'] ?? null)) {
+                    $walk($element['children']);
+                }
+            }
+        };
+        $walk(is_array($data['elements'] ?? null) ? $data['elements'] : []);
+        return $output;
     }
 
     /**
@@ -93,6 +153,8 @@ final class Renderer
             'tabs' => $this->renderTabs($settings, $id),
             'gallery' => $this->renderGallery($settings),
             'video', 'audio' => $this->renderMedia($type, $settings),
+            'posts' => $this->content?->posts($settings, $this->live) ?? '',
+            'current_content' => $this->content?->current($settings, $this->entry) ?? '',
             default => '',
         };
     }

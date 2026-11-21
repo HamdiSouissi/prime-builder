@@ -8,6 +8,9 @@ use Prime\Admin\Menu\AdminMenu;
 use Prime\Admin\Menu\MenuItem;
 use Prime\Admin\Notice;
 use Prime\Content\ContentType;
+use Prime\Content\ContentTypeRegistry;
+use Prime\Content\Entry;
+use Prime\Content\EntryQuery;
 use Prime\Editor\BlockDefinition;
 use Prime\Hooks\Hooks;
 use Prime\Http\Router;
@@ -16,6 +19,7 @@ use Prime\Plugins\PluginContext;
 use Prime\Security\HtmlSanitizer;
 use Prime\Settings\SettingsRegistry;
 use Prime\Site\PageContext;
+use Prime\Site\UrlGenerator;
 use Prime\Themes\ThemeAssetRegistry;
 use PrimeBuilder\Controller\Dashboard;
 use PrimeBuilder\Controller\Documents;
@@ -23,6 +27,7 @@ use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
+use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
@@ -93,6 +98,13 @@ final class Plugin extends AbstractPlugin
         }, styles: ['css/alternate.css']);
 
         $registry = new Registry($context->app()->get(Hooks::class));
+        $content = new Content($context->app()->get(EntryQuery::class), $context->app()->get(ContentTypeRegistry::class), $context->app()->get(UrlGenerator::class));
+        $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
+        foreach (['content.saved', 'content.updated', 'content.published', 'content.deleted', 'content.trashed', 'content.restored', 'content.status_changed'] as $event) {
+            $context->hooks()->on($event, static function () use ($content): void {
+                $content->invalidate();
+            });
+        }
         // Prime 1.0's EntryView uses a raw `"dynamic"` substring as a dynamic-block
         // sentinel. A plain builder field whose value is exactly that word must not
         // trigger a live re-render (which would erase the fallback when disabled).
@@ -115,8 +127,8 @@ final class Plugin extends AbstractPlugin
             icon: 'layout-dashboard',
             category: 'plugins',
             validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer))->validate($data),
-            renderer: static fn (array $data, HtmlSanitizer $sanitizer): string => (new Renderer($registry, $sanitizer, $context->logger()))->render($data),
-            textExtractor: static fn (array $data): string => trim(strip_tags((new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger()))->render($data))),
+            renderer: static fn (array $data, HtmlSanitizer $sanitizer, array $renderContext): string => (new Renderer($registry, $sanitizer, $context->logger(), $content, ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null))->render($data),
+            textExtractor: static fn (array $data): string => trim(strip_tags((new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content))->render($data))),
             keywords: ['builder', 'layout'],
         ));
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
@@ -137,6 +149,7 @@ final class Plugin extends AbstractPlugin
         });
         $context->api()->patch('/documents/{id}', [$controller::class, 'update'], permission: 'prime_builder.edit');
         $context->api()->post('/documents/{id}/render', [$controller::class, 'render'], permission: 'prime_builder.edit');
+        $context->api()->get('/documents/{id}/live', [$controller::class, 'live'], public: true);
         // PluginContext is not a container service, so API controllers need an explicit binding.
         $context->app()->container()->singleton(Documents::class, static fn (): Documents => $controller);
         $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context): void {
@@ -171,10 +184,12 @@ final class Plugin extends AbstractPlugin
             };
             $collect(is_array($data['elements'] ?? null) ? $data['elements'] : []);
             $definitions = (new Registry($context->app()->get(Hooks::class)))->all();
+            $registeredScripts = [];
             foreach (array_keys($types) as $type) {
                 $script = $definitions[$type]['script'] ?? null;
-                if (is_string($script) && !str_contains($script, '..') && preg_match('#^/assets/plugins/[a-z0-9-]+/[a-zA-Z0-9_./-]+\.js(?:\?[a-zA-Z0-9_=&.-]+)?$#', $script) === 1) {
+                if (is_string($script) && !isset($registeredScripts[$script]) && !str_contains($script, '..') && preg_match('#^/assets/plugins/[a-z0-9-]+/[a-zA-Z0-9_./-]+\.js(?:\?[a-zA-Z0-9_=&.-]+)?$#', $script) === 1) {
                     $assets->script('prime-builder-widget-' . $type, $script);
+                    $registeredScripts[$script] = true;
                 }
             }
         });

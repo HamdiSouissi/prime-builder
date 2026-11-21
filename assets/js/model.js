@@ -5,7 +5,7 @@ export function createElement(type) {
   const defaults = {
     container: { layout: 'flex', direction: 'column', columns: 1 }, heading: { level: 2 },
     progress: { value: 0 }, counter: { value: 0 },
-    video: { caption_language: 'fr' },
+    video: { caption_language: 'fr' }, posts: { limit: 3, show_excerpt: 'hide' }, current_content: { source: 'title' },
   };
   return { id: id(), type, settings: clone(defaults[type] || {}), styles: {}, children: [] };
 }

@@ -177,6 +177,29 @@ test('responsive container controls and unsaved style reset update the preview',
   await expectAccessible(page);
 });
 
+test('recent posts and current content refresh safely with a no-JS fallback', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Articles récents' }).click();
+  await page.getByRole('button', { name: 'Éléments', exact: true }).last().click();
+  await page.getByRole('button', { name: 'Ajouter Contenu actuel' }).click();
+  await page.locator('[data-pb-status]').selectOption('published');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto('/test-prime-builder');
+  await expect(page.locator('.pb-posts').getByRole('link', { name: 'Actualité publique' })).toBeVisible();
+  await expect(page.locator('.pb-posts')).not.toContainText('Brouillon confidentiel');
+  await expect(page.locator('.pb-current_content')).toHaveText('Test Prime Builder');
+  await expectAccessible(page);
+  const withoutJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+  const fallback = await withoutJs.newPage();
+  await fallback.goto('/test-prime-builder');
+  await expect(fallback.locator('.pb-posts').getByRole('link', { name: 'Voir les articles récents' })).toBeVisible();
+  await expect(fallback.locator('.pb-posts')).not.toContainText('Brouillon confidentiel');
+  await expect(fallback.locator('.pb-current_content')).toHaveText('Test Prime Builder');
+  await withoutJs.close();
+});
+
 test('built-in default widgets save and remain accessible together', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
@@ -197,6 +220,6 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(20);
+  await expect(page.locator('.pb-element')).toHaveCount(22);
   await expectAccessible(page);
 });

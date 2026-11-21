@@ -21,6 +21,8 @@ final class CatalogTest extends TestCase
         $fr = require dirname(__DIR__) . '/lang/fr/messages.php';
         $en = require dirname(__DIR__) . '/lang/en/messages.php';
         self::assertSame($this->keys($fr), $this->keys($en));
+        self::assertSame('Titre', $fr['ui']['title']);
+        self::assertSame('Éditeur visuel', $fr['ui']['editor_title']);
     }
 
     public function testAllShippedTemplatesValidate(): void
