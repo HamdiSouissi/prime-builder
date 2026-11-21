@@ -1,0 +1,30 @@
+name: Set up Prime CMS
+inputs:
+  copy-plugin:
+    description: Copy the plugin checkout into the CMS
+    default: 'true'
+  install-dependencies:
+    description: Install CMS development dependencies
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.3'
+        extensions: mbstring, gd, exif, pdo_mysql, pdo_sqlite, zip, fileinfo, openssl, intl
+        coverage: none
+    - name: Clone Prime CMS main
+      shell: bash
+      run: git clone --depth 1 --branch main https://github.com/HamdiSouissi/prime-cms.git cms
+    - name: Copy plugin
+      if: inputs.copy-plugin == 'true'
+      shell: bash
+      run: |
+        mkdir -p cms/content/plugins/prime-builder
+        rsync -a --exclude='.git' builder/ cms/content/plugins/prime-builder/
+    - name: Install CMS development dependencies
+      if: inputs.install-dependencies == 'true'
+      shell: bash
+      working-directory: cms
+      run: composer install --no-interaction --prefer-dist --no-progress
