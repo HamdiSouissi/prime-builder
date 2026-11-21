@@ -87,13 +87,37 @@ export function moveInto(elements, elementId, parentId, containerTypes = ['conta
   return next;
 }
 export class History {
-  constructor(initial, limit = 100) { this.past = []; this.present = clone(initial); this.future = []; this.limit = limit; }
-  commit(value) {
-    if (JSON.stringify(value) === JSON.stringify(this.present)) return false;
-    this.past.push(clone(this.present));
-    if (this.past.length > this.limit) this.past.shift();
-    this.present = clone(value); this.future = []; return true;
+  constructor(initial, limit = 100, label = '') {
+    this.past = []; this.present = clone(initial); this.future = []; this.limit = limit; this.label = label;
   }
-  undo() { if (this.past.length) { this.future.push(this.present); this.present = this.past.pop(); } return clone(this.present); }
-  redo() { if (this.future.length) { this.past.push(this.present); this.present = this.future.pop(); } return clone(this.present); }
+  commit(value, label = '') {
+    if (JSON.stringify(value) === JSON.stringify(this.present)) return false;
+    this.past.push({ value: clone(this.present), label: this.label });
+    if (this.past.length > this.limit) this.past.shift();
+    this.present = clone(value); this.label = label; this.future = []; return true;
+  }
+  undo() {
+    if (this.past.length) {
+      this.future.push({ value: this.present, label: this.label });
+      const state = this.past.pop(); this.present = state.value; this.label = state.label;
+    }
+    return clone(this.present);
+  }
+  redo() {
+    if (this.future.length) {
+      this.past.push({ value: this.present, label: this.label });
+      const state = this.future.pop(); this.present = state.value; this.label = state.label;
+    }
+    return clone(this.present);
+  }
+  entries() {
+    return [...this.past, { label: this.label }, ...this.future.slice().reverse()]
+      .map((state, index) => ({ index, label: state.label, current: index === this.past.length }));
+  }
+  jump(index) {
+    if (!Number.isInteger(index) || index < 0 || index > this.past.length + this.future.length) return clone(this.present);
+    while (this.past.length > index) this.undo();
+    while (this.past.length < index) this.redo();
+    return clone(this.present);
+  }
 }

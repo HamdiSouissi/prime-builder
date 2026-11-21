@@ -385,6 +385,39 @@ test('navigator renames, folds and hides elements with persisted accessible cont
   await expect(page.getByRole('heading', { name: 'Titre à masquer' })).toBeVisible();
 });
 
+test('history lists actions and can jump backward and forward with focus restored', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('Étape de l’historique');
+  const frame = page.frameLocator('[data-pb-frame]');
+  const heading = frame.locator('.pb-heading').filter({ hasText: 'Étape de l’historique' });
+  await expect(heading).toBeVisible();
+  const elementId = await heading.getAttribute('data-pb-id');
+  const opener = page.getByRole('button', { name: 'Historique', exact: true });
+  await opener.click();
+  const dialog = page.getByRole('dialog', { name: 'Historique' });
+  await expect(dialog.getByRole('button', { name: /Contenu : Texte/ })).toHaveAttribute('aria-current', 'step');
+  await expectAccessible(page);
+  await dialog.getByRole('button', { name: 'État de départ' }).click();
+  await expect(frame.locator(`[data-pb-id="${elementId}"]`)).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Ajouter : Titre' }).click();
+  await expect(frame.locator(`[data-pb-id="${elementId}"]`)).toHaveCount(1);
+  await dialog.getByRole('button', { name: /Contenu : Texte/ }).click();
+  await expect(heading).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+  await page.keyboard.press('Control+z');
+  await expect(heading).toHaveCount(0);
+  await page.keyboard.press('Control+Shift+z');
+  await expect(heading).toBeVisible();
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await opener.click();
+  await expectAccessible(page);
+});
+
 test('context menu copies elements and styles with keyboard and restores focus', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);

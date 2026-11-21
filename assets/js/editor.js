@@ -14,7 +14,7 @@ const $$ = selector => [...root.querySelectorAll(selector)];
 const originalBlocks = config.document.blocks || [];
 const savedLayout = originalBlocks.find(block => block.type === 'prime-builder/layout');
 const foreign = Boolean(config.conversionFailed) || (originalBlocks.length > 0 && (!savedLayout || originalBlocks.length !== 1));
-let history = new History(savedLayout?.data?.elements || []);
+let history = new History(savedLayout?.data?.elements || [], 100, ui.history_initial);
 let selected = null;
 let device = 'desktop';
 let tab = 'content';
@@ -82,8 +82,8 @@ function markDirty() {
   dirty = true; $('[data-pb-save-state]').textContent = ui.unsaved_short;
   try { localStorage.setItem(localKey, JSON.stringify({ elements: history.present, status: status.value, publishedAt: schedule.value, sourceHash: config.sourceHash, time: Date.now() })); } catch { /* Storage can be disabled. */ }
 }
-function commit(elements, rebuild = false) {
-  if (!history.commit(elements)) return;
+function commit(elements, rebuild = false, action = ui.history_change) {
+  if (!history.commit(elements, action)) return;
   markDirty();
   if (rebuild) renderPanel();
   schedulePreview();
@@ -98,7 +98,7 @@ function addWidget(type) {
   const parent = find(history.present, selected);
   const node = newElement(type);
   selected = node.id; tab = 'content'; panel = 'settings';
-  commit(add(history.present, node, isContainer(parent) ? parent.id : null, containerTypes), true);
+  commit(add(history.present, node, isContainer(parent) ? parent.id : null, containerTypes), true, `${ui.add} : ${config.widgets[type].label}`);
   // The widget card is replaced by the settings panel; give keyboard users a useful next focus.
   ($('[data-pb-fields] input, [data-pb-fields] textarea, [data-pb-fields] select') || parentSelect)?.focus({ preventScroll: true });
 }
@@ -165,7 +165,7 @@ function renderTree() {
         if (!isContainer(element)) return;
         event.preventDefault(); event.stopPropagation();
         const source = event.dataTransfer.getData('text/prime-builder-element');
-        if (source) commit(moveInto(history.present, source, element.id, containerTypes), true);
+        if (source) commit(moveInto(history.present, source, element.id, containerTypes), true, ui.move_to);
       });
       if (element.children?.length) {
         const closed = collapsed.has(element.id);
@@ -185,7 +185,7 @@ function renderTree() {
         input.value = element.label || ''; input.placeholder = name; input.setAttribute('aria-label', `${ui.rename_element} : ${name}`);
         const finish = saveName => {
           renaming = null;
-          if (saveName) commit(update(history.present, element.id, { label: input.value.trim() }));
+          if (saveName) commit(update(history.present, element.id, { label: input.value.trim() }), false, `${ui.rename_element} : ${name}`);
           renderTree(); target.querySelector(`[data-pb-tree-rename="${CSS.escape(element.id)}"]`)?.focus();
         };
         input.addEventListener('keydown', event => {
@@ -207,7 +207,7 @@ function renderTree() {
           : 'M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z');
         visibility.dataset.pbTreeVisibility = element.id;
         visibility.addEventListener('click', () => {
-          commit(update(history.present, element.id, { hidden: !element.hidden }));
+          commit(update(history.present, element.id, { hidden: !element.hidden }), false, `${element.hidden ? ui.show : ui.hide} : ${name}`);
           renderTree(); target.querySelector(`[data-pb-tree-visibility="${CSS.escape(element.id)}"]`)?.focus();
         });
         row.append(select, rename, visibility);
@@ -241,12 +241,12 @@ async function insertTemplate(template) {
   if (!config.canTemplates || !ensureLayout()) return;
   if (template.kind === 'page' && history.present.length && !await showMessage(ui.confirm_template, true)) return;
   const nodes = freshIds(template.elements);
-  if (template.kind === 'page') commit(nodes, true);
+  if (template.kind === 'page') commit(nodes, true, `${ui.insert} : ${template.name}`);
   else {
     let next = history.present;
     const parent = find(next, selected);
     for (const node of nodes) next = add(next, node, isContainer(parent) ? parent.id : null, containerTypes);
-    commit(next, true);
+    commit(next, true, `${ui.insert} : ${template.name}`);
   }
   selected = null; panel = 'navigator'; renderPanel();
 }
@@ -272,7 +272,7 @@ async function importDocument(file) {
     if (!response.ok) throw new Error('invalid');
     const result = await response.json();
     if (!ensureLayout() || (history.present.length && !await showMessage(ui.confirm_template, true))) return;
-    selected = null; commit(freshIds(result.data.layout.elements)); panel = 'navigator'; renderPanel();
+    selected = null; commit(freshIds(result.data.layout.elements), false, ui.import); panel = 'navigator'; renderPanel();
     $('[data-pb-save-state]').textContent = ui.imported;
   } catch { await showMessage(ui.invalid_import); }
 }
@@ -404,7 +404,7 @@ async function openMedia(elementId, urlField, kind = 'image') {
       if (node.type === 'image') {
         for (const key of ['width', 'height']) if (Number.isInteger(media[key]) && media[key] > 0 && media[key] <= 10000) settings[key] = media[key];
       }
-      commit(update(history.present, elementId, { settings })); renderSettings();
+      commit(update(history.present, elementId, { settings }), false, ui.choose_media); renderSettings();
     } });
     const overlay = document.getElementById('pc-media-picker-modal');
     const grid = overlay?.querySelector('[data-prime-picker-grid]');
@@ -444,7 +444,7 @@ function renderSettings() {
         const current = find(history.present, selected); if (!current) return;
         const settings = { ...current.settings };
         if (value === undefined) delete settings[name]; else settings[name] = value;
-        commit(update(history.present, selected, { settings }));
+        commit(update(history.present, selected, { settings }), false, `${ui.content} : ${schema.label || ui[name] || name}`);
       }));
       if ((['image', 'video', 'audio'].includes(element.type) && name === 'url') || (element.type === 'card' && name === 'image_url')) {
         const choose = text('button', ui.choose_media, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMedia = '';
@@ -468,7 +468,7 @@ function renderSettings() {
         const current = find(history.present, selected); if (!current) return;
         const styles = structuredClone(current.styles || {}); styles[device] ||= {};
         if (value === undefined) delete styles[device][name]; else styles[device][name] = value;
-        commit(update(history.present, selected, { styles }));
+        commit(update(history.present, selected, { styles }), false, `${ui[tab]} : ${ui[name] || name}`);
       }));
     }
   }
@@ -546,16 +546,17 @@ function performElementAction(action) {
     const copy = freshIds([clipboard], true)[0];
     const next = isContainer(element) ? add(history.present, copy, element.id, containerTypes) : insertAfter(history.present, element.id, copy);
     selected = copy.id; tab = 'content'; panel = 'settings';
-    commit(next, true);
+    commit(next, true, `${ui.paste} : ${elementLabel(copy)}`);
     $('[data-pb-live]').textContent = ui.pasted;
     return;
   }
-  if (action === 'paste_style' && clipboard && !readOnly) commit(update(history.present, element.id, { styles: structuredClone(clipboard.styles || {}) }));
-  if (action === 'reset_style' && !readOnly) commit(update(history.present, element.id, { styles: {} }));
-  if (action === 'duplicate') commit(duplicate(history.present, element.id));
-  if (action === 'move_up') commit(reorder(history.present, element.id, -1));
-  if (action === 'move_down') commit(reorder(history.present, element.id, 1));
-  if (action === 'remove') { commit(remove(history.present, element.id)); selected = null; panel = 'widgets'; }
+  const label = `${ui[action] || ui.history_change} : ${elementLabel(element)}`;
+  if (action === 'paste_style' && clipboard && !readOnly) commit(update(history.present, element.id, { styles: structuredClone(clipboard.styles || {}) }), false, label);
+  if (action === 'reset_style' && !readOnly) commit(update(history.present, element.id, { styles: {} }), false, label);
+  if (action === 'duplicate') commit(duplicate(history.present, element.id), false, label);
+  if (action === 'move_up') commit(reorder(history.present, element.id, -1), false, label);
+  if (action === 'move_down') commit(reorder(history.present, element.id, 1), false, label);
+  if (action === 'remove') { commit(remove(history.present, element.id), false, label); selected = null; panel = 'widgets'; }
   renderPanel();
 }
 function cssLength(value, width = false) {
@@ -680,7 +681,7 @@ function attachFrameEvents() {
     const source = event.dataTransfer.getData('text/prime-builder-element');
     if (source && (!node || isContainer(node))) {
       selected = source; panel = 'settings'; tab = 'content';
-      commit(moveInto(history.present, source, node?.id || null, containerTypes), true);
+      commit(moveInto(history.present, source, node?.id || null, containerTypes), true, ui.move_to);
       return;
     }
     const type = event.dataTransfer.getData('text/prime-builder-widget');
@@ -711,7 +712,7 @@ async function save() {
     config.status = result.data.status; config.publishedAt = result.data.published_at;
     if (snapshot === JSON.stringify(history.present) && currentStatus === status.value && currentSchedule === schedule.value) {
       status.value = result.data.status; updateSchedule();
-      history = new History(result.data.content.blocks[0].data.elements);
+      history = new History(result.data.content.blocks[0].data.elements, 100, ui.history_initial);
       dirty = false;
       try { localStorage.removeItem(localKey); } catch { /* Ignore unavailable storage. */ }
       $('[data-pb-save-state]').textContent = ui.saved;
@@ -736,7 +737,7 @@ async function restoreLocalDraft() {
     const cached = JSON.parse(localStorage.getItem(localKey) || 'null');
     // An old draft must never silently replace a newer or previously unconverted document.
     if (!foreign && cached && cached.sourceHash === config.sourceHash && Array.isArray(cached.elements) && await showMessage(ui.autosave_found, true)) {
-      history = new History(cached.elements);
+      history = new History(cached.elements, 100, ui.history_initial);
       if ([...status.options].some(o => o.value === cached.status)) status.value = cached.status;
       if (typeof cached.publishedAt === 'string') schedule.value = cached.publishedAt;
       updateSchedule(); markDirty(); renderPanel(); schedulePreview();
@@ -798,8 +799,32 @@ document.addEventListener('pointerdown', event => {
 });
 window.addEventListener('resize', positionToolbar);
 window.addEventListener('scroll', positionToolbar, true);
-function undo() { const before = JSON.stringify(history.present); history.undo(); if (before !== JSON.stringify(history.present)) { markDirty(); renderPanel(); schedulePreview(); } }
-function redo() { const before = JSON.stringify(history.present); history.redo(); if (before !== JSON.stringify(history.present)) { markDirty(); renderPanel(); schedulePreview(); } }
+const historyDialog = document.querySelector('[data-pb-history]');
+const historyList = historyDialog.querySelector('[data-pb-history-list]');
+function renderHistory() {
+  historyList.replaceChildren();
+  for (const entry of history.entries()) {
+    const item = document.createElement('li');
+    const button = text('button', entry.label || ui.history_change); button.type = 'button'; button.dataset.pbHistoryIndex = String(entry.index);
+    if (entry.current) { button.setAttribute('aria-current', 'step'); button.append(text('span', ui.history_current)); }
+    button.addEventListener('click', () => {
+      const before = JSON.stringify(history.present);
+      history.jump(entry.index);
+      if (before !== JSON.stringify(history.present)) { markDirty(); renderPanel(); schedulePreview(); }
+      renderHistory(); historyList.querySelector(`[data-pb-history-index="${entry.index}"]`)?.focus();
+    });
+    item.append(button); historyList.append(item);
+  }
+}
+function openHistory() {
+  renderHistory();
+  if (!historyDialog.open) historyDialog.showModal();
+  historyList.querySelector('[aria-current="step"]')?.focus();
+}
+$('[data-pb-history-open]').addEventListener('click', openHistory);
+historyDialog.querySelector('[data-pb-history-close]').addEventListener('click', () => historyDialog.close());
+function undo() { const before = JSON.stringify(history.present); history.undo(); if (before !== JSON.stringify(history.present)) { markDirty(); renderPanel(); schedulePreview(); if (historyDialog.open) { renderHistory(); historyList.querySelector('[aria-current="step"]')?.focus(); } } }
+function redo() { const before = JSON.stringify(history.present); history.redo(); if (before !== JSON.stringify(history.present)) { markDirty(); renderPanel(); schedulePreview(); if (historyDialog.open) { renderHistory(); historyList.querySelector('[aria-current="step"]')?.focus(); } } }
 $('[data-pb-undo]').addEventListener('click', undo);
 $('[data-pb-redo]').addEventListener('click', redo);
 $('[data-pb-save]').addEventListener('click', save);
@@ -807,7 +832,7 @@ status.addEventListener('change', () => { updateSchedule(); markDirty(); });
 schedule.addEventListener('input', markDirty);
 parentSelect.addEventListener('change', () => {
   if (!selected) return;
-  commit(moveInto(history.present, selected, parentSelect.value || null, containerTypes));
+  commit(moveInto(history.present, selected, parentSelect.value || null, containerTypes), false, ui.move_to);
   renderParentOptions(find(history.present, selected)); parentSelect.focus();
 });
 frame.addEventListener('load', attachFrameEvents);
@@ -825,7 +850,7 @@ const commandSearch = document.querySelector('[data-pb-command-search]');
 function renderCommands() {
   const target = document.querySelector('[data-pb-command-list]'); target.replaceChildren();
   const commands = [
-    [ui.save, save], [ui.undo, undo], [ui.redo, redo],
+    [ui.save, save], [ui.undo, undo], [ui.redo, redo], [ui.history, openHistory],
     [ui.widgets, () => { panel = 'widgets'; renderPanel(); }],
     [ui.navigator, () => { panel = 'navigator'; renderPanel(); }],
     ...(config.canTemplates ? [[ui.library, () => { panel = 'library'; renderPanel(); }]] : []),

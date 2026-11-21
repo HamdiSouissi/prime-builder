@@ -69,6 +69,22 @@ test('history restores snapshots and clears redo on divergent edits', () => {
   history.commit(add([], createElement('heading')));
   assert.equal(history.redo()[0].type, 'heading');
 });
+test('history labels and jumps preserve redo and discard a divergent future', () => {
+  const history = new History([], 2, 'initial');
+  const a = createElement('heading'), b = createElement('text'), c = createElement('button');
+  history.commit(add(history.present, a), 'heading');
+  history.commit(add(history.present, b), 'text');
+  assert.deepEqual(history.entries().map(entry => [entry.label, entry.current]), [['initial', false], ['heading', false], ['text', true]]);
+  assert.equal(history.jump(0).length, 0);
+  assert.equal(history.jump(2).length, 2);
+  assert.equal(history.jump(1).length, 1);
+  history.commit(add(history.present, c), 'button');
+  assert.deepEqual(history.entries().map(entry => entry.label), ['initial', 'heading', 'button']);
+  assert.equal(history.redo().length, 2);
+  history.commit(remove(history.present, a.id), 'remove');
+  assert.deepEqual(history.entries().map(entry => entry.label), ['heading', 'button', 'remove']);
+  assert.deepEqual(history.jump(10), history.present);
+});
 test('style updates preserve separate responsive values', () => {
   const node = createElement('heading');
   const tree = update([node], node.id, { styles: { desktop: { font_size: 32 }, mobile: { font_size: 20 } } });

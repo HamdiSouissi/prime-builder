@@ -76,12 +76,17 @@ declare(strict_types=1);
         <button type="button" role="menuitem" tabindex="-1" data-pb-context="remove"><?= $this->e(t('plugin::prime-builder.ui.remove')) ?></button>
     </div>
     <span class="pb-sr-only" data-pb-live aria-live="polite"></span>
-    <footer class="pb-bottombar"><div><button type="button" class="pb-icon-button" data-pb-undo title="<?= $this->e(t('plugin::prime-builder.ui.undo')) ?>" aria-label="<?= $this->e(t('plugin::prime-builder.ui.undo')) ?>">↶</button><button type="button" class="pb-icon-button" data-pb-redo title="<?= $this->e(t('plugin::prime-builder.ui.redo')) ?>" aria-label="<?= $this->e(t('plugin::prime-builder.ui.redo')) ?>">↷</button><a href="/admin/content/<?= $this->e(rawurlencode($entry->type)) ?>/<?= $this->e((string) $entry->id) ?>/revisions"><?= $this->e(t('plugin::prime-builder.ui.revisions')) ?></a></div><div><label for="pb-status"><?= $this->e(t('plugin::prime-builder.ui.document_status')) ?></label><select id="pb-status" data-pb-status></select><label data-pb-schedule-wrap hidden><?= $this->e(t('plugin::prime-builder.ui.schedule_date')) ?> <input type="datetime-local" data-pb-schedule></label><span class="pb-status-indicator" aria-hidden="true"></span></div></footer>
+    <footer class="pb-bottombar"><div><button type="button" class="pb-icon-button" data-pb-undo title="<?= $this->e(t('plugin::prime-builder.ui.undo')) ?>" aria-label="<?= $this->e(t('plugin::prime-builder.ui.undo')) ?>">↶</button><button type="button" class="pb-icon-button" data-pb-redo title="<?= $this->e(t('plugin::prime-builder.ui.redo')) ?>" aria-label="<?= $this->e(t('plugin::prime-builder.ui.redo')) ?>">↷</button><button type="button" class="pb-history-open" data-pb-history-open aria-haspopup="dialog"><?= $this->e(t('plugin::prime-builder.ui.history')) ?></button><a href="/admin/content/<?= $this->e(rawurlencode($entry->type)) ?>/<?= $this->e((string) $entry->id) ?>/revisions"><?= $this->e(t('plugin::prime-builder.ui.revisions')) ?></a></div><div><label for="pb-status"><?= $this->e(t('plugin::prime-builder.ui.document_status')) ?></label><select id="pb-status" data-pb-status></select><label data-pb-schedule-wrap hidden><?= $this->e(t('plugin::prime-builder.ui.schedule_date')) ?> <input type="datetime-local" data-pb-schedule></label><span class="pb-status-indicator" aria-hidden="true"></span></div></footer>
 </div>
 <dialog class="pb-command-dialog" data-pb-commands aria-labelledby="pb-command-title">
     <div class="pb-command-head"><h2 id="pb-command-title"><?= $this->e(t('plugin::prime-builder.ui.commands')) ?></h2><button type="button" data-pb-command-close aria-label="<?= $this->e(t('plugin::prime-builder.ui.close')) ?>">×</button></div>
     <label class="pb-field"><?= $this->e(t('plugin::prime-builder.ui.command_search')) ?><input type="search" data-pb-command-search></label>
     <div class="pb-command-list" data-pb-command-list></div>
+</dialog>
+<dialog class="pb-command-dialog pb-history-dialog" data-pb-history aria-labelledby="pb-history-title" aria-describedby="pb-history-help">
+    <div class="pb-command-head"><h2 id="pb-history-title"><?= $this->e(t('plugin::prime-builder.ui.history')) ?></h2><button type="button" data-pb-history-close aria-label="<?= $this->e(t('plugin::prime-builder.ui.close')) ?>">×</button></div>
+    <p id="pb-history-help" class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.history_help')) ?></p>
+    <ol class="pb-history-list" data-pb-history-list></ol>
 </dialog>
 <dialog class="pb-confirm-dialog" data-pb-confirm aria-labelledby="pb-confirm-title" aria-describedby="pb-confirm-message">
     <h2 id="pb-confirm-title" data-pb-confirm-title></h2>
