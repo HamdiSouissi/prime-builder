@@ -68,7 +68,7 @@ final class BuiltinWidgets
             icon: 'video',
             scripts: ['video-consent.js'],
             defaults: ['url' => '', 'provider' => 'youtube'],
-            renderer: static function (array $s) use ($e, $u): string {
+            renderer: static function (array $s) use ($u): string {
                 $url = (string) ($s['url'] ?? '');
                 if ($url === '') {
                     return '<div class="pb-video pb-video--empty"></div>';
