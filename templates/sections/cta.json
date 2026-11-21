@@ -1,0 +1,55 @@
+{
+  "kind": "section",
+  "name": "cta",
+  "version": 1,
+  "elements": [
+    {
+      "id": "cta",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12,
+          "background": "#f3f1ee"
+        }
+      },
+      "children": [
+        {
+          "id": "cta-title",
+          "type": "heading",
+          "settings": {
+            "text": "@pb:templates.copy.cta_title",
+            "level": 2
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "cta-text",
+          "type": "text",
+          "settings": {
+            "text": "@pb:templates.copy.cta_text"
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "cta-button",
+          "type": "button",
+          "settings": {
+            "text": "@pb:templates.copy.cta_button",
+            "url": "#contact"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    }
+  ]
+}

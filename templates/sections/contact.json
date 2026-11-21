@@ -1,0 +1,63 @@
+{
+  "kind": "section",
+  "name": "contact",
+  "version": 1,
+  "elements": [
+    {
+      "id": "contact",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12
+        }
+      },
+      "children": [
+        {
+          "id": "contact-anchor",
+          "type": "anchor",
+          "settings": {
+            "anchor": "contact"
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "contact-title",
+          "type": "heading",
+          "settings": {
+            "text": "@pb:templates.copy.contact_title",
+            "level": 2
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "contact-copy",
+          "type": "text",
+          "settings": {
+            "text": "@pb:templates.copy.contact_text"
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "contact-button",
+          "type": "button",
+          "settings": {
+            "text": "@pb:templates.copy.contact_button",
+            "url": "mailto:bonjour@example.com"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    }
+  ]
+}

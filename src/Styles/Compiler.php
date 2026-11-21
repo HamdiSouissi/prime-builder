@@ -7,12 +7,21 @@ namespace PrimeBuilder\Styles;
 /** Compile only a small allowlist of CSS properties; never concatenate arbitrary CSS. */
 final class Compiler
 {
+    private readonly int $tablet;
+    private readonly int $mobile;
+
+    public function __construct(int $tablet = 1024, int $mobile = 767)
+    {
+        $this->tablet = max(600, min(2000, $tablet));
+        $this->mobile = max(320, min($this->tablet - 1, $mobile));
+    }
+
     /** @param array<string, mixed> $data */
     public function compile(array $data): string
     {
         $modes = ['desktop' => '', 'tablet' => '', 'mobile' => ''];
         $this->walk(is_array($data['elements'] ?? null) ? $data['elements'] : [], $modes);
-        return $modes['desktop'] . ($modes['tablet'] !== '' ? '@media(max-width:1024px){' . $modes['tablet'] . '}' : '') . ($modes['mobile'] !== '' ? '@media(max-width:767px){' . $modes['mobile'] . '}' : '');
+        return $modes['desktop'] . ($modes['tablet'] !== '' ? '@media(max-width:' . $this->tablet . 'px){' . $modes['tablet'] . '}' : '') . ($modes['mobile'] !== '' ? '@media(max-width:' . $this->mobile . 'px){' . $modes['mobile'] . '}' : '');
     }
 
     /** @param array<mixed> $elements @param array<string, string> $modes */

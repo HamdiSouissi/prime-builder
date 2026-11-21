@@ -43,6 +43,18 @@ final class Plugin extends AbstractPlugin
                         'type' => 'toggle', 'section' => 'prime-builder', 'default' => $default, 'rules' => '', 'priority' => 10,
                     ], 'prime-builder');
                 }
+                foreach ([
+                    ['other_types', 'text', '', 'max:500'],
+                    ['breakpoint_tablet', 'number', 1024, 'required|min:600|max:2000'],
+                    ['breakpoint_mobile', 'number', 767, 'required|min:320|max:1600'],
+                ] as [$name, $type, $default, $rules]) {
+                    $registry->add([
+                        'name' => 'plugin.prime-builder.' . $name,
+                        'label' => 'plugin::prime-builder.settings.' . $name,
+                        'description' => 'plugin::prime-builder.settings.' . $name . '_help',
+                        'type' => $type, 'section' => 'prime-builder', 'default' => $default, 'rules' => $rules, 'priority' => 20,
+                    ], 'prime-builder');
+                }
             }
             return $registry;
         });
@@ -52,7 +64,9 @@ final class Plugin extends AbstractPlugin
             }
             $key = match ($type->name) { 'page' => 'pages', 'post' => 'posts', default => null };
             if ($key === null) {
-                return $editor;
+                $other = $context->settings()->get('other_types', '');
+                $names = is_string($other) ? array_map('trim', explode(',', $other)) : [];
+                return in_array($type->name, $names, true) ? 'prime-builder' : $editor;
             }
             $value = $context->settings()->get($key, $key === 'pages');
             return in_array($value, [true, 1, '1', 'true'], true) ? 'prime-builder' : $editor;
@@ -83,7 +97,7 @@ final class Plugin extends AbstractPlugin
         });
         $controller = new Documents($context);
         $context->router()->adminGroup(static function (Router $router) use ($controller, $context): void {
-            $router->get('/', static fn (): \Prime\Http\Response => \Prime\Http\Response::redirect('/admin/settings/general#prime-builder'))->name('index');
+            $router->get('/', static fn (): \Prime\Http\Response => \Prime\Http\Response::redirect('/admin/settings/general#settings-section-prime-builder'))->name('index');
             $router->get('/edit/{id:\d+}', [$controller, 'edit'])->name('edit');
         }, capability: 'prime_builder.edit');
         $context->router()->frontGroup(static function (Router $router) use ($controller): void {
@@ -101,9 +115,36 @@ final class Plugin extends AbstractPlugin
             if ($data === null) {
                 return;
             }
-            $css = (new Compiler())->compile($data);
+            $css = (new Compiler((int) $context->settings()->get('breakpoint_tablet', 1024), (int) $context->settings()->get('breakpoint_mobile', 767)))->compile($data);
             $assets->style('prime-builder-base', $context->url('css/public.css'));
             $assets->style('prime-builder-document', '/prime-builder/css/' . $page->entry->id . '-' . substr(hash('sha256', $css), 0, 16) . '.css', ['prime-builder-base']);
+            $types = [];
+            $collect = static function (array $elements) use (&$collect, &$types): void {
+                foreach ($elements as $element) {
+                    if (!is_array($element)) {
+                        continue;
+                    }
+                    if (is_string($element['type'] ?? null)) {
+                        $types[$element['type']] = true;
+                    }
+                    if (is_array($element['children'] ?? null)) {
+                        $collect($element['children']);
+                    }
+                }
+            };
+            $collect(is_array($data['elements'] ?? null) ? $data['elements'] : []);
+            $definitions = (new Registry($context->app()->get(Hooks::class)))->all();
+            foreach (array_keys($types) as $type) {
+                $script = $definitions[$type]['script'] ?? null;
+                if (is_string($script) && !str_contains($script, '..') && preg_match('#^/assets/plugins/[a-z0-9-]+/[a-zA-Z0-9_./-]+\.js(?:\?[a-zA-Z0-9_=&.-]+)?$#', $script) === 1) {
+                    $assets->script('prime-builder-widget-' . $type, $script);
+                }
+            }
+        });
+        $context->hooks()->on('settings.updated', static function (mixed $name) use ($context): void {
+            if (is_string($name) && str_starts_with($name, 'plugin.prime-builder.')) {
+                $context->app()->get(\Prime\Cache\CacheManager::class)->clearPages();
+            }
         });
         $context->hooks()->filter('system.checks', static function (mixed $checks): mixed {
             if (is_array($checks)) {

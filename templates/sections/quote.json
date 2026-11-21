@@ -1,0 +1,36 @@
+{
+  "kind": "section",
+  "name": "quote",
+  "version": 1,
+  "elements": [
+    {
+      "id": "quote-section",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12,
+          "background": "#fff4f1"
+        }
+      },
+      "children": [
+        {
+          "id": "quote",
+          "type": "quote",
+          "settings": {
+            "text": "@pb:templates.copy.quote",
+            "author": "@pb:templates.copy.quote_author"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    }
+  ]
+}

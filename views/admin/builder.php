@@ -22,13 +22,13 @@ declare(strict_types=1);
 <div class="pb-app" data-pb-app>
     <textarea hidden data-pb-config><?= $this->e($configJson) ?></textarea>
     <header class="pb-topbar">
-        <div class="pb-brand"><span class="pb-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16v4H4zm0 7h7v7H4zm10 0h6v3h-6zm0 5h6v2h-6z" fill="currentColor"/></svg></span><span><strong>Prime Builder</strong><small><?= $this->e($entry->title) ?></small></span></div>
+        <div class="pb-brand"><span class="pb-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16v4H4zm0 7h7v7H4zm10 0h6v3h-6zm0 5h6v2h-6z" fill="currentColor"/></svg></span><span><strong><?= $this->e(t('plugin::prime-builder.menu')) ?></strong><small><?= $this->e($entry->title) ?></small></span></div>
         <div class="pb-top-actions"><span class="pb-save-state" data-pb-save-state aria-live="polite"></span><a class="pb-button pb-button-quiet" href="<?= $this->e($entry->editUrl()) ?>"><?= $this->e(t('plugin::prime-builder.ui.back')) ?></a><button type="button" class="pb-button pb-button-primary" data-pb-save><?= $this->e(t('plugin::prime-builder.ui.save')) ?></button></div>
     </header>
     <div class="pb-workspace">
         <aside class="pb-sidebar" aria-label="<?= $this->e(t('plugin::prime-builder.ui.sidebar')) ?>">
             <div class="pb-panel-head"><div><span class="pb-eyebrow"><?= $this->e(t('plugin::prime-builder.ui.eyebrow')) ?></span><h1><?= $this->e(t('plugin::prime-builder.ui.title')) ?></h1></div><span class="pb-panel-dot" aria-hidden="true"></span></div>
-            <nav class="pb-panel-nav" aria-label="<?= $this->e(t('plugin::prime-builder.ui.panels')) ?>"><button type="button" class="pb-nav-active" data-pb-panel="widgets" aria-pressed="true"><?= $this->e(t('plugin::prime-builder.ui.widgets')) ?></button><button type="button" data-pb-panel="navigator" aria-pressed="false"><?= $this->e(t('plugin::prime-builder.ui.navigator')) ?></button></nav>
+            <nav class="pb-panel-nav" aria-label="<?= $this->e(t('plugin::prime-builder.ui.panels')) ?>"><button type="button" class="pb-nav-active" data-pb-panel="widgets" aria-pressed="true"><?= $this->e(t('plugin::prime-builder.ui.widgets')) ?></button><button type="button" data-pb-panel="navigator" aria-pressed="false"><?= $this->e(t('plugin::prime-builder.ui.navigator')) ?></button><button type="button" data-pb-panel="library" aria-pressed="false"><?= $this->e(t('plugin::prime-builder.ui.library')) ?></button></nav>
             <section class="pb-panel-content" data-pb-widget-panel>
                 <label class="pb-search"><span aria-hidden="true">⌕</span><span class="pb-sr-only"><?= $this->e(t('plugin::prime-builder.ui.search')) ?></span><input type="search" data-pb-search placeholder="<?= $this->e(t('plugin::prime-builder.ui.search')) ?>"></label>
                 <p class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.intro')) ?></p>
@@ -38,6 +38,13 @@ declare(strict_types=1);
                 <h2><?= $this->e(t('plugin::prime-builder.ui.navigator')) ?></h2>
                 <p class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.navigator_help')) ?></p>
                 <div data-pb-tree></div>
+            </section>
+            <section class="pb-panel-content" data-pb-library-panel hidden>
+                <h2><?= $this->e(t('plugin::prime-builder.ui.library')) ?></h2>
+                <p class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.library_intro')) ?></p>
+                <div class="pb-library-actions"><label class="pb-library-import"><?= $this->e(t('plugin::prime-builder.ui.import')) ?><input type="file" accept="application/json,.json" data-pb-import></label><button type="button" data-pb-export><?= $this->e(t('plugin::prime-builder.ui.export')) ?></button></div>
+                <p class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.import_help')) ?></p>
+                <div data-pb-library-list></div>
             </section>
             <section class="pb-panel-content" data-pb-settings-panel hidden>
                 <div class="pb-selected-heading"><div><span class="pb-eyebrow"><?= $this->e(t('plugin::prime-builder.ui.edit_element')) ?></span><h2 data-pb-selected-title></h2></div><button type="button" class="pb-icon-button" data-pb-close-settings aria-label="<?= $this->e(t('plugin::prime-builder.ui.widgets')) ?>">×</button></div>

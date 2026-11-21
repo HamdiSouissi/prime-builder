@@ -1,0 +1,45 @@
+{
+  "kind": "section",
+  "name": "feature",
+  "version": 1,
+  "elements": [
+    {
+      "id": "feature",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12,
+          "background": "#f3f1ee"
+        }
+      },
+      "children": [
+        {
+          "id": "feature-title",
+          "type": "heading",
+          "settings": {
+            "text": "@pb:templates.copy.feature_title",
+            "level": 2
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "feature-text",
+          "type": "text",
+          "settings": {
+            "text": "@pb:templates.copy.feature_text"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    }
+  ]
+}

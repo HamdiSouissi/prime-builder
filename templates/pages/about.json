@@ -1,0 +1,133 @@
+{
+  "kind": "page",
+  "name": "about",
+  "version": 1,
+  "elements": [
+    {
+      "id": "image-text",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12
+        }
+      },
+      "children": [
+        {
+          "id": "image-text-art",
+          "type": "image",
+          "settings": {
+            "url": "/assets/plugins/prime-builder/images/landscape.svg",
+            "alt": "@pb:templates.copy.image_alt",
+            "width": 960,
+            "height": 640
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "image-text-title",
+          "type": "heading",
+          "settings": {
+            "text": "@pb:templates.copy.about_title",
+            "level": 2
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "image-text-copy",
+          "type": "text",
+          "settings": {
+            "text": "@pb:templates.copy.about_text"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "quote-section",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12,
+          "background": "#fff4f1"
+        }
+      },
+      "children": [
+        {
+          "id": "quote",
+          "type": "quote",
+          "settings": {
+            "text": "@pb:templates.copy.quote",
+            "author": "@pb:templates.copy.quote_author"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "cta",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12,
+          "background": "#f3f1ee"
+        }
+      },
+      "children": [
+        {
+          "id": "cta-title",
+          "type": "heading",
+          "settings": {
+            "text": "@pb:templates.copy.cta_title",
+            "level": 2
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "cta-text",
+          "type": "text",
+          "settings": {
+            "text": "@pb:templates.copy.cta_text"
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "cta-button",
+          "type": "button",
+          "settings": {
+            "text": "@pb:templates.copy.cta_button",
+            "url": "#contact"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    }
+  ]
+}

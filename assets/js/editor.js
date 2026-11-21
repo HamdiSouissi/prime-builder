@@ -1,4 +1,4 @@
-import { History, add, createElement, duplicate, find, moveInto, remove, reorder, update } from './model.js';
+import { History, add, createElement, duplicate, find, id, moveInto, remove, reorder, update } from './model.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -100,6 +100,57 @@ function renderTree() {
   }
   target.append(build(history.present));
 }
+function freshIds(elements) {
+  const copy = structuredClone(elements);
+  const visit = node => { node.id = id(); (node.children || []).forEach(visit); };
+  copy.forEach(visit);
+  return copy;
+}
+function insertTemplate(template) {
+  if (!ensureLayout()) return;
+  if (template.kind === 'page' && history.present.length && !confirm(ui.confirm_template)) return;
+  const nodes = freshIds(template.elements);
+  if (template.kind === 'page') commit(nodes, true);
+  else {
+    let next = history.present;
+    const parent = find(next, selected);
+    for (const node of nodes) next = add(next, node, parent?.type === 'container' ? parent.id : null);
+    commit(next, true);
+  }
+  selected = null; panel = 'navigator'; renderPanel();
+}
+function renderLibrary() {
+  const list = $('[data-pb-library-list]'); list.replaceChildren();
+  for (const template of config.library || []) {
+    const card = document.createElement('div'); card.className = 'pb-template-card';
+    const info = document.createElement('div'); info.append(text('strong', template.name), text('small', template.kind === 'page' ? ui.page_template : ui.section_template));
+    const button = text('button', ui.insert); button.type = 'button'; button.setAttribute('aria-label', `${ui.insert} ${template.name}`);
+    button.addEventListener('click', () => insertTemplate(template)); card.append(info, button); list.append(card);
+  }
+}
+async function importDocument(file) {
+  if (!file || file.size > 1048576) { alert(ui.invalid_import); return; }
+  try {
+    const input = JSON.parse(await file.text());
+    const layout = Array.isArray(input.blocks) ? input.blocks.find(block => block.type === 'prime-builder/layout')?.data : input;
+    if (!layout || !Array.isArray(layout.elements) || layout.version !== 1) throw new Error('invalid');
+    const response = await fetch(`/api/prime-builder/v1/documents/${config.entryId}/render`, {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf }, body: JSON.stringify({ data: layout }),
+    });
+    if (!response.ok) throw new Error('invalid');
+    const result = await response.json();
+    if (!ensureLayout() || (history.present.length && !confirm(ui.confirm_template))) return;
+    selected = null; commit(freshIds(result.data.layout.elements)); panel = 'navigator'; renderPanel();
+    $('[data-pb-save-state]').textContent = ui.imported;
+  } catch { alert(ui.invalid_import); }
+}
+function exportDocument() {
+  if (foreign) return;
+  const payload = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: history.present } }] };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a'); link.href = url; link.download = `prime-builder-${config.entryId}.json`; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 function makeField(name, schema, current, onChange) {
   const wrapper = document.createElement('label'); wrapper.className = 'pb-field';
   wrapper.append(text('span', ui[name] || name));
@@ -163,12 +214,14 @@ function renderPanel() {
   $('[data-pb-widget-panel]').hidden = panel !== 'widgets';
   $('[data-pb-navigator-panel]').hidden = panel !== 'navigator';
   $('[data-pb-settings-panel]').hidden = panel !== 'settings';
+  $('[data-pb-library-panel]').hidden = panel !== 'library';
   $$('[data-pb-panel]').forEach(button => {
     const active = button.dataset.pbPanel === panel;
     button.classList.toggle('pb-nav-active', active); button.setAttribute('aria-pressed', String(active));
   });
   if (panel === 'widgets') renderWidgets();
   if (panel === 'navigator') renderTree();
+  if (panel === 'library') renderLibrary();
   if (panel === 'settings') renderSettings();
 }
 function applyVisualStyles(doc) {
@@ -281,6 +334,8 @@ try {
   }
 } catch { /* Unavailable or corrupt local drafts do not block editing. */ }
 $('[data-pb-search]').addEventListener('input', renderWidgets);
+$('[data-pb-import]').addEventListener('change', event => { importDocument(event.target.files?.[0]); event.target.value = ''; });
+$('[data-pb-export]').addEventListener('click', exportDocument);
 $$('[data-pb-panel]').forEach(button => button.addEventListener('click', () => { panel = button.dataset.pbPanel; renderPanel(); }));
 $('[data-pb-close-settings]').addEventListener('click', () => { panel = 'widgets'; renderPanel(); });
 $$('[data-pb-tab]').forEach(button => button.addEventListener('click', () => { tab = button.dataset.pbTab; renderSettings(); }));
@@ -288,6 +343,7 @@ $$('[data-pb-device]').forEach(button => button.addEventListener('click', () => 
   device = button.dataset.pbDevice;
   $$('[data-pb-device]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
   $('[data-pb-frame-wrap]').className = `pb-canvas-frame pb-device-${device}`;
+  $('[data-pb-frame-wrap]').style.maxWidth = device === 'desktop' ? '' : `${device === 'tablet' ? config.tabletBreakpoint : Math.min(config.mobileBreakpoint, 375)}px`;
   if (panel === 'settings') renderSettings(); schedulePreview();
 }));
 $$('[data-pb-action]').forEach(button => button.addEventListener('click', () => {
