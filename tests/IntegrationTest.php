@@ -96,6 +96,38 @@ final class IntegrationTest extends TestCase
         self::assertSame(404, $this->send($app, 'GET', '/prime-builder/css/1-0000000000000000.css')->status());
     }
 
+    public function testPartialPreviewRendersOnlyTheRequestedSubtreeAndValidatesTheWholeDocument(): void
+    {
+        $app = $this->activated(null);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $data = ['version' => 1, 'elements' => [[
+            'id' => 'parent', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                ['id' => 'first', 'type' => 'heading', 'settings' => ['text' => 'Premier'], 'styles' => [], 'children' => []],
+                ['id' => 'second', 'type' => 'heading', 'settings' => ['text' => 'Second'], 'styles' => [], 'children' => []],
+            ],
+        ]]];
+        $full = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $data], $token);
+        self::assertSame(200, $full->status(), $full->body());
+        $fullResult = json_decode($full->body(), true)['data'];
+        self::assertStringContainsString('Premier', $fullResult['html']);
+        self::assertStringContainsString('Second', $fullResult['html']);
+        self::assertSame(2, count($fullResult['layout']['elements'][0]['children']));
+
+        $part = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $data, 'target' => 'first'], $token);
+        self::assertSame(200, $part->status(), $part->body());
+        $partResult = json_decode($part->body(), true)['data'];
+        self::assertSame('first', $partResult['target']);
+        self::assertStringContainsString('Premier', $partResult['html']);
+        self::assertStringNotContainsString('Second', $partResult['html']);
+        self::assertSame(false, isset($partResult['layout']));
+        self::assertSame(422, $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $data, 'target' => 'missing'], $token)->status());
+        self::assertSame(422, $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $data, 'target' => ['first']], $token)->status());
+
+        // An invalid sibling must not evade validation just because it is not rendered.
+        $data['elements'][0]['children'][1]['styles'] = ['desktop' => ['color' => 'url(javascript:alert(1))']];
+        self::assertSame(422, $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $data, 'target' => 'first'], $token)->status());
+    }
+
     public function testInteractiveScriptIsLoadedOnlyForPagesWithTabs(): void
     {
         $app = $this->activated(null);

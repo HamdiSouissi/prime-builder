@@ -34,6 +34,28 @@ export function locate(elements, id) {
   }
   return null;
 }
+// Return one changed subtree root only when identity and structure stayed intact.
+// Multiple edits or any insertion/removal/reordering require a full preview.
+export function changedElement(before, after) {
+  let target = null;
+  function sameShape(left, right) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index++) {
+      const oldNode = left[index], newNode = right[index];
+      if (!oldNode || !newNode || typeof oldNode !== 'object' || typeof newNode !== 'object' ||
+          typeof oldNode.id !== 'string' || oldNode.id !== newNode.id || oldNode.type !== newNode.type) return false;
+      const { children: oldChildren = [], ...oldValues } = oldNode;
+      const { children: newChildren = [], ...newValues } = newNode;
+      if (JSON.stringify(oldValues) !== JSON.stringify(newValues)) {
+        if (target !== null) return false;
+        target = oldNode.id;
+      }
+      if (!sameShape(oldChildren, newChildren)) return false;
+    }
+    return true;
+  }
+  return sameShape(before, after) ? target : null;
+}
 export function add(elements, element, parentId = null, containerTypes = ['container']) {
   const next = clone(elements);
   const parent = parentId ? find(next, parentId) : null;

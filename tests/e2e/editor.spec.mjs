@@ -59,6 +59,73 @@ test('compose and publish a page using the CMS theme', async ({ page }) => {
   await page.screenshot({ path: test.info().outputPath('public-desktop.png'), fullPage: true });
 });
 
+test('partial previews preserve siblings, ignore stale responses, and recover a missing node', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('Voisin conservé');
+  await page.locator('[data-pb-panel="widgets"]').click();
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  const field = page.getByLabel('Texte', { exact: true });
+  await field.fill('Élément modifié');
+  const frame = page.frameLocator('[data-pb-frame]');
+  const sibling = frame.locator('.pb-heading').filter({ hasText: 'Voisin conservé' });
+  const selected = frame.locator('.pb-heading').filter({ hasText: 'Élément modifié' });
+  await expect(sibling).toBeVisible();
+  await expect(selected).toBeVisible();
+  const elementId = await selected.getAttribute('data-pb-id');
+  expect(elementId).toBeTruthy();
+  const edited = frame.locator(`[data-pb-id="${elementId}"] h2`);
+  await sibling.evaluate(node => { node.ownerDocument.defaultView.__pbSibling = node; });
+
+  const partial = page.waitForResponse(response => response.url().endsWith('/render') && response.request().postDataJSON()?.target === elementId);
+  await field.fill('Rendu partiel');
+  const partialResponse = await partial;
+  expect(partialResponse.ok()).toBeTruthy();
+  const body = (await partialResponse.json()).data;
+  expect(body.target).toBe(elementId);
+  expect(body.html).toContain('Rendu partiel');
+  expect(body.html).not.toContain('Voisin conservé');
+  expect(body).not.toHaveProperty('layout');
+  await expect(edited).toHaveText('Rendu partiel');
+  expect(await sibling.evaluate(node => node === node.ownerDocument.defaultView.__pbSibling)).toBe(true);
+
+  let release;
+  let signal;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const requestStarted = new Promise(resolve => { signal = resolve; });
+  await page.route('**/render', async route => {
+    if (route.request().postDataJSON()?.target === elementId && route.request().postData()?.includes('Valeur retardée')) {
+      signal();
+      await blocked;
+    }
+    await route.continue();
+  });
+  try {
+    const delayedResponse = page.waitForResponse(response => response.url().endsWith('/render') && response.request().postData()?.includes('Valeur retardée'));
+    await field.fill('Valeur retardée');
+    await requestStarted;
+    await field.fill('Valeur finale');
+    await expect(edited).toHaveText('Valeur finale');
+    release();
+    await delayedResponse;
+    await page.waitForTimeout(250);
+    await expect(edited).toHaveText('Valeur finale');
+    expect(await sibling.evaluate(node => node === node.ownerDocument.defaultView.__pbSibling)).toBe(true);
+  } finally {
+    release();
+    await page.unroute('**/render');
+  }
+
+  // If an element disappeared from the iframe, the next change must trigger a full reconciliation.
+  await frame.locator(`[data-pb-id="${elementId}"]`).evaluate(node => node.remove());
+  await field.fill('Élément restauré');
+  await expect(edited).toHaveText('Élément restauré');
+  await expect(sibling).toBeVisible();
+  expect(await sibling.evaluate(node => node === node.ownerDocument.defaultView.__pbSibling)).toBe(false);
+  await expectAccessible(page);
+});
+
 test('build and publish four widgets with the mouse', async ({ page }) => {
   expect(mouseId).toMatch(/^[1-9][0-9]*$/);
   await login(page);

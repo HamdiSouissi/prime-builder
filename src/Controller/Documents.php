@@ -286,7 +286,41 @@ final class Documents
             return ApiError::response('validation_failed', 422, $request, ['fields' => ['content' => $result['errors']]]);
         }
         $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals);
+        if (array_key_exists('target', $body)) {
+            $target = $body['target'];
+            $elements = is_array($result['data']['elements'] ?? null) ? $result['data']['elements'] : [];
+            $element = is_string($target) ? $this->previewElement($elements, $target) : null;
+            if ($element === null) {
+                return ApiError::response('validation_failed', 422, $request);
+            }
+            return Response::json(['data' => ['target' => $target, 'html' => $renderer->render(['version' => 1, 'elements' => [$element]])]]);
+        }
         return Response::json(['data' => ['html' => $renderer->render($result['data']), 'layout' => $result['data']]]);
+    }
+
+    /**
+     * Find a normalized subtree only after validating the complete document.
+     *
+     * @param array<mixed> $elements
+     * @return array<mixed>|null
+     */
+    private function previewElement(array $elements, string $target): ?array
+    {
+        foreach ($elements as $element) {
+            if (!is_array($element)) {
+                continue;
+            }
+            if (($element['id'] ?? null) === $target) {
+                return $element;
+            }
+            if (is_array($element['children'] ?? null)) {
+                $found = $this->previewElement($element['children'], $target);
+                if ($found !== null) {
+                    return $found;
+                }
+            }
+        }
+        return null;
     }
 
     public function live(Request $request, string $id): Response

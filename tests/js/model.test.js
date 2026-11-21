@@ -1,6 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { History, add, createElement, duplicate, find, inheritedStyle, insertAfter, moveInto, remove, reorder, update } from '../../assets/js/model.js';
+import { History, add, changedElement, createElement, duplicate, find, inheritedStyle, insertAfter, moveInto, remove, reorder, update } from '../../assets/js/model.js';
+
+test('preview diff selects a single changed subtree and rejects structural or multiple changes', () => {
+  const parent = createElement('container'), first = createElement('heading'), second = createElement('text');
+  const tree = add(add(add([], parent), first, parent.id), second, parent.id);
+  assert.equal(changedElement(tree, tree), null);
+  assert.equal(changedElement(tree, update(tree, first.id, { settings: { text: 'Salut' } })), first.id);
+  assert.equal(changedElement(tree, update(tree, parent.id, { styles: { desktop: { gap: 12 } } })), parent.id);
+  const twoChanges = update(update(tree, first.id, { hidden: true }), second.id, { label: 'Texte' });
+  assert.equal(changedElement(tree, twoChanges), null);
+  assert.equal(changedElement(tree, reorder(tree, first.id, 1)), null);
+  assert.equal(changedElement(tree, remove(tree, first.id)), null);
+  assert.equal(changedElement(tree, add(tree, createElement('button'), parent.id)), null);
+  assert.equal(changedElement(tree, update(tree, first.id, { type: 'button' })), null);
+  assert.equal(changedElement(tree, [{ ...parent, children: null }]), null);
+});
 
 test('adding creates a new tree without mutating the original', () => {
   const root = createElement('container');

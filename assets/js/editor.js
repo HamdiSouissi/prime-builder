@@ -1,4 +1,4 @@
-import { History, add, createElement, duplicate, find, id, inheritedStyle, insertAfter, moveInto, remove, reorder, update } from './model.js';
+import { History, add, changedElement, createElement, duplicate, find, id, inheritedStyle, insertAfter, moveInto, remove, reorder, update } from './model.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -22,6 +22,8 @@ let panel = 'widgets';
 let dirty = false;
 let requestNumber = 0;
 let previewTimer;
+let previewNeedsFull = true;
+const previewTargets = new Set();
 let clipboard = null;
 let contextOpener = null;
 let renaming = null;
@@ -83,10 +85,11 @@ function markDirty() {
   try { localStorage.setItem(localKey, JSON.stringify({ elements: history.present, status: status.value, publishedAt: schedule.value, sourceHash: config.sourceHash, time: Date.now() })); } catch { /* Storage can be disabled. */ }
 }
 function commit(elements, rebuild = false, action = ui.history_change) {
+  const target = changedElement(history.present, elements);
   if (!history.commit(elements, action)) return;
   markDirty();
   if (rebuild) renderPanel();
-  schedulePreview();
+  schedulePreview(target);
 }
 function ensureLayout() {
   if (!foreign) return true;
@@ -626,18 +629,21 @@ function applyVisualStyles(doc) {
   }
   walk(history.present);
 }
-async function renderPreview() {
+async function renderPreview(sequence) {
   if (foreign || !frame.contentDocument) return;
-  const sequence = ++requestNumber;
+  // Keep the complete tree in the request for server-side validation, but render
+  // just one subtree when no structural or other pending changes exist.
+  const target = !previewNeedsFull && previewTargets.size === 1 ? [...previewTargets][0] : null;
   try {
     const response = await fetch(`/api/prime-builder/v1/documents/${config.entryId}/render`, {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
-      body: JSON.stringify({ data: { version: 1, elements: history.present } }),
+      body: JSON.stringify({ data: { version: 1, elements: history.present }, ...(target === null ? {} : { target }) }),
     });
     if (!response.ok || sequence !== requestNumber) return;
     const result = await response.json();
     if (sequence !== requestNumber) return;
     const doc = frame.contentDocument;
+    if (!doc?.head) return;
     if (!doc.querySelector('[data-pb-base-css]')) {
       const link = doc.createElement('link'); link.rel = 'stylesheet'; link.href = config.publicCssUrl; link.dataset.pbBaseCss = ''; doc.head.append(link);
     }
@@ -650,17 +656,41 @@ async function renderPreview() {
       const url = new URL(link.href, doc.baseURI);
       if (url.origin === location.origin && url.pathname.startsWith('/prime-builder/css/')) link.disabled = true;
     });
-    const current = doc.querySelector('.pb-layout');
-    if (current) current.outerHTML = result.data.html;
-    else {
-      const area = doc.querySelector('.aurora-prose') || doc.querySelector('main');
-      if (area) area.innerHTML = result.data.html;
+    if (target !== null) {
+      const selector = `[data-pb-id="${CSS.escape(target)}"]`;
+      const current = doc.querySelector(selector);
+      const fragment = doc.createElement('template'); fragment.innerHTML = result.data.html;
+      const replacement = fragment.content.querySelector(selector);
+      if (!current || !replacement || result.data.target !== target) {
+        // The iframe may have reloaded or a third-party widget may have failed.
+        // Reconcile the entire canvas rather than silently losing an edit.
+        schedulePreview();
+        return;
+      }
+      current.replaceWith(replacement);
+    } else {
+      const current = doc.querySelector('.pb-layout');
+      if (current) current.outerHTML = result.data.html;
+      else {
+        const area = doc.querySelector('.aurora-prose') || doc.querySelector('main');
+        if (!area) return;
+        area.innerHTML = result.data.html;
+      }
     }
+    previewNeedsFull = false;
+    previewTargets.clear();
     applyVisualStyles(doc);
     positionToolbar();
-  } catch { $('[data-pb-save-state]').textContent = ui.connection_error; }
+  } catch { if (sequence === requestNumber) $('[data-pb-save-state]').textContent = ui.connection_error; }
 }
-function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 180); }
+function schedulePreview(target = null) {
+  if (target === null) { previewNeedsFull = true; previewTargets.clear(); }
+  else previewTargets.add(target);
+  clearTimeout(previewTimer);
+  // Invalidate in-flight responses as soon as a newer change is queued.
+  const sequence = ++requestNumber;
+  previewTimer = setTimeout(() => renderPreview(sequence), 180);
+}
 function attachFrameEvents() {
   const doc = frame.contentDocument;
   if (!doc) return;
