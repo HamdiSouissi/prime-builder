@@ -10,6 +10,7 @@ use PrimeBuilder\Document\Library;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Widgets\Registry;
 
+require_once dirname(__DIR__) . '/src/Styles/Values.php';
 require_once dirname(__DIR__) . '/src/Document/Library.php';
 require_once dirname(__DIR__) . '/src/Document/Validator.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';

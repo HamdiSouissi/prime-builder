@@ -208,7 +208,59 @@ function exportDocument() {
   const link = document.createElement('a'); link.href = url; link.download = `prime-builder-${config.entryId}.json`; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+function sixDigitColor(value, fallback) {
+  const match = typeof value === 'string' && value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!match) return fallback;
+  const hex = match[1].toLowerCase();
+  return `#${hex.length === 3 ? [...hex].map(char => char + char).join('') : hex}`;
+}
+function makeStyleControl(name, schema, current, onChange) {
+  const wrapper = document.createElement('div'); wrapper.className = 'pb-field pb-typed-field';
+  const label = text('label', schema.label || ui[name] || name); const input = document.createElement('input');
+  input.id = id(); label.htmlFor = input.id; wrapper.append(label);
+  const row = document.createElement('div'); row.className = 'pb-typed-row';
+  if (schema.type === 'color') {
+    input.type = 'text'; input.maxLength = 7;
+    const references = { 'kit:primary': sixDigitColor(config.kitColors?.primary, '#c9441f'), 'kit:text': sixDigitColor(config.kitColors?.text, '#1a1d29') };
+    input.value = references[current] || current || '';
+    const picker = document.createElement('input'); picker.type = 'color';
+    picker.setAttribute('aria-label', name === 'color' ? ui.color_picker_text : ui.color_picker_background);
+    picker.value = sixDigitColor(input.value, '#000000');
+    const reference = document.createElement('select');
+    reference.setAttribute('aria-label', name === 'color' ? ui.color_reference_text : ui.color_reference_background);
+    for (const [value, title] of [['', ui.color_custom], ['kit:primary', ui.kit_primary], ['kit:text', ui.kit_text]]) {
+      const option = text('option', title); option.value = value; reference.append(option);
+    }
+    reference.value = Object.hasOwn(references, current) ? current : '';
+    input.addEventListener('input', () => {
+      reference.value = ''; picker.value = sixDigitColor(input.value, '#000000');
+      onChange(input.value === '' ? undefined : input.value);
+    });
+    picker.addEventListener('input', () => { input.value = picker.value; reference.value = ''; onChange(picker.value); });
+    reference.addEventListener('change', () => {
+      if (reference.value) { input.value = references[reference.value]; picker.value = input.value; onChange(reference.value); }
+      else onChange(input.value === '' ? undefined : input.value);
+    });
+    row.append(input, picker); wrapper.append(row, reference); return wrapper;
+  }
+  input.type = 'number'; input.min = 0; input.max = 2000; input.step = '0.01';
+  const units = document.createElement('select'); units.setAttribute('aria-label', `${ui.unit} : ${ui[name] || name}`);
+  for (const unit of ['px', '%', 'em', 'rem', 'vw', 'vh']) { const option = text('option', unit); option.value = unit; units.append(option); }
+  const match = typeof current === 'string' ? current.match(/^(\d{1,4}(?:\.\d{1,2})?)(px|%|em|rem|vw|vh)$/) : null;
+  input.value = match ? match[1] : Number.isInteger(current) ? String(current) : '';
+  units.value = match ? match[2] : 'px';
+  const emit = () => {
+    input.max = name === 'width' && units.value === '%' ? 100 : 2000;
+    if (input.value === '') { onChange(undefined); return; }
+    const number = Number(input.value);
+    if (!Number.isFinite(number) || number < 0 || number > Number(input.max) || !input.validity.valid) return;
+    onChange(units.value === 'px' && Number.isInteger(number) ? number : `${number}${units.value}`);
+  };
+  input.addEventListener('input', emit); units.addEventListener('change', emit);
+  row.append(input, units); wrapper.append(row); return wrapper;
+}
 function makeField(name, schema, current, onChange) {
+  if (schema.type === 'color' || schema.type === 'length') return makeStyleControl(name, schema, current, onChange);
   const wrapper = document.createElement('label'); wrapper.className = 'pb-field';
   wrapper.append(text('span', schema.label || ui[name] || name));
   let input;
@@ -328,8 +380,8 @@ function renderSettings() {
   } else {
     fields.append(text('p', ui.responsive_help, 'pb-intro'));
     const schemas = tab === 'style'
-      ? { color: { type: 'text', max: 7 }, background: { type: 'text', max: 7 }, font_size: { type: 'integer', min: 0, max: 2000 }, align: { type: 'enum', values: ['left', 'center', 'right'] }, radius: { type: 'integer', min: 0, max: 2000 } }
-      : { padding: { type: 'integer', min: 0, max: 2000 }, margin: { type: 'integer', min: 0, max: 2000 }, gap: { type: 'integer', min: 0, max: 2000 }, min_height: { type: 'integer', min: 0, max: 2000 }, width: { type: 'text', max: 6 },
+      ? { color: { type: 'color' }, background: { type: 'color' }, font_size: { type: 'length' }, align: { type: 'enum', values: ['left', 'center', 'right'] }, radius: { type: 'length' } }
+      : { padding: { type: 'length' }, margin: { type: 'length' }, gap: { type: 'length' }, min_height: { type: 'length' }, width: { type: 'length' },
         ...(isContainer(element) ? {
           layout_mode: { type: 'enum', values: ['flex', 'grid'] }, flow: { type: 'enum', values: ['row', 'column'] },
           grid_columns: { type: 'integer', min: 1, max: 6 }, wrap: { type: 'enum', values: ['wrap', 'nowrap'] },
@@ -360,6 +412,17 @@ function renderPanel() {
   if (panel === 'library') renderLibrary();
   if (panel === 'settings') renderSettings();
 }
+function cssLength(value, width = false) {
+  if (Number.isInteger(value) && value >= 0 && value <= 2000) return `${value}px`;
+  const match = typeof value === 'string' && value.match(/^(\d{1,4}(?:\.\d{1,2})?)(px|%|em|rem|vw|vh)$/);
+  if (!match || Number(match[1]) > 2000 || (width && match[2] === '%' && Number(match[1]) > 100)) return null;
+  return value;
+}
+function cssColor(value) {
+  if (value === 'kit:primary') return 'var(--pb-kit-primary)';
+  if (value === 'kit:text') return 'var(--pb-kit-text)';
+  return typeof value === 'string' && /^#[a-f\d]{3}([a-f\d]{3})?$/i.test(value) ? value : null;
+}
 function applyVisualStyles(doc) {
   function walk(elements) {
     for (const element of elements) {
@@ -375,10 +438,16 @@ function applyVisualStyles(doc) {
           const style = element.styles?.[mode] || {};
           const lengths = { padding: 'padding', margin: 'margin', gap: 'gap', font_size: 'fontSize', radius: 'borderRadius', min_height: 'minHeight' };
           for (const [key, value] of Object.entries(style)) {
-            if (key in lengths && Number.isInteger(value) && value >= 0 && value <= 2000) node.style[lengths[key]] = `${value}px`;
-            else if (['color', 'background'].includes(key) && typeof value === 'string' && /^#[a-f\d]{3}([a-f\d]{3})?$/i.test(value)) node.style[key === 'color' ? 'color' : 'backgroundColor'] = value;
+            if (key in lengths && cssLength(value) !== null) {
+              node.style[lengths[key]] = cssLength(value);
+              if (key === 'font_size') node.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary').forEach(child => { child.style.fontSize = 'inherit'; });
+            }
+            else if (['color', 'background'].includes(key) && cssColor(value) !== null) {
+              node.style[key === 'color' ? 'color' : 'backgroundColor'] = cssColor(value);
+              if (key === 'color') node.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary').forEach(child => { child.style.color = 'inherit'; });
+            }
             else if (key === 'align' && ['left', 'center', 'right'].includes(value)) node.style.textAlign = value;
-            else if (key === 'width' && typeof value === 'string' && /^(?:(?:100|[0-9]{1,2})%|(?:[0-9]{1,3}|1[0-9]{3}|2000)px)$/.test(value)) node.style.width = value;
+            else if (key === 'width' && cssLength(value, true) !== null) node.style.width = cssLength(value, true);
             else if (key === 'layout_mode' && ['flex', 'grid'].includes(value)) node.style.display = value;
             else if (key === 'flow' && ['row', 'column'].includes(value)) node.style.flexDirection = value;
             else if (key === 'grid_columns' && Number.isInteger(value) && value >= 1 && value <= 6) node.style.gridTemplateColumns = `repeat(${value},minmax(0,1fr))`;

@@ -6,6 +6,7 @@ namespace PrimeBuilder\Document;
 
 use Prime\Editor\BlockRegistry;
 use Prime\Security\HtmlSanitizer;
+use PrimeBuilder\Styles\Values;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\PrimeBlock;
 use PrimeBuilder\Widgets\Registry;
@@ -201,9 +202,9 @@ final class Validator
             }
             foreach ($values as $key => $value) {
                 $valid = match ($key) {
-                    'color', 'background' => is_string($value) && preg_match('/^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/', $value) === 1,
-                    'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height' => is_int($value) && $value >= 0 && $value <= 2000,
-                    'width' => is_string($value) && preg_match('/^(?:(?:100|[0-9]{1,2})%|(?:[0-9]{1,3}|1[0-9]{3}|2000)px)$/', $value) === 1,
+                    'color', 'background' => Values::color($value) !== null,
+                    'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height' => Values::length($value) !== null,
+                    'width' => Values::length($value, true) !== null,
                     'align' => is_string($value) && in_array($value, ['left', 'center', 'right'], true),
                     'layout_mode' => is_string($value) && in_array($value, ['flex', 'grid'], true),
                     'flow' => is_string($value) && in_array($value, ['row', 'column'], true),

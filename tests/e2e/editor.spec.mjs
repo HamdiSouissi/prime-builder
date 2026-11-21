@@ -269,6 +269,36 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   await expectAccessible(page);
 });
 
+test('color picker uses kit references and spacing has numeric units', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByLabel('Texte', { exact: true }).fill('Styles référencés');
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Sélecteur : texte')).toHaveAttribute('type', 'color');
+  await page.getByLabel('Couleur globale du texte').selectOption('kit:primary');
+  const heading = page.frameLocator('[data-pb-frame]').locator('.pb-heading').last();
+  await expect(heading).toHaveCSS('color', 'rgb(201, 68, 31)');
+  await expect(heading.locator('h2')).toHaveCSS('color', 'rgb(201, 68, 31)');
+  await page.getByLabel('Unité : Taille du texte', { exact: true }).selectOption('rem');
+  await page.getByLabel('Taille du texte', { exact: true }).fill('2');
+  await expect(heading.locator('h2')).toHaveCSS('font-size', '32px');
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await page.getByLabel('Unité : Marge intérieure', { exact: true }).selectOption('rem');
+  await page.getByLabel('Marge intérieure', { exact: true }).fill('1.25');
+  await expect(heading).toHaveCSS('padding-top', '20px');
+  const response = page.waitForResponse(result => result.request().method() === 'PATCH' && result.url().includes(`/documents/${id}`));
+  await page.locator('[data-pb-save]').click();
+  const saved = await (await response).json();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  const nodes = saved.data.content.blocks[0].data.elements;
+  const node = nodes.find(element => element.settings.text === 'Styles référencés');
+  expect(node.styles.desktop.color).toBe('kit:primary');
+  expect(node.styles.desktop.font_size).toBe('2rem');
+  expect(node.styles.desktop.padding).toBe('1.25rem');
+  await expectAccessible(page);
+});
+
 test('existing three-block page is converted without losing its saved HTML', async ({ page }) => {
   const legacyId = process.env.E2E_LEGACY_ENTRY_ID;
   expect(legacyId).toBeTruthy();

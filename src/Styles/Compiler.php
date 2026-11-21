@@ -51,6 +51,11 @@ final class Compiler
                 }
                 if ($declarations !== '') {
                     $modes[$mode] .= $selector . '{' . $declarations . '}';
+                    $inherit = Values::color($values['color'] ?? null) !== null ? 'color:inherit;' : '';
+                    $inherit .= Values::length($values['font_size'] ?? null) !== null ? 'font-size:inherit;' : '';
+                    if ($inherit !== '') {
+                        $modes[$mode] .= $selector . ' :where(h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary){' . $inherit . '}';
+                    }
                 }
             }
             $this->walk(is_array($element['children'] ?? null) ? $element['children'] : [], $modes);
@@ -60,17 +65,20 @@ final class Compiler
     private function declaration(string $key, mixed $value): string
     {
         $numeric = ['padding' => 'padding', 'margin' => 'margin', 'gap' => 'gap', 'font_size' => 'font-size', 'radius' => 'border-radius', 'min_height' => 'min-height'];
-        if (isset($numeric[$key]) && is_int($value) && $value >= 0 && $value <= 2000) {
-            return $numeric[$key] . ':' . $value . 'px;';
+        if (isset($numeric[$key])) {
+            $length = Values::length($value);
+            return $length !== null ? $numeric[$key] . ':' . $length . ';' : '';
         }
-        if (in_array($key, ['color', 'background'], true) && is_string($value) && preg_match('/^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/', $value) === 1) {
-            return ($key === 'background' ? 'background-color' : 'color') . ':' . $value . ';';
+        if (in_array($key, ['color', 'background'], true)) {
+            $color = Values::color($value);
+            return $color !== null ? ($key === 'background' ? 'background-color' : 'color') . ':' . $color . ';' : '';
         }
         if ($key === 'align' && is_string($value) && in_array($value, ['left', 'center', 'right'], true)) {
             return 'text-align:' . $value . ';';
         }
-        if ($key === 'width' && is_string($value) && preg_match('/^(?:(?:100|[0-9]{1,2})%|(?:[0-9]{1,3}|1[0-9]{3}|2000)px)$/', $value) === 1) {
-            return 'width:' . $value . ';';
+        if ($key === 'width') {
+            $width = Values::length($value, true);
+            return $width !== null ? 'width:' . $width . ';' : '';
         }
         if ($key === 'layout_mode' && is_string($value) && in_array($value, ['flex', 'grid'], true)) {
             return 'display:' . $value . ';';

@@ -20,6 +20,7 @@ require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
 require_once dirname(__DIR__) . '/src/Document/Validator.php';
+require_once dirname(__DIR__) . '/src/Styles/Values.php';
 require_once dirname(__DIR__) . '/src/Styles/Compiler.php';
 require_once dirname(__DIR__) . '/src/Styles/Kit.php';
 require_once dirname(__DIR__) . '/src/Styles/Snapshots.php';
@@ -85,6 +86,29 @@ final class DocumentTest extends TestCase
         $node['styles']['desktop']['width'] = '2001px';
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
         self::assertStringNotContainsString('body{', (new Compiler())->compile(['elements' => [$node]]));
+    }
+
+    public function testKitColorReferencesAndTypedLengthUnitsAreValidatedAndCompiled(): void
+    {
+        $node = $this->element();
+        $node['styles'] = ['desktop' => ['color' => 'kit:primary', 'background' => 'kit:text', 'padding' => '1.25rem', 'margin' => '2.5em', 'width' => '85%', 'font_size' => 24]];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $css = (new Compiler())->compile($result['data']);
+        self::assertStringContainsString('color:var(--pb-kit-primary);', $css);
+        self::assertStringContainsString('background-color:var(--pb-kit-text);', $css);
+        self::assertStringContainsString('padding:1.25rem;', $css);
+        self::assertStringContainsString('margin:2.5em;', $css);
+        self::assertStringContainsString('width:85%;', $css);
+        self::assertStringContainsString('font-size:24px;', $css);
+        $node['styles']['desktop']['padding'] = '1px;display:none';
+        $node['styles']['desktop']['color'] = 'var(--other)';
+        $node['styles']['desktop']['width'] = '100.01%';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $badCss = (new Compiler())->compile(['elements' => [$node]]);
+        self::assertStringNotContainsString('display:none', $badCss);
+        self::assertStringNotContainsString('var(--other)', $badCss);
+        self::assertStringNotContainsString('100.01%', $badCss);
     }
 
     public function testStyleSnapshotsAreAddressedByHashAndPrunedSafely(): void
