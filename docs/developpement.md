@@ -87,6 +87,8 @@ php bin/prime lang:check --strict
 
 # Depuis le dépôt du plugin
 npm test
+# Mesure indicative sur la fixture SQLite du CMS (copie du plugin à jour requise)
+php tools/benchmark.php /chemin/vers/prime-cms
 cd tests/e2e
 npm ci --no-audit --no-fund
 npx playwright install --with-deps chromium

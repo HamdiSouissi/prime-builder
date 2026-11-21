@@ -26,6 +26,20 @@ test('dashboard exposes the current features and system status', async ({ page }
   await expectAccessible(page);
 });
 
+test('the core content screen embeds the alternative editor on desktop and mobile', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/content/page/${id}/edit`);
+  await expect(page.getByRole('link', { name: 'Modifier avec Prime Builder' })).toHaveAttribute('href', `/admin/prime-builder/edit/${id}`);
+  await expect(page.locator('textarea[name="content_json"][data-prime-custom-editor-input]')).toBeHidden();
+  await expect(page.locator('.pb-alternate-preview')).toBeVisible();
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('core-editor-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('core-editor-mobile.png'), fullPage: true });
+});
+
 test('compose and publish a page using the CMS theme', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
