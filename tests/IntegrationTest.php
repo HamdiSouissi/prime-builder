@@ -57,6 +57,23 @@ final class IntegrationTest extends TestCase
         self::assertSame(200, $this->send($app, 'GET', '/admin/prime-builder/edit/1')->status());
     }
 
+    public function testDashboardAndSystemChecksReportRealState(): void
+    {
+        $app = $this->activated('admin');
+        $response = $this->send($app, 'GET', '/admin/prime-builder');
+        self::assertSame(200, $response->status(), $response->body());
+        self::assertStringContainsString('pb-start-title', $response->body());
+        self::assertStringContainsString('/admin/content/page', $response->body());
+        self::assertStringContainsString('no-store', (string) $response->header('Cache-Control'));
+        $checks = $app->get(Hooks::class)->apply('system.checks', []);
+        self::assertSame('ok', $checks[1]['status']);
+        self::assertSame('ok', $checks[2]['status']);
+        $app->get(Settings::class)->set('plugin.prime-builder.breakpoint_tablet', 600);
+        $app->get(Settings::class)->set('plugin.prime-builder.breakpoint_mobile', 767);
+        $checks = $app->get(Hooks::class)->apply('system.checks', []);
+        self::assertSame('warning', $checks[2]['status']);
+    }
+
     public function testApiPersistsRenderedHtmlAndHashedCss(): void
     {
         $app = $this->activated(null);

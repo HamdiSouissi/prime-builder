@@ -17,6 +17,7 @@ use Prime\Security\HtmlSanitizer;
 use Prime\Settings\SettingsRegistry;
 use Prime\Site\PageContext;
 use Prime\Themes\ThemeAssetRegistry;
+use PrimeBuilder\Controller\Dashboard;
 use PrimeBuilder\Controller\Documents;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
@@ -110,8 +111,9 @@ final class Plugin extends AbstractPlugin
             return $menu;
         });
         $controller = new Documents($context);
-        $context->router()->adminGroup(static function (Router $router) use ($controller): void {
-            $router->get('/', static fn (): \Prime\Http\Response => \Prime\Http\Response::redirect('/admin/settings/general#settings-section-prime-builder'))->name('index');
+        $dashboard = new Dashboard($context);
+        $context->router()->adminGroup(static function (Router $router) use ($controller, $dashboard): void {
+            $router->get('/', [$dashboard, 'index'])->name('index');
             $router->get('/edit/{id:\d+}', [$controller, 'edit'])->name('edit');
         }, capability: 'prime_builder.edit');
         $context->router()->frontGroup(static function (Router $router) use ($controller): void {
@@ -166,10 +168,17 @@ final class Plugin extends AbstractPlugin
                 $context->app()->get(\Prime\Cache\CacheManager::class)->clearPages();
             }
         });
-        $context->hooks()->filter('system.checks', static function (mixed $checks): mixed {
-            if (is_array($checks)) {
-                $checks[] = ['id' => 'prime-builder.status', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.label'), 'status' => 'ok', 'value' => t('plugin::prime-builder.system.active')];
+        $context->hooks()->filter('system.checks', static function (mixed $checks) use ($context): mixed {
+            if (!is_array($checks)) {
+                return $checks;
             }
+            $checks[] = ['id' => 'prime-builder.status', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.label'), 'status' => 'ok', 'value' => t('plugin::prime-builder.system.active')];
+            $assetsPresent = is_file($context->path('assets/js/editor.js')) && is_file($context->path('assets/css/editor.css')) && is_file($context->path('assets/css/public.css'));
+            $checks[] = ['id' => 'prime-builder.assets', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.assets'), 'status' => $assetsPresent ? 'ok' : 'error', 'value' => t($assetsPresent ? 'plugin::prime-builder.system.present' : 'plugin::prime-builder.system.missing')];
+            $tablet = (int) $context->settings()->get('breakpoint_tablet', 1024);
+            $mobile = (int) $context->settings()->get('breakpoint_mobile', 767);
+            $breakpointsValid = $tablet >= 600 && $tablet <= 2000 && $mobile >= 320 && $mobile < $tablet;
+            $checks[] = ['id' => 'prime-builder.breakpoints', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.breakpoints'), 'status' => $breakpointsValid ? 'ok' : 'warning', 'value' => t($breakpointsValid ? 'plugin::prime-builder.system.valid' : 'plugin::prime-builder.system.adjusted')];
             return $checks;
         });
     }

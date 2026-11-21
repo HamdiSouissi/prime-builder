@@ -14,6 +14,16 @@ async function expectAccessible(page) {
   expect(failures.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([]);
 }
 
+test('dashboard exposes the current features and system status', async ({ page }) => {
+  await login(page);
+  await page.goto('/admin/prime-builder');
+  await expect(page.getByRole('heading', { name: 'Commencer' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'État de l’installation' })).toBeVisible();
+  await expect(page.getByText('Cette version est partielle', { exact: false })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Consulter le diagnostic système' })).toBeVisible();
+  await expectAccessible(page);
+});
+
 test('compose and publish a page using the CMS theme', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
