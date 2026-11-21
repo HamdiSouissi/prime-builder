@@ -1,0 +1,17 @@
+{
+  "title": "Section Appel à l’action",
+  "type": "section",
+  "document": {
+    "version": 1,
+    "elements": [
+      {
+        "id": "sec_cta_1",
+        "elType": "container",
+        "settings": { "layout_type": "flex", "content_width": "boxed" },
+        "elements": [
+          { "id": "cta_1", "elType": "widget", "widgetType": "cta", "settings": { "title": "Prêt à lancer votre projet ?", "description": "Créez votre première page dès maintenant.", "button_text": "Commencer", "url": "/contact" } }
+        ]
+      }
+    ]
+  }
+}

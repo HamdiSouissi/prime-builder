@@ -1,0 +1,18 @@
+{
+  "title": "Page Contact",
+  "type": "page",
+  "document": {
+    "version": 1,
+    "elements": [
+      {
+        "id": "pg_contact_1",
+        "elType": "container",
+        "settings": { "layout_type": "flex", "content_width": "boxed" },
+        "elements": [
+          { "id": "contact_h1", "elType": "widget", "widgetType": "heading", "settings": { "tag": "h1", "text": "Contactez-nous" } },
+          { "id": "contact_form", "elType": "widget", "widgetType": "form", "settings": { "form_id": "contact", "submit_label": "Envoyer le message" } }
+        ]
+      }
+    ]
+  }
+}

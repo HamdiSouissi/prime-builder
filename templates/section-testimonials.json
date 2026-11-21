@@ -1,0 +1,18 @@
+{
+  "title": "Section Témoignages",
+  "type": "section",
+  "document": {
+    "version": 1,
+    "elements": [
+      {
+        "id": "sec_testi_1",
+        "elType": "container",
+        "settings": { "layout_type": "grid", "grid_columns": 2, "gap": "24px", "content_width": "boxed" },
+        "elements": [
+          { "id": "testi_1", "elType": "widget", "widgetType": "testimonial", "settings": { "quote": "Une expérience fluide.", "author": "Alice", "role": "Éditrice" } },
+          { "id": "testi_2", "elType": "widget", "widgetType": "testimonial", "settings": { "quote": "Simple et efficace.", "author": "Karim", "role": "Développeur" } }
+        ]
+      }
+    ]
+  }
+}

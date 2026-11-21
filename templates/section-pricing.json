@@ -1,0 +1,18 @@
+{
+  "title": "Section Tarifs",
+  "type": "section",
+  "document": {
+    "version": 1,
+    "elements": [
+      {
+        "id": "sec_price_1",
+        "elType": "container",
+        "settings": { "layout_type": "grid", "grid_columns": 2, "gap": "24px", "content_width": "boxed" },
+        "elements": [
+          { "id": "price_1", "elType": "widget", "widgetType": "price-table", "settings": { "title": "Essentiel", "price": "0 €", "button_text": "Démarrer", "url": "#" } },
+          { "id": "price_2", "elType": "widget", "widgetType": "price-table", "settings": { "title": "Pro", "price": "29 €", "button_text": "Choisir Pro", "url": "#" } }
+        ]
+      }
+    ]
+  }
+}

@@ -26,3 +26,20 @@ test('store adds container and widget, supports undo/redo and responsive device'
   store.removeElement(wId);
   assert.equal(store.getState().document.elements[0].elements.length, 0);
 });
+
+test('store moves elements up and down in container', () => {
+  const store = createStore({ version: 1, elements: [] });
+  const cId = store.addContainer('flex');
+  const w1 = store.addWidget('heading', { text: 'First' }, cId);
+  const w2 = store.addWidget('button', { text: 'Second' }, cId);
+
+  store.moveElement(w2, 'up');
+  const children = store.getState().document.elements[0].elements;
+  assert.equal(children[0].id, w2);
+  assert.equal(children[1].id, w1);
+
+  store.moveElement(w2, 'down');
+  const childrenAfter = store.getState().document.elements[0].elements;
+  assert.equal(childrenAfter[0].id, w1);
+  assert.equal(childrenAfter[1].id, w2);
+});

@@ -1,0 +1,19 @@
+{
+  "title": "Section Fonctionnalités (3 colonnes)",
+  "type": "section",
+  "document": {
+    "version": 1,
+    "elements": [
+      {
+        "id": "sec_feat_1",
+        "elType": "container",
+        "settings": { "layout_type": "grid", "grid_columns": 3, "gap": "24px", "content_width": "boxed" },
+        "elements": [
+          { "id": "feat_1", "elType": "widget", "widgetType": "icon-box", "settings": { "title": "Rapide", "description": "Rendu serveur sans dépendance." } },
+          { "id": "feat_2", "elType": "widget", "widgetType": "icon-box", "settings": { "title": "Accessible", "description": "Conforme WCAG 2.2 AA." } },
+          { "id": "feat_3", "elType": "widget", "widgetType": "icon-box", "settings": { "title": "Sécurisé", "description": "Validation stricte et CSP." } }
+        ]
+      }
+    ]
+  }
+}

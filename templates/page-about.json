@@ -1,0 +1,19 @@
+{
+  "title": "Page À propos",
+  "type": "page",
+  "document": {
+    "version": 1,
+    "elements": [
+      {
+        "id": "pg_about_1",
+        "elType": "container",
+        "settings": { "layout_type": "flex", "content_width": "boxed" },
+        "elements": [
+          { "id": "about_h1", "elType": "widget", "widgetType": "heading", "settings": { "tag": "h1", "text": "À propos de nous" } },
+          { "id": "about_txt", "elType": "widget", "widgetType": "text-editor", "settings": { "text": "<p>Nous concevons des outils web ouverts, rapides et accessibles.</p>" } },
+          { "id": "about_cnt", "elType": "widget", "widgetType": "counter", "settings": { "number": "150", "title": "Sites propulsés" } }
+        ]
+      }
+    ]
+  }
+}

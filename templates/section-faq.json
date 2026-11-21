@@ -1,0 +1,18 @@
+{
+  "title": "Section FAQ",
+  "type": "section",
+  "document": {
+    "version": 1,
+    "elements": [
+      {
+        "id": "sec_faq_1",
+        "elType": "container",
+        "settings": { "layout_type": "flex", "content_width": "boxed" },
+        "elements": [
+          { "id": "faq_h", "elType": "widget", "widgetType": "heading", "settings": { "tag": "h2", "text": "Questions fréquentes" } },
+          { "id": "faq_acc", "elType": "widget", "widgetType": "accordion", "settings": { "items": [{"title": "Comment installer ?", "content": "Copiez dans content/plugins/prime-builder."}, {"title": "Est-ce compatible CSP ?", "content": "Oui, 100 % sans script inline."}] } }
+        ]
+      }
+    ]
+  }
+}
