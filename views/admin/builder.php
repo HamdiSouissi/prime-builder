@@ -14,7 +14,7 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="<?= $this->e(csrf_token()) ?>">
     <title><?= $this->e(t('plugin::prime-builder.ui.title')) ?> — <?= $this->e($entry->title) ?></title>
-    <link rel="stylesheet" href="<?= $this->e($cssUrl) ?>">
+    <link rel="stylesheet" data-pb-editor-css href="<?= $this->e($cssUrl) ?>">
     <script type="module" src="<?= $this->e($jsUrl) ?>"></script>
 </head>
 <body>

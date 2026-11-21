@@ -17,6 +17,7 @@ use Prime\Content\Exception\ContentLockedException;
 use Prime\Content\Exception\ContentValidationException;
 use Prime\Http\Request;
 use Prime\Http\Response;
+use Prime\I18n\Translator;
 use Prime\Plugins\PluginContext;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Library;
@@ -58,15 +59,43 @@ final class Documents
         $definitions = [];
         foreach ($registry->all() as $name => $definition) {
             // Never send server callbacks or non-serializable plugin data to the browser.
+            $fields = [];
+            foreach ($definition['fields'] as $fieldName => $schema) {
+                if (!is_string($fieldName) || !is_array($schema)) {
+                    continue;
+                }
+                $field = ['type' => is_string($schema['type'] ?? null) ? $schema['type'] : 'text'];
+                foreach (['min', 'max'] as $bound) {
+                    if (is_int($schema[$bound] ?? null)) {
+                        $field[$bound] = $schema[$bound];
+                    }
+                }
+                if (is_string($schema['label'] ?? null)) {
+                    $field['label'] = t($schema['label']);
+                }
+                if (is_array($schema['values'] ?? null)) {
+                    $field['values'] = array_values(array_filter($schema['values'], 'is_string'));
+                }
+                if (is_array($schema['option_labels'] ?? null)) {
+                    $labels = [];
+                    foreach ($schema['option_labels'] as $value => $label) {
+                        if (is_string($value) && is_string($label)) {
+                            $labels[$value] = t($label);
+                        }
+                    }
+                    $field['option_labels'] = $labels;
+                }
+                $fields[$fieldName] = $field;
+            }
             $definitions[$name] = [
                 'label' => t(is_string($definition['label'] ?? null) ? $definition['label'] : $name),
                 'category' => is_string($definition['category'] ?? null) ? $definition['category'] : 'base',
-                'fields' => $definition['fields'],
+                'fields' => $fields,
                 'container' => ($definition['container'] ?? false) === true,
             ];
         }
         $ui = [];
-        foreach (['widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'history', 'drop', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3'] as $key) {
+        foreach (['widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'history', 'drop', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'media_grid', 'media_error'] as $key) {
             $ui[$key] = t('plugin::prime-builder.ui.' . $key);
         }
         $config = [
@@ -76,6 +105,8 @@ final class Documents
             'previewUrl' => $entry->previewUrl(),
             'publicCssUrl' => $this->plugin->url('css/public.css'),
             'kitCssUrl' => '/prime-builder/kit/' . substr(hash('sha256', Kit::fromSettings($this->plugin->settings())), 0, 16) . '.css',
+            'mediaCssUrl' => asset('admin/css/admin.css'),
+            'mediaMessages' => array_filter($this->plugin->app()->get(Translator::class)->messages(), static fn (string $key): bool => str_starts_with($key, 'admin.js.media.'), ARRAY_FILTER_USE_KEY),
             'tabletBreakpoint' => max(600, min(2000, (int) $this->plugin->settings()->get('breakpoint_tablet', 1024))),
             'mobileBreakpoint' => max(320, min(1600, (int) $this->plugin->settings()->get('breakpoint_mobile', 767))),
             'editUrl' => $entry->editUrl(),

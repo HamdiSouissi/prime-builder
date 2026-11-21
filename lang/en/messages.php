@@ -83,6 +83,9 @@ return [
         'anchor' => 'Anchor',
     ],
     'ui' => [
+        'choose_media' => 'Choose from media library',
+        'media_grid' => 'Available media',
+        'media_error' => 'The media library is unavailable. You can enter a URL.',
         'command_hint' => '⌘K',
         'pro' => 'Advanced',
         'items' => 'Items (one per line)',

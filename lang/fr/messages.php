@@ -83,6 +83,9 @@ return [
         'anchor' => 'Ancre',
     ],
     'ui' => [
+        'choose_media' => 'Choisir dans la médiathèque',
+        'media_grid' => 'Médias disponibles',
+        'media_error' => 'La médiathèque est indisponible. Vous pouvez saisir une URL.',
         'command_hint' => '⌘K',
         'pro' => 'Avancé',
         'items' => 'Éléments (un par ligne)',

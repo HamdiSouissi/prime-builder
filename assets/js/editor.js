@@ -172,12 +172,12 @@ function exportDocument() {
 }
 function makeField(name, schema, current, onChange) {
   const wrapper = document.createElement('label'); wrapper.className = 'pb-field';
-  wrapper.append(text('span', ui[name] || name));
+  wrapper.append(text('span', schema.label || ui[name] || name));
   let input;
   if (schema.type === 'enum') {
     input = document.createElement('select');
     if (current == null) { const option = text('option', '—'); option.value = ''; input.append(option); }
-    for (const value of schema.values) { const option = text('option', ui[value] || value); option.value = value; input.append(option); }
+    for (const value of schema.values) { const option = text('option', schema.option_labels?.[value] || ui[value] || value); option.value = value; input.append(option); }
   } else if (schema.type === 'rich' || schema.type === 'multiline') {
     input = document.createElement('textarea');
     if (schema.max != null) input.maxLength = schema.max;
@@ -214,6 +214,50 @@ function renderParentOptions(selectedElement) {
   }
   walk(history.present); parentSelect.value = currentParent;
 }
+let mediaDependencies;
+async function openMedia(elementId, urlField) {
+  try {
+    if (!mediaDependencies) {
+      const stylesheet = new Promise((resolve, reject) => {
+        const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = config.mediaCssUrl;
+        link.addEventListener('load', resolve, { once: true }); link.addEventListener('error', reject, { once: true });
+        document.head.insertBefore(link, document.querySelector('[data-pb-editor-css]'));
+      });
+      mediaDependencies = Promise.all([import('/assets/admin/js/media/picker.js'), import('/assets/admin/js/i18n.js'), stylesheet]);
+    }
+    const [picker, i18n] = await mediaDependencies;
+    i18n.setTranslations(config.mediaMessages || {});
+    picker.openMediaPicker({ multiple: false, kinds: ['image'], title: ui.choose_media, onSelect: selection => {
+      const media = Array.isArray(selection) ? selection[0] : selection;
+      const node = find(history.present, elementId);
+      if (!node || !media || typeof media.url !== 'string') return;
+      const settings = { ...node.settings, [urlField]: media.url };
+      if (typeof media.alt === 'string') settings.alt = media.alt;
+      if (node.type === 'image') {
+        for (const key of ['width', 'height']) if (Number.isInteger(media[key]) && media[key] > 0 && media[key] <= 10000) settings[key] = media[key];
+      }
+      commit(update(history.present, elementId, { settings })); renderSettings();
+    } });
+    const overlay = document.getElementById('pc-media-picker-modal');
+    const grid = overlay?.querySelector('[data-prime-picker-grid]');
+    grid?.setAttribute('aria-label', ui.media_grid);
+    if (overlay && !overlay.dataset.pbFocusTrap) {
+      overlay.dataset.pbFocusTrap = 'true';
+      overlay.addEventListener('keydown', event => {
+        if (event.key !== 'Tab' || overlay.hidden) return;
+        const focusable = [...overlay.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[href],[tabindex]:not([tabindex="-1"])')]
+          .filter(node => node.getClientRects().length > 0);
+        if (!focusable.length) return;
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      });
+    }
+  } catch {
+    mediaDependencies = null;
+    $('[data-pb-save-state]').textContent = ui.media_error;
+  }
+}
 function renderSettings() {
   const element = find(history.present, selected);
   if (!element) { panel = 'widgets'; renderPanel(); return; }
@@ -230,6 +274,10 @@ function renderSettings() {
         if (value === undefined) delete settings[name]; else settings[name] = value;
         commit(update(history.present, selected, { settings }));
       }));
+      if ((element.type === 'image' && name === 'url') || (element.type === 'card' && name === 'image_url')) {
+        const choose = text('button', ui.choose_media, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMedia = '';
+        choose.addEventListener('click', () => openMedia(element.id, name)); fields.append(choose);
+      }
     }
     if (!fields.children.length) fields.append(text('p', ui.empty, 'pb-empty'));
   } else {

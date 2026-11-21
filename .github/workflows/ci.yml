@@ -134,15 +134,15 @@ jobs:
       - name: Install browser tooling
         working-directory: builder/tests/e2e
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
       - name: Playwright
         working-directory: builder/tests/e2e
         run: npm test
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
-          name: prime-builder-e2e-failure
+          name: prime-builder-e2e-results
           path: |
             builder/tests/e2e/test-results
             /tmp/prime-builder-server.log

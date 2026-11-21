@@ -26,9 +26,11 @@ test('compose and publish a page using the CMS theme', async ({ page }) => {
   await page.locator('[data-pb-save]').click();
   await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
   await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('editor-desktop.png'), fullPage: true });
   await page.goto('/test-prime-builder');
   await expect(page.getByRole('heading', { name: 'Une page composée dans Prime Builder' })).toBeVisible();
   await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('public-desktop.png'), fullPage: true });
 });
 
 test('library templates are available and the editor fits a mobile viewport', async ({ page }) => {
@@ -39,6 +41,7 @@ test('library templates are available and the editor fits a mobile viewport', as
   await expect(page.locator('.pb-template-card')).toHaveCount(9);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('editor-mobile.png'), fullPage: true });
 });
 
 test('keyboard reparenting, favorites, commands and scheduling', async ({ page }) => {
@@ -113,4 +116,25 @@ test('tabs work with keyboard and remain readable without JavaScript', async ({ 
   await expect(fallback.getByText('Contenu rouge')).toBeVisible();
   await expect(fallback.getByText('Contenu bleu')).toBeVisible();
   await withoutJs.close();
+});
+
+test('image selection uses the Prime media picker', async ({ page }) => {
+  await login(page);
+  await page.route('**/admin/media/api/items?*', route => route.fulfill({ json: { items: [{
+    id: 42, kind: 'image', url: '/assets/plugins/prime-builder/images/landscape.svg',
+    thumbnail_url: '/assets/plugins/prime-builder/images/landscape.svg', display_title: 'Paysage',
+    alt: 'Montagnes', width: 1200, height: 800, human_size: '10 KB',
+  }], has_more: false } }));
+  await page.route('**/admin/media/api/folders', route => route.fulfill({ json: { flat_folders: [], counts: { all: 1, unclassified: 1 } } }));
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Image' }).click();
+  await page.getByRole('button', { name: 'Choisir dans la médiathèque' }).click();
+  const modal = page.getByRole('dialog', { name: 'Choisir dans la médiathèque' });
+  await expect(modal).toBeVisible();
+  await expectAccessible(page);
+  await modal.getByRole('option', { name: /Paysage/ }).click();
+  await modal.locator('[data-prime-picker-confirm]').click();
+  await expect(page.getByLabel('Adresse URL')).toHaveValue('/assets/plugins/prime-builder/images/landscape.svg');
+  await expect(page.getByLabel('Texte alternatif')).toHaveValue('Montagnes');
+  await expect(page.getByLabel('Largeur')).toHaveValue('1200');
 });

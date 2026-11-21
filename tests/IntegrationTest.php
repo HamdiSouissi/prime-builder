@@ -18,7 +18,10 @@ use Prime\Kernel\Application;
 use Prime\Plugins\AssetPublisher;
 use Prime\Plugins\PluginManager;
 use Prime\Security\Csrf;
+use Prime\Settings\Settings;
 use Prime\Site\PageContext;
+use Prime\Site\UrlGenerator;
+use Prime\Site\View\EntryView;
 use Prime\Tests\Support\ApiTestFixture;
 use Prime\Themes\ThemeAssetRegistry;
 use PrimeBuilder\Styles\Compiler;
@@ -118,6 +121,29 @@ final class IntegrationTest extends TestCase
         $csrf = (new Csrf($app->get(Session::class)))->token();
         $request = Request::create('PATCH', '/api/prime-builder/v1/documents/2', headers: ['Content-Type' => 'application/json', 'Accept' => 'application/json', 'X-Prime-CSRF' => $csrf], rawBody: (string) json_encode(['content' => $this->document()]));
         self::assertSame(200, $app->get(Kernel::class)->handle($request)->status());
+    }
+
+    public function testDeactivationKeepsReadableHtmlAndUninstallCleansSettingsAndCapabilities(): void
+    {
+        $app = $this->activated(null);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $this->document()], $token)->status());
+        $settings = $app->get(Settings::class);
+        $settings->set('plugin.prime-builder.kit_primary', '#123456');
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.edit')");
+        $manager = $app->get(PluginManager::class);
+        $manager->deactivate('prime-builder');
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('<h2>Bonjour</h2>', (new EntryView($entry, $app->get(UrlGenerator::class)))->content());
+        $manager->uninstall('prime-builder', deleteFiles: false);
+        self::assertSame(false, $settings->has('plugin.prime-builder.kit_primary'));
+        self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM pc_role_capabilities WHERE capability LIKE 'prime!_builder.%' ESCAPE '!'")->fetchColumn());
+        self::assertSame(false, is_dir($this->assets . '/prime-builder'));
+        $saved = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($saved);
+        self::assertStringContainsString('<h2>Bonjour</h2>', $saved->contentHtml);
     }
 
     public function testInvalidTreeAndPrivateCssAreNotExposed(): void
