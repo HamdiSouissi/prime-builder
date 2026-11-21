@@ -41,6 +41,11 @@ final class Registry
             'posts' => ['limit' => ['type' => 'integer', 'min' => 1, 'max' => 12], 'show_excerpt' => ['type' => 'enum', 'values' => ['show', 'hide']]],
             'current_content' => ['source' => ['type' => 'enum', 'values' => ['title', 'excerpt', 'published', 'author']]],
             'prime_block' => ['block_type' => ['type' => 'enum', 'values' => PrimeBlock::ALLOWED], 'block_data' => ['type' => 'json_object', 'max' => 20000], 'block_anchor' => ['type' => 'text', 'max' => 100]],
+            'html' => [
+                'markup' => ['type' => 'rich', 'max' => 20000],
+                'signed_entry' => ['type' => 'integer', 'min' => 1, 'max' => PHP_INT_MAX, 'internal' => true],
+                'signature' => ['type' => 'signature', 'max' => 64, 'internal' => true],
+            ],
             'original_content' => ['payload' => ['type' => 'protected', 'max' => 1048576]],
             'original_group' => ['payload' => ['type' => 'protected', 'max' => 1048576]],
             'tabs' => [

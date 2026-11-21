@@ -81,6 +81,7 @@ return [
     ],
     'validation' => [
         'prime_block' => 'Le bloc Prime est invalide ou non autorisé.',
+        'html' => 'Le contenu HTML filtré n’a pas été autorisé pour cette entrée.',
         'size' => 'Le document dépasse la taille autorisée.',
         'structure' => 'La structure du document est invalide.',
         'depth' => 'La profondeur maximale est dépassée.',
@@ -94,6 +95,7 @@ return [
         'prime_block' => 'Un texte composé avec un bloc Prime.',
         'heading' => 'Un titre à personnaliser',
         'text' => 'Ajoutez ici votre texte.',
+        'html' => 'Ajoutez ici votre HTML filtré.',
         'button' => 'En savoir plus',
         'quote' => 'Une citation inspirante.',
         'alert' => 'Un message important.',
@@ -115,6 +117,7 @@ return [
         'original_content' => 'Contenu d’origine',
         'original_group' => 'Contenus d’origine groupés',
         'prime_block' => 'Bloc Prime',
+        'html' => 'HTML filtré',
         'posts' => 'Articles récents',
         'current_content' => 'Contenu actuel',
         'gallery' => 'Galerie',
@@ -141,6 +144,8 @@ return [
     'ui' => [
         'conversion_failed' => 'Impossible de convertir ce contenu sans risquer de perdre son HTML enregistré. L’enregistrement est désactivé ; revenez à Prime Editor.',
         'original_read_only' => 'Ce contenu d’origine ne peut pas être modifié ici. Vous pouvez le déplacer ou le supprimer.',
+        'html_read_only' => 'Le code HTML est en lecture seule pour votre compte. Vous pouvez déplacer ou supprimer cet élément ; sa création et sa modification exigent une permission dédiée.',
+        'markup' => 'Code HTML filtré',
         'original_group_warning' => 'Les limites des blocs d’origine ne peuvent pas être retrouvées : leur HTML enregistré est conservé ensemble en lecture seule. Ils ne peuvent pas être modifiés, déplacés ou supprimés séparément ; déplacer ou supprimer cet élément affecte tout le groupe. À l’enregistrement, leurs réglages d’origine ne sont pas conservés et leur contenu dynamique reste figé.',
         'unsaved_short' => 'Non enregistré',
         'confirm_title' => 'Confirmer',

@@ -24,6 +24,8 @@ final class Validator
         private readonly ?BlockRegistry $blocks = null,
         private readonly ?OriginalContent $originals = null,
         private readonly ?int $entryId = null,
+        private readonly ?HtmlContent $html = null,
+        private readonly bool $requireSealedHtml = false,
     ) {
     }
 
@@ -117,6 +119,9 @@ final class Validator
                     $settings['block_data'] = $normalizedBlock;
                 }
             }
+            if ($type === 'html' && $this->requireSealedHtml && !($this->html?->valid($id, $settings, $this->entryId) ?? false)) {
+                $errors[] = t('plugin::prime-builder.validation.html');
+            }
             $isOriginal = in_array($type, ['original_content', 'original_group'], true);
             if ($isOriginal) {
                 $payload = $settings['payload'] ?? null;
@@ -178,6 +183,7 @@ final class Validator
             'href' => $value === '' ? '' : $this->sanitizer->sanitizeHref($value),
             'url' => $value === '' ? '' : $this->sanitizer->sanitizeResourceUrl($value),
             'slug' => $value === '' || preg_match('/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/', $value) === 1 ? $value : null,
+            'signature' => preg_match('/^[a-f0-9]{64}$/D', $value) === 1 ? $value : null,
             'enum' => in_array($value, is_array($schema['values'] ?? null) ? $schema['values'] : [], true) ? $value : null,
             default => null,
         };

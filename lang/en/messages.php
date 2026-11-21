@@ -81,6 +81,7 @@ return [
     ],
     'validation' => [
         'prime_block' => 'The Prime block is invalid or not allowed.',
+        'html' => 'The filtered HTML content was not authorized for this entry.',
         'size' => 'The document exceeds the allowed size.',
         'structure' => 'The document structure is invalid.',
         'depth' => 'The maximum depth was exceeded.',
@@ -94,6 +95,7 @@ return [
         'prime_block' => 'Text composed with a Prime block.',
         'heading' => 'A heading to customize',
         'text' => 'Add your text here.',
+        'html' => 'Add your filtered HTML here.',
         'button' => 'Learn more',
         'quote' => 'An inspiring quote.',
         'alert' => 'An important message.',
@@ -115,6 +117,7 @@ return [
         'original_content' => 'Original content',
         'original_group' => 'Grouped original content',
         'prime_block' => 'Prime block',
+        'html' => 'Filtered HTML',
         'posts' => 'Recent posts',
         'current_content' => 'Current content',
         'gallery' => 'Gallery',
@@ -141,6 +144,8 @@ return [
     'ui' => [
         'conversion_failed' => 'This content cannot be converted without risking loss of saved HTML. Saving is disabled; return to Prime Editor.',
         'original_read_only' => 'This original content cannot be edited here. You can move or delete it.',
+        'html_read_only' => 'HTML is read-only for your account. You can move or delete this element; creating or changing it requires a dedicated permission.',
+        'markup' => 'Filtered HTML code',
         'original_group_warning' => 'The original block boundaries could not be recovered: their saved HTML is kept together as read-only content. The blocks cannot be edited, moved or deleted individually; moving or deleting this element affects the whole group. Saving does not retain their original settings, and dynamic content remains frozen.',
         'unsaved_short' => 'Not saved',
         'confirm_title' => 'Confirm',

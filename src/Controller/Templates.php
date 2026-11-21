@@ -13,6 +13,7 @@ use Prime\Http\Response;
 use Prime\Plugins\PluginContext;
 use Prime\Security\HtmlSanitizer;
 use Prime\Settings\Settings;
+use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Library;
 use PrimeBuilder\Document\SavedTemplates;
 use PrimeBuilder\Document\Validator;
@@ -67,6 +68,13 @@ final class Templates
         if ($result['errors'] !== [] || !is_array($elements) || $elements === []) {
             return ApiError::response('validation_failed', 422, $request, ['fields' => ['content' => $result['errors']]]);
         }
+        if (HtmlContent::contains($result['data']) && !$user->can('prime_builder.unfiltered_html')) {
+            return ApiError::response('forbidden', 403, $request);
+        }
+        // A shared template is not bound to its source entry; a privileged save to a
+        // destination entry will authenticate its HTML again with the new IDs.
+        $portable = HtmlContent::withoutSeals($result['data']);
+        $elements = is_array($portable['elements'] ?? null) ? $portable['elements'] : [];
         $saved = $this->saved->create($name, $body['kind'], $elements);
         if ($saved === null) {
             return ApiError::response('validation_failed', 422, $request);

@@ -325,6 +325,154 @@ final class IntegrationTest extends TestCase
         self::assertSame(200, $app->get(Kernel::class)->handle($request)->status());
     }
 
+    public function testFilteredHtmlRequiresCapabilityAndRemainsSafeAcrossCoreAndBuilderApis(): void
+    {
+        $app = $this->activated(null);
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.edit'), (2, 'prime_builder.templates')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $editorToken = $this->tokens($app)->issue($this->user($app, 2), 'editor', ['*'])['token'];
+        $layout = ['version' => 1, 'elements' => [[
+            'id' => 'box', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [[
+                'id' => 'snippet', 'type' => 'html', 'settings' => ['markup' => '<p>HTML <strong>autorisé</strong><script>alert(1)</script><a href="javascript:alert(1)" onclick="alert(2)">lien</a></p>'], 'styles' => [], 'children' => [],
+            ]],
+        ]]];
+        $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => $layout]]];
+        $template = ['name' => 'HTML', 'kind' => 'section', 'data' => $layout];
+        $original = $app->get(EntryRepository::class)->find(3);
+        self::assertNotNull($original);
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/render', ['data' => $layout], $editorToken)->status());
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $document], $editorToken)->status());
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/import', ['data' => $layout], $editorToken)->status());
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/templates', $template, $editorToken)->status());
+        // The core block validator cannot authorize a new unsigned widget either.
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/content/post/3', ['content' => $document], $editorToken)->status());
+        self::assertSame($original->content, $app->get(EntryRepository::class)->find(3)?->content);
+
+        $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.unfiltered_html')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $htmlToken = $this->tokens($app)->issue($this->user($app, 2), 'html author', ['*'])['token'];
+        // An account's permission must not broaden a deliberately scoped token.
+        $scoped = $this->tokens($app)->issue($this->user($app, 2), 'no html', ['prime_builder.edit', 'prime_builder.templates', 'content.edit_own'])['token'];
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/render', ['data' => $layout], $scoped)->status());
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $document], $scoped)->status());
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/templates', $template, $scoped)->status());
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/render', ['data' => $layout], $htmlToken);
+        self::assertSame(200, $preview->status(), $preview->body());
+        self::assertStringContainsString('<strong>autorisé</strong>', $preview->body());
+        self::assertStringNotContainsString('<script', $preview->body());
+        self::assertStringNotContainsString('onclick', $preview->body());
+        self::assertStringNotContainsString('javascript:', $preview->body());
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $document], $htmlToken);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(3);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('<strong>autorisé</strong>', $entry->contentHtml);
+        self::assertStringNotContainsString('<script', $entry->contentHtml);
+        $stored = $entry->decodedContent();
+        $settings = $stored['blocks'][0]['data']['elements'][0]['children'][0]['settings'];
+        self::assertSame(3, $settings['signed_entry']);
+        self::assertSame(64, strlen($settings['signature']));
+        $savedTemplate = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'HTML', 'kind' => 'section', 'data' => $stored['blocks'][0]['data']], $htmlToken);
+        self::assertSame(201, $savedTemplate->status(), $savedTemplate->body());
+        $templateSettings = json_decode($savedTemplate->body(), true)['data']['elements'][0]['children'][0]['settings'];
+        self::assertSame(false, isset($templateSettings['signature']));
+        self::assertSame(false, isset($templateSettings['signed_entry']));
+        self::assertSame(200, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/import', ['data' => $layout], $htmlToken)->status());
+        $admin = $this->tokens($app)->issue($this->user($app, 1), 'administrator', ['*'])['token'];
+        $coreCopy = $this->send($app, 'PATCH', '/api/v1/content/post/2', ['content' => $stored], $admin);
+        self::assertSame(200, $coreCopy->status(), $coreCopy->body());
+        $copyEntry = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($copyEntry);
+        self::assertStringContainsString('<strong>autorisé</strong>', $copyEntry->contentHtml);
+        $crossEntry = $copyEntry->decodedContent();
+        self::assertSame(2, $crossEntry['blocks'][0]['data']['elements'][0]['children'][0]['settings']['signed_entry']);
+        $adminDuplicate = $app->get(\Prime\Content\EntryService::class)->duplicate(3, $this->user($app, 1));
+        self::assertStringContainsString('<strong>autorisé</strong>', $adminDuplicate->contentHtml);
+        self::assertSame('text', $adminDuplicate->decodedContent()['blocks'][0]['data']['elements'][0]['children'][0]['type']);
+
+        // Revocation permits unchanged HTML to survive while denying edits or copies.
+        $pdo->exec("DELETE FROM pc_role_capabilities WHERE role_id = 2 AND capability = 'prime_builder.unfiltered_html'");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $unchanged = $stored;
+        $unchanged['blocks'][0]['data']['elements'][] = ['id' => 'heading', 'type' => 'heading', 'settings' => ['text' => 'Autre contenu'], 'styles' => [], 'children' => []];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $unchanged], $htmlToken)->status());
+        $changed = $unchanged;
+        $changed['blocks'][0]['data']['elements'][0]['children'][0]['settings']['markup'] = '<p>Modification interdite</p>';
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $changed], $htmlToken)->status());
+        self::assertSame(403, $this->send($app, 'POST', '/api/prime-builder/v1/documents/3/render', ['data' => $changed['blocks'][0]['data']], $htmlToken)->status());
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/content/post/3', ['content' => $changed], $htmlToken)->status());
+        $copy = $unchanged;
+        $copy['blocks'][0]['data']['elements'][0]['children'][] = $copy['blocks'][0]['data']['elements'][0]['children'][0];
+        $copy['blocks'][0]['data']['elements'][0]['children'][1]['id'] = 'copied';
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $copy], $htmlToken)->status());
+        $beforeCrossEntry = $app->get(EntryRepository::class)->find(3);
+        self::assertNotNull($beforeCrossEntry);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/v1/content/post/3', ['content' => $crossEntry], $htmlToken)->status());
+        self::assertSame($beforeCrossEntry->content, $app->get(EntryRepository::class)->find(3)?->content);
+        $after = $app->get(EntryRepository::class)->find(3);
+        self::assertNotNull($after);
+        self::assertStringContainsString('<strong>autorisé</strong>', $after->contentHtml);
+        self::assertStringContainsString('Autre contenu', $after->contentHtml);
+        self::assertStringNotContainsString('Modification interdite', $after->contentHtml);
+        // Core duplication has no destination ID during validation; keep the filtered
+        // content as ordinary rich text rather than producing an empty duplicate.
+        $duplicate = $app->get(\Prime\Content\EntryService::class)->duplicate(3, $this->user($app, 2));
+        self::assertStringContainsString('<strong>autorisé</strong>', $duplicate->contentHtml);
+        self::assertStringContainsString('Autre contenu', $duplicate->contentHtml);
+        self::assertSame('text', $duplicate->decodedContent()['blocks'][0]['data']['elements'][0]['children'][0]['type']);
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $editor = $this->send($app, 'GET', '/admin/prime-builder/edit/3');
+        self::assertSame(200, $editor->status());
+        self::assertSame(1, preg_match('~<textarea hidden data-pb-config>(.*?)</textarea>~s', $editor->body(), $matches));
+        $config = json_decode(html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'), true);
+        self::assertSame(false, $config['canHtml']);
+        self::assertSame(true, $config['widgets']['html']['hidden']);
+        self::assertSame(true, $config['widgets']['html']['readOnly']);
+        self::assertSame(false, isset($config['widgets']['html']['fields']['signature']));
+    }
+
+    public function testCoreSaveCannotReplayOldSignedHtmlAfterCapabilityRevocation(): void
+    {
+        $app = $this->activated(null);
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.edit'), (2, 'prime_builder.unfiltered_html')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $token = $this->tokens($app)->issue($this->user($app, 2), 'html author', ['*'])['token'];
+        $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => [[
+            'id' => 'snippet', 'type' => 'html', 'settings' => ['markup' => '<p>Première version</p>'], 'styles' => [], 'children' => [],
+        ]]]]]];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $document], $token)->status());
+        $first = $app->get(EntryRepository::class)->find(3)?->decodedContent();
+        self::assertNotNull($first);
+        $second = $first;
+        $second['blocks'][0]['data']['elements'][0]['settings']['markup'] = '<p>Seconde version</p>';
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $second], $token)->status());
+        $current = $app->get(EntryRepository::class)->find(3);
+        self::assertNotNull($current);
+        self::assertStringContainsString('Seconde version', $current->contentHtml);
+        $pdo->exec("DELETE FROM pc_role_capabilities WHERE role_id = 2 AND capability = 'prime_builder.unfiltered_html'");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        // The core hook API does not support aborting a save: this request reports 200,
+        // but the guarded content remains unchanged. Builder's own API returns 403.
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/v1/content/post/3', ['content' => $first, 'title' => 'Titre changé'], $token)->status());
+        $after = $app->get(EntryRepository::class)->find(3);
+        self::assertNotNull($after);
+        self::assertSame($current->content, $after->content);
+        self::assertSame($current->contentHtml, $after->contentHtml);
+        self::assertSame('Titre changé', $after->title);
+        self::assertStringNotContainsString('Première version', $after->contentHtml);
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/3', ['content' => $first], $token)->status());
+        // Core autosave bypasses content.saving; restoring that revision still calls update.
+        $service = $app->get(\Prime\Content\EntryService::class);
+        $actor = $this->user($app, 2);
+        $autosave = $service->autosave(3, ['content' => $first], $actor);
+        self::assertStringContainsString('Première version', $autosave->content);
+        $restored = $service->restoreRevision(3, $autosave->id, $actor);
+        self::assertSame($current->content, $restored->content);
+        self::assertStringContainsString('Seconde version', $restored->contentHtml);
+    }
+
     public function testBearerTokenCannotRetainRevokedAccountPermissions(): void
     {
         $app = $this->activated(null);

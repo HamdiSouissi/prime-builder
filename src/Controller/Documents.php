@@ -22,6 +22,7 @@ use Prime\I18n\Translator;
 use Prime\Plugins\PluginContext;
 use PrimeBuilder\Configuration;
 use PrimeBuilder\Document\Converter;
+use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
@@ -45,6 +46,7 @@ final class Documents
         return [
             'heading' => ['text' => $copy('heading')],
             'text' => ['text' => $copy('text')],
+            'html' => ['markup' => '<p>' . htmlspecialchars($copy('html'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>'],
             'button' => ['text' => $copy('button')],
             'quote' => ['text' => $copy('quote')],
             'alert' => ['text' => $copy('alert')],
@@ -91,7 +93,7 @@ final class Documents
             // Never send server callbacks or non-serializable plugin data to the browser.
             $fields = [];
             foreach ($definition['fields'] as $fieldName => $schema) {
-                if (!is_string($fieldName) || !is_array($schema)) {
+                if (!is_string($fieldName) || !is_array($schema) || ($schema['internal'] ?? false) === true) {
                     continue;
                 }
                 $field = ['type' => is_string($schema['type'] ?? null) ? $schema['type'] : 'text'];
@@ -122,12 +124,12 @@ final class Documents
                 'category' => is_string($definition['category'] ?? null) ? $definition['category'] : 'base',
                 'fields' => $fields,
                 'container' => ($definition['container'] ?? false) === true,
-                'hidden' => ($definition['hidden'] ?? false) === true,
-                'readOnly' => ($definition['read_only'] ?? false) === true,
+                'hidden' => ($definition['hidden'] ?? false) === true || ($name === 'html' && !$user?->can('prime_builder.unfiltered_html')),
+                'readOnly' => ($definition['read_only'] ?? false) === true || ($name === 'html' && !$user?->can('prime_builder.unfiltered_html')),
             ];
         }
         $ui = [];
-        foreach (['conversion_failed', 'original_read_only', 'original_group_warning', 'unsaved_short', 'confirm_title', 'notice_title', 'cancel', 'continue', 'color_picker_text', 'color_picker_background', 'color_reference_text', 'color_reference_background', 'color_custom', 'kit_primary', 'kit_text', 'unit', 'rename_element', 'rename_save', 'rename_cancel', 'collapse_tree', 'expand_tree', 'context_menu', 'element_toolbar', 'copy', 'paste', 'paste_style', 'reset_style', 'copied', 'pasted', 'widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'value_inherited', 'value_defined', 'value_default', 'history', 'history_initial', 'history_change', 'history_current', 'history_help', 'drop', 'drop_before', 'drop_after', 'drop_inside', 'drop_invalid', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'save_template', 'template_saved', 'template_error', 'template_delete', 'template_delete_confirm', 'template_deleted', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'media_grid', 'media_error', 'images', 'captions', 'caption_language', 'transcript', 'fr', 'en', 'default_option', 'layout_mode', 'flow', 'grid_columns', 'wrap', 'nowrap', 'justify', 'items_align', 'start', 'end', 'space-between', 'stretch', 'limit', 'show_excerpt', 'show', 'hide', 'source', 'excerpt', 'published', 'block_type', 'block_data', 'block_anchor', 'paragraph', 'heading', 'list', 'quote', 'separator', 'code', 'table', 'callout'] as $key) {
+        foreach (['conversion_failed', 'original_read_only', 'original_group_warning', 'html_read_only', 'markup', 'unsaved_short', 'confirm_title', 'notice_title', 'cancel', 'continue', 'color_picker_text', 'color_picker_background', 'color_reference_text', 'color_reference_background', 'color_custom', 'kit_primary', 'kit_text', 'unit', 'rename_element', 'rename_save', 'rename_cancel', 'collapse_tree', 'expand_tree', 'context_menu', 'element_toolbar', 'copy', 'paste', 'paste_style', 'reset_style', 'copied', 'pasted', 'widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'value_inherited', 'value_defined', 'value_default', 'history', 'history_initial', 'history_change', 'history_current', 'history_help', 'drop', 'drop_before', 'drop_after', 'drop_inside', 'drop_invalid', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'save_template', 'template_saved', 'template_error', 'template_delete', 'template_delete_confirm', 'template_deleted', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'media_grid', 'media_error', 'images', 'captions', 'caption_language', 'transcript', 'fr', 'en', 'default_option', 'layout_mode', 'flow', 'grid_columns', 'wrap', 'nowrap', 'justify', 'items_align', 'start', 'end', 'space-between', 'stretch', 'limit', 'show_excerpt', 'show', 'hide', 'source', 'excerpt', 'published', 'block_type', 'block_data', 'block_anchor', 'paragraph', 'heading', 'list', 'quote', 'separator', 'code', 'table', 'callout'] as $key) {
             $ui[$key] = t('plugin::prime-builder.ui.' . $key);
         }
         $document = $entry->decodedContent();
@@ -156,6 +158,7 @@ final class Documents
             'widgets' => $definitions,
             'widgetDefaults' => $this->widgetDefaults(),
             'canTemplates' => $user instanceof User && $user->can('prime_builder.templates'),
+            'canHtml' => $user instanceof User && $user->can('prime_builder.unfiltered_html'),
             // Editors may insert shared templates; only managers may save, import or delete them.
             'library' => (new Templates($this->plugin))->all(),
             'ui' => $ui,
@@ -202,7 +205,20 @@ final class Documents
         if ($validated['errors'] !== []) {
             return ApiError::response('validation_failed', 422, $request, ['fields' => ['content' => $validated['errors']]]);
         }
-        $input = ['content' => $body['content']];
+        $layout = $validated['data'];
+        if (HtmlContent::contains($layout)) {
+            $htmlContent = HtmlContent::fromAppKey($this->plugin->app()->config()->get('app.key'));
+            if ($htmlContent === null) {
+                return ApiError::response('validation_failed', 422, $request);
+            }
+            if (!$htmlContent->allows($layout, $entry->decodedContent(), $entry->id, $user->can('prime_builder.unfiltered_html'))) {
+                return ApiError::response('forbidden', 403, $request);
+            }
+            $layout = $htmlContent->seal($layout, $entry->id);
+        }
+        $document = $body['content'];
+        $document['blocks'][0]['data'] = $layout;
+        $input = ['content' => $document];
         if (is_string($body['status'] ?? null)) {
             $input['status'] = $body['status'];
         }
@@ -243,7 +259,16 @@ final class Documents
         if ($result['errors'] !== []) {
             return ApiError::response('validation_failed', 422, $request, ['fields' => ['content' => $result['errors']]]);
         }
-        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals);
+        $htmlContent = HtmlContent::fromAppKey($this->plugin->app()->config()->get('app.key'));
+        if (HtmlContent::contains($result['data'])) {
+            if ($htmlContent === null) {
+                return ApiError::response('validation_failed', 422, $request);
+            }
+            if (!$htmlContent->allows($result['data'], $entry->decodedContent(), $entry->id, $user->can('prime_builder.unfiltered_html'))) {
+                return ApiError::response('forbidden', 403, $request);
+            }
+        }
+        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals, $htmlContent, true);
         if (array_key_exists('target', $body)) {
             $target = $body['target'];
             $elements = is_array($result['data']['elements'] ?? null) ? $result['data']['elements'] : [];
@@ -261,6 +286,10 @@ final class Documents
     {
         $user = $request->attribute('api.user');
         if (!$user instanceof User || !$user->can('prime_builder.templates')) {
+            return ApiError::response('forbidden', 403, $request);
+        }
+        $body = $request->attribute('api.body');
+        if (!$user->can('prime_builder.unfiltered_html') && is_array($body) && is_array($body['data'] ?? null) && HtmlContent::contains($body['data'])) {
             return ApiError::response('forbidden', 403, $request);
         }
         return $this->render($request, $id);

@@ -477,7 +477,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(23);
+  await expect(page.locator('.pb-element')).toHaveCount(24);
   await expectAccessible(page);
 });
 
@@ -938,6 +938,27 @@ test('unrecoverable block boundaries remain one read-only group after saving and
   await expect(page.locator('.pb-original_group')).toHaveCount(1);
   expect((await page.locator('.pb-original_group').innerHTML()).trim()).toBe(before);
   expect(nativeDialogs).toBe(0);
+  await expectAccessible(page);
+});
+
+test('filtered HTML is previewed, sanitized, saved and reopened', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter HTML filtré', exact: true }).click();
+  const field = page.getByLabel('Code HTML filtré', { exact: true });
+  await field.fill('<p>Un <strong>fragment HTML</strong><script>alert(1)</script><a href="javascript:alert(1)" onclick="alert(2)">lien</a></p>');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.locator('.pb-html strong')).toHaveText('fragment HTML');
+  await expect(frame.locator('.pb-html script')).toHaveCount(0);
+  await page.locator('[data-pb-status]').selectOption('published');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.reload();
+  await expect(page.frameLocator('[data-pb-frame]').locator('.pb-html strong')).toHaveText('fragment HTML');
+  await page.goto('/test-prime-builder?filtered-html=1');
+  await expect(page.locator('.pb-html strong')).toHaveText('fragment HTML');
+  await expect(page.locator('.pb-html script, .pb-html [onclick]')).toHaveCount(0);
+  await expect(page.locator('.pb-html [href^="javascript:"]')).toHaveCount(0);
   await expectAccessible(page);
 });
 

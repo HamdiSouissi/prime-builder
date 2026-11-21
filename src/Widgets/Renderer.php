@@ -8,6 +8,7 @@ use Prime\Content\Entry;
 use Prime\Editor\BlockRegistry;
 use Prime\Log\Logger;
 use Prime\Security\HtmlSanitizer;
+use PrimeBuilder\Document\HtmlContent;
 use Throwable;
 
 /** Render safe, useful static HTML so saved pages remain readable without this plugin. */
@@ -22,6 +23,8 @@ final class Renderer
         private readonly bool $live = false,
         private readonly ?BlockRegistry $blocks = null,
         private readonly ?OriginalContent $originals = null,
+        private readonly ?HtmlContent $html = null,
+        private readonly bool $trustedPreview = false,
     ) {
     }
 
@@ -142,6 +145,7 @@ final class Renderer
             'container', 'spacer' => '',
             'heading' => '<h' . $level . '>' . $text . '</h' . $level . '>',
             'text' => $rich,
+            'html' => $this->renderHtmlWidget($id, $settings),
             'image' => $resource !== '' ? '<img src="' . self::escape($resource) . '" alt="' . self::escape((string) ($settings['alt'] ?? '')) . '" width="' . $width . '" height="' . $height . '" loading="lazy" decoding="async">' : '',
             'button' => $href !== '' ? '<a class="pb-button-link" href="' . self::escape($href) . '">' . $text . '</a>' : '',
             'separator' => '<hr>',
@@ -164,6 +168,16 @@ final class Renderer
             'original_group' => $this->renderOriginal($settings, true),
             default => '',
         };
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderHtmlWidget(string $id, array $settings): string
+    {
+        $verified = $this->entry !== null && ($this->html?->valid($id, $settings, $this->entry->id) ?? false);
+        if (!$this->trustedPreview && !$verified) {
+            return '';
+        }
+        return $this->sanitizer->sanitizeBasic(is_string($settings['markup'] ?? null) ? $settings['markup'] : '');
     }
 
     /** @param array<string, mixed> $settings */

@@ -7,6 +7,8 @@ namespace PrimeBuilder\Tests;
 use PHPUnit\Framework\TestCase;
 use Prime\Hooks\Hooks;
 use Prime\Security\HtmlSanitizer;
+use PrimeBuilder\Document\HtmlContent;
+use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
@@ -19,6 +21,7 @@ require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
+require_once dirname(__DIR__) . '/src/Document/HtmlContent.php';
 require_once dirname(__DIR__) . '/src/Document/Validator.php';
 require_once dirname(__DIR__) . '/src/Document/Layout.php';
 require_once dirname(__DIR__) . '/src/Document/Converter.php';
@@ -282,6 +285,46 @@ final class DocumentTest extends TestCase
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$gallery]])['errors']);
         $gallery['settings']['images'] = implode("\n", array_fill(0, 21, '/uploads/a.jpg|a'));
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$gallery]])['errors']);
+    }
+
+    public function testFilteredHtmlSealsAreSanitizedEntryBoundAndCannotBeForged(): void
+    {
+        $registry = new Registry();
+        $sanitizer = new HtmlSanitizer();
+        $html = HtmlContent::fromAppKey(str_repeat('k', 32));
+        self::assertNotNull($html);
+        self::assertSame(null, HtmlContent::fromAppKey(''));
+        $node = $this->element('html', 'snippet');
+        $node['settings'] = ['markup' => '<p>Visible <strong>texte</strong><script>alert(1)</script><a href="javascript:alert(1)" onclick="alert(2)">lien</a></p>'];
+        $normalized = (new Validator($registry, $sanitizer))->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $normalized['errors']);
+        $markup = $normalized['data']['elements'][0]['settings']['markup'];
+        self::assertStringContainsString('<strong>texte</strong>', $markup);
+        self::assertStringNotContainsString('<script', $markup);
+        self::assertStringNotContainsString('javascript:', $markup);
+        self::assertStringNotContainsString('onclick', $markup);
+        $strict = new Validator($registry, $sanitizer, entryId: 1, html: $html, requireSealedHtml: true);
+        self::assertNotEmpty($strict->validate($normalized['data'])['errors']);
+        $sealed = $html->seal($normalized['data'], 1);
+        self::assertSame([], $strict->validate($sealed)['errors']);
+        self::assertNotEmpty((new Validator($registry, $sanitizer, entryId: 2, html: $html, requireSealedHtml: true))->validate($sealed)['errors']);
+        $entry1 = \Prime\Content\Entry::fromRow(['id' => 1]);
+        $entry2 = \Prime\Content\Entry::fromRow(['id' => 2]);
+        self::assertStringContainsString('<strong>texte</strong>', (new Renderer($registry, $sanitizer, entry: $entry1, html: $html))->render($sealed));
+        self::assertStringNotContainsString('<strong>texte</strong>', (new Renderer($registry, $sanitizer, entry: $entry2, html: $html))->render($sealed));
+        $modified = $sealed;
+        $modified['elements'][0]['settings']['markup'] = '<p>Falsifié</p>';
+        self::assertNotEmpty($strict->validate($modified)['errors']);
+        $previous = Layout::document($sealed);
+        self::assertSame(true, $html->allows($sealed, $previous, 1, false));
+        self::assertSame(false, $html->allows($modified, $previous, 1, false));
+        $copy = $sealed;
+        $copy['elements'][0]['id'] = 'copy';
+        self::assertSame(false, $html->allows($copy, $previous, 1, false));
+        self::assertSame(true, $html->allows($modified, $previous, 1, true));
+        $portable = HtmlContent::withoutSeals($sealed);
+        self::assertSame(false, isset($portable['elements'][0]['settings']['signature']));
+        self::assertSame(false, isset($portable['elements'][0]['settings']['signed_entry']));
     }
 
     public function testPrimeBlockUsesCoreValidatorAndRejectsPrivilegedTypes(): void

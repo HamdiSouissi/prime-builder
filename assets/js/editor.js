@@ -36,6 +36,8 @@ const schedule = $('[data-pb-schedule]');
 const parentSelect = $('[data-pb-parent]');
 const containerTypes = Object.entries(config.widgets).filter(([, definition]) => definition.container).map(([type]) => type);
 const isContainer = node => !!node && containerTypes.includes(node.type);
+const hasHtml = nodes => Array.isArray(nodes) && nodes.some(node => node?.type === 'html' || hasHtml(node?.children));
+const cannotCopyHtml = node => !config.canHtml && hasHtml([node]);
 const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
 const localKey = `prime-builder:document:${config.userId}:${config.entryId}`;
 const favoritesKey = `prime-builder:favorites:${config.userId}`;
@@ -325,7 +327,7 @@ function freshIds(elements, removeAnchors = false) {
   return copy;
 }
 async function insertTemplate(template) {
-  if (!ensureLayout()) return;
+  if (!ensureLayout() || (!config.canHtml && hasHtml(template.elements))) return;
   if (template.kind === 'page' && history.present.length && !await showMessage(ui.confirm_template, true)) return;
   const nodes = freshIds(template.elements, true);
   if (template.kind === 'page') commit(nodes, true, `${ui.insert} : ${template.name}`);
@@ -343,6 +345,7 @@ function renderLibrary() {
     const card = document.createElement('div'); card.className = 'pb-template-card';
     const info = document.createElement('div'); info.append(text('strong', template.name), text('small', template.kind === 'page' ? ui.page_template : ui.section_template));
     const button = text('button', ui.insert); button.type = 'button'; button.setAttribute('aria-label', `${ui.insert} ${template.name}`);
+    if (!config.canHtml && hasHtml(template.elements)) { button.disabled = true; button.title = ui.html_read_only; }
     button.addEventListener('click', () => insertTemplate(template));
     const actions = document.createElement('div'); actions.className = 'pb-template-actions'; actions.append(button);
     if (config.canTemplates && template.id) {
@@ -372,7 +375,7 @@ let templateSnapshot = null;
 let templateEpoch = 0;
 function openSaveTemplate(opener) {
   const element = find(history.present, selected);
-  if (!config.canTemplates || !templateDialog || !element || !ensureLayout()) return;
+  if (!config.canTemplates || !templateDialog || !element || !ensureLayout() || cannotCopyHtml(element)) return;
   templateFocus = opener?.isConnected && opener.getClientRects().length ? opener : $('[data-pb-context-open]');
   templateSnapshot = structuredClone(element);
   templateEpoch++;
@@ -597,12 +600,14 @@ function renderSettings() {
   const element = find(history.present, selected);
   if (!element) { panel = 'widgets'; renderPanel(); return; }
   const definition = config.widgets[element.type];
+  $('[data-pb-action="duplicate"]').disabled = cannotCopyHtml(element);
   renderParentOptions(element);
   $('[data-pb-selected-title]').textContent = elementLabel(element);
   $$('[data-pb-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.pbTab === tab)));
   const fields = $('[data-pb-fields]'); fields.replaceChildren();
   if (definition?.readOnly) {
-    fields.append(text('p', element.type === 'original_group' ? ui.original_group_warning : ui.original_read_only, 'pb-intro'));
+    const message = element.type === 'html' ? ui.html_read_only : element.type === 'original_group' ? ui.original_group_warning : ui.original_read_only;
+    fields.append(text('p', message, 'pb-intro'));
     return;
   }
   if (tab === 'content') {
@@ -677,6 +682,7 @@ function positionToolbar() {
   const doc = frame.contentDocument;
   const node = selected && doc ? doc.querySelector(`[data-pb-id="${CSS.escape(selected)}"]`) : null;
   if (!node) { toolbar.hidden = true; return; }
+  toolbar.querySelector('[data-pb-tool="duplicate"]').disabled = cannotCopyHtml(find(history.present, selected));
   const outer = frame.getBoundingClientRect(), inner = node.getBoundingClientRect();
   const left = Math.max(0, outer.left, outer.left + inner.left);
   const right = Math.min(innerWidth, outer.right, outer.left + inner.right);
@@ -702,7 +708,10 @@ function openContext(x, y, opener) {
   const element = find(history.present, selected);
   if (!element || !ensureLayout()) return;
   const readOnly = Boolean(config.widgets[element.type]?.readOnly);
-  contextMenu.querySelector('[data-pb-context="paste"]').disabled = !clipboard;
+  contextMenu.querySelector('[data-pb-context="paste"]').disabled = !clipboard || cannotCopyHtml(clipboard);
+  contextMenu.querySelector('[data-pb-context="duplicate"]').disabled = cannotCopyHtml(element);
+  const saveTemplate = contextMenu.querySelector('[data-pb-context="save_template"]');
+  if (saveTemplate) saveTemplate.disabled = cannotCopyHtml(element);
   contextMenu.querySelector('[data-pb-context="paste_style"]').disabled = !clipboard || readOnly;
   contextMenu.querySelector('[data-pb-context="reset_style"]').disabled = readOnly || !Object.keys(element.styles || {}).length;
   contextOpener = opener;
@@ -727,7 +736,7 @@ function performElementAction(action) {
     return;
   }
   if (action === 'paste') {
-    if (!clipboard) return;
+    if (!clipboard || cannotCopyHtml(clipboard)) return;
     const copy = freshIds([clipboard], true)[0];
     const next = isContainer(element) ? add(history.present, copy, element.id, containerTypes) : insertAfter(history.present, element.id, copy);
     selected = copy.id; tab = 'content'; panel = 'settings';
@@ -739,7 +748,7 @@ function performElementAction(action) {
   let changed = false;
   if (action === 'paste_style' && clipboard && !readOnly) changed = commit(update(history.present, element.id, { styles: structuredClone(clipboard.styles || {}) }), false, label);
   if (action === 'reset_style' && !readOnly) changed = commit(update(history.present, element.id, { styles: {} }), false, label);
-  if (action === 'duplicate') changed = commit(duplicate(history.present, element.id), false, label);
+  if (action === 'duplicate' && !cannotCopyHtml(element)) changed = commit(duplicate(history.present, element.id), false, label);
   if (action === 'move_up') changed = commit(reorder(history.present, element.id, -1), false, label);
   if (action === 'move_down') changed = commit(reorder(history.present, element.id, 1), false, label);
   if (action === 'remove') { changed = commit(remove(history.present, element.id), false, label); selected = null; panel = 'widgets'; }
@@ -1005,7 +1014,7 @@ contextMenu.addEventListener('keydown', event => {
   } else if (event.key === 'Escape' || event.key === 'Tab') { event.preventDefault(); closeContext(true); }
 });
 toolbar.addEventListener('keydown', event => {
-  const buttons = [...toolbar.querySelectorAll('button')];
+  const buttons = [...toolbar.querySelectorAll('button:not([disabled])')];
   const index = buttons.indexOf(document.activeElement);
   if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
     event.preventDefault();

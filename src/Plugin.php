@@ -10,6 +10,7 @@ use Prime\Admin\Notice;
 use Prime\Api\Token\ApiTokenService;
 use Prime\Auth\Auth;
 use Prime\Auth\Middleware\ApiAuthenticate;
+use Prime\Auth\User;
 use Prime\Auth\UserRepository;
 use Prime\Content\ContentType;
 use Prime\Content\ContentTypeRegistry;
@@ -34,6 +35,7 @@ use PrimeBuilder\Controller\Dashboard;
 use PrimeBuilder\Controller\Documents;
 use PrimeBuilder\Controller\Settings;
 use PrimeBuilder\Controller\Templates;
+use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Security\EffectiveApiAuthentication;
@@ -86,6 +88,7 @@ final class Plugin extends AbstractPlugin
         $registry = new Registry($context->app()->get(Hooks::class));
         $blocks = $context->app()->get(BlockRegistry::class);
         $originals = OriginalContent::fromAppKey($context->app()->config()->get('app.key'));
+        $htmlContent = HtmlContent::fromAppKey($context->app()->config()->get('app.key'));
         $content = new Content($context->app()->get(EntryQuery::class), $context->app()->get(ContentTypeRegistry::class), $context->app()->get(UrlGenerator::class));
         $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
         foreach (['content.saved', 'content.updated', 'content.published', 'content.deleted', 'content.trashed', 'content.restored', 'content.status_changed'] as $event) {
@@ -99,11 +102,47 @@ final class Plugin extends AbstractPlugin
             description: 'plugin::prime-builder.block.description',
             icon: 'layout-dashboard',
             category: 'plugins',
-            validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer, $blocks, $originals))->validate($data),
-            renderer: static fn (array $data, HtmlSanitizer $sanitizer, array $renderContext): string => (new Renderer($registry, $sanitizer, $context->logger(), $content, ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null, false, $blocks, $originals))->render($data),
-            textExtractor: static fn (array $data): string => Str::plainText((new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals))->render($data)),
+            validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer, $blocks, $originals, html: $htmlContent, requireSealedHtml: true))->validate($data),
+            renderer: static fn (array $data, HtmlSanitizer $sanitizer, array $renderContext): string => (new Renderer($registry, $sanitizer, $context->logger(), $content, ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null, false, $blocks, $originals, $htmlContent))->render($data),
+            // Text extraction has no entry context; it never emits HTML and still sanitizes markup.
+            textExtractor: static fn (array $data): string => Str::plainText((new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, true))->render($data)),
             keywords: ['builder', 'layout'],
         ));
+        // The core content service can also save builder blocks. Its owned filters cannot
+        // reject by throwing (the hook engine isolates plugin exceptions), so preserve the
+        // old content if an unprivileged caller replays a previously signed HTML node.
+        $context->hooks()->filter('content.saving', static function (mixed $payload, mixed $existing, mixed $type, mixed $actor) use ($htmlContent, $context): mixed {
+            if (!is_array($payload) || !$htmlContent instanceof HtmlContent) {
+                return $payload;
+            }
+            $candidate = is_string($payload['content'] ?? null) ? json_decode($payload['content'], true) : null;
+            if (!is_array($candidate) || !HtmlContent::documentContains($candidate)) {
+                return $payload;
+            }
+            if (!$existing instanceof Entry) {
+                // Core creates and duplicates before a destination ID exists. Preserve
+                // filtered markup as ordinary rich text rather than an unusable seal.
+                $candidate = HtmlContent::asTextDocument($candidate);
+            } elseif ($actor instanceof User && $actor->can('prime_builder.unfiltered_html')) {
+                if ($htmlContent->documentIsBound($candidate, $existing->id)) {
+                    return $payload;
+                }
+                // A privileged core edit may copy an authenticated widget from another entry.
+                $candidate = $htmlContent->sealDocument($candidate, $existing->id);
+            } elseif ($htmlContent->allowsDocument($candidate, $existing->decodedContent(), $existing->id)) {
+                return $payload;
+            } else {
+                $payload['content'] = $existing->content;
+                $payload['content_html'] = $existing->contentHtml;
+                $payload['content_text'] = $existing->contentText;
+                return $payload;
+            }
+            $renderer = $context->app()->get(\Prime\Editor\Renderer::class);
+            $payload['content'] = json_encode($candidate, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{"version":1,"blocks":[]}';
+            $payload['content_html'] = $renderer->renderHtml($candidate, $existing instanceof Entry ? $existing : null, allowUnfilteredHtml: $actor instanceof User && $actor->can('content.unfiltered_html'));
+            $payload['content_text'] = $renderer->extractText($candidate);
+            return $payload;
+        });
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
             if ($menu instanceof AdminMenu) {
                 $menu->add(new MenuItem(id: 'plugin.prime-builder', label: 'plugin::prime-builder.menu', icon: 'layout-dashboard', url: '/admin/prime-builder', position: 60, accent: 'brand', capability: 'prime_builder.edit', group: 'admin.menu.groups.content'));

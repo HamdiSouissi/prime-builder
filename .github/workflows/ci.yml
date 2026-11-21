@@ -28,6 +28,9 @@ jobs:
         run: |
           echo "::notice title=PHP syntax::$(tail -1 /tmp/prime-builder-php-lint.log)"
           echo "::notice title=PHPStan::$(grep -F '[OK]' /tmp/prime-builder-phpstan.log | tail -1 | xargs)"
+      - name: Report PHPStan output on failure
+        if: failure()
+        run: if test -f /tmp/prime-builder-phpstan.log; then echo "::error title=PHPStan log (base64)::$(tail -160 /tmp/prime-builder-phpstan.log | base64 -w0)"; fi
 
   cs:
     name: cs
@@ -44,6 +47,9 @@ jobs:
         run: vendor/bin/php-cs-fixer fix content/plugins/prime-builder --config .php-cs-fixer.dist.php --dry-run --diff --no-ansi 2>&1 | tee /tmp/prime-builder-fixer.log
       - name: Report coding style summary
         run: echo "::notice title=PHP-CS-Fixer::$(grep -E 'Found [0-9]+ of [0-9]+ files' /tmp/prime-builder-fixer.log | tail -1)"
+      - name: Report coding style output on failure
+        if: failure()
+        run: if test -f /tmp/prime-builder-fixer.log; then echo "::error title=PHP-CS-Fixer log (base64)::$(tail -160 /tmp/prime-builder-fixer.log | base64 -w0)"; fi
 
   phpunit:
     name: phpunit (${{ matrix.cms }})
