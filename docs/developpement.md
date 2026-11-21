@@ -1,6 +1,6 @@
 # Développement de Prime Builder
 
-Ce document décrit l’implémentation 0.1.0, et non les fonctions encore absentes. Les classes et hooks du CMS cités ici ont été repérés dans le code de Prime CMS 1.0.0. Le CMS n’est pas modifié par le plugin.
+Ce document décrit l’implémentation 0.1.0, et non les fonctions encore absentes. Les classes et hooks du CMS cités ici ont été repérés dans le code de Prime CMS 1.0.1. Le CMS n’est pas modifié par le plugin.
 
 ## Structure
 
@@ -21,7 +21,7 @@ Le document sauvegardé est un document Prime v1 contenant un unique bloc `prime
 
 `Validator` limite les données de mise en page encodées à 1 Mio, 500 éléments et une profondeur de 12 ; les identifiants doivent être uniques et ne contenir que lettres, chiffres, `_` et `-`. Il vérifie le catalogue, les champs, les enfants et les propriétés CSS autorisées. Les champs `rich` passent par `Prime\Security\HtmlSanitizer` ; les URL et valeurs CSS ont leurs propres listes de validation. Le `Renderer` échappe les sorties et isole les erreurs de rendu d’un widget.
 
-Le bloc est enregistré avec `PluginContext::blocks()` ; `EntryService::update()` valide et sauvegarde le document, le HTML rendu, le texte et les révisions du CMS. Les documents préexistants mixtes ne sont pas convertis automatiquement. Un filtre `content.saving` modifie uniquement la représentation JSON du mot exact `dynamic` dans un document contenant le seul bloc du constructeur : cela contourne le test de chaîne de `EntryView::content()` du CMS sans changer la valeur décodée.
+Le bloc est enregistré avec `PluginContext::blocks()` ; `EntryService::update()` valide et sauvegarde le document, le HTML rendu, le texte et les révisions du CMS. Les documents préexistants mixtes ne sont pas convertis automatiquement. Depuis Prime CMS 1.0.1, `EntryView::content()` détecte les blocs dynamiques par leur type décodé ; le plugin ne modifie plus la représentation JSON des contenus.
 
 ## Routes et sécurité
 

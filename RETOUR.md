@@ -8,7 +8,7 @@ Le dépôt contient un **prototype fonctionnel mais incomplet**, pas la totalit�
 
 - Branche de travail : `arena/2d5ecf33-prime-builder`, créée depuis `95c54eb9021c990373685e06f3a5e7994b775e48`.
 - Tête distante observée par `git ls-remote` avant cette mise à jour du rapport : `bd9730cb1445712bbf57092ede8f3fe3f013fa08`. Ce rapport et d’éventuelles corrections ultérieures ajoutent des commits ; pour la tête actuelle, exécuter `git ls-remote origin refs/heads/arena/2d5ecf33-prime-builder`.
-- Référence locale Prime CMS : `3c7e26d7632ab4c78d486dc254c5242a77296131`, version du noyau 1.0.0. Le code du CMS n’a pas été modifié ; une copie du plugin a été placée dans son dossier de plugins pour les essais.
+- Référence locale Prime CMS : `1cef617660f8d4f7bbd9d3d659de85d284fb18e7`, version du noyau 1.0.1. Le code du CMS n’a pas été modifié ; une copie du plugin a été placée dans son dossier de plugins pour les essais. Les runs antérieurs ci-dessous utilisaient le CMS 1.0.0.
 - Dernier succès CI complet confirmé avant cette mise à jour : [run 44923960284](https://github.com/HamdiSouissi/prime-builder/actions/runs/44923960284), commit `bd9730cb1445712bbf57092ede8f3fe3f013fa08`. Les trois jobs, l’installation ZIP et les contrôles après désactivation et désinstallation ont réussi.
 
 ## 3. Intégration et édition
@@ -33,7 +33,7 @@ Six sections et trois pages JSON sont fournies, avec une illustration vectoriell
 
 Le document Prime v1 ne contient qu’un bloc `prime-builder/layout`. La validation limite le JSON de mise en page à 1 Mio, 500 éléments et une profondeur de 12 ; identifiants, types, champs, URL et styles sont contrôlés. Les styles acceptés sont compilés en CSS séparé pour le document et le kit, par empreinte. Des instantanés publics sont conservés dans le stockage privé du CMS ; la tâche `prime-builder.prune-styles` retire les fichiers inutilisés depuis plus de 366 jours. Une feuille privée reste `no-store` et n’est pas archivée. Si le stockage est non inscriptible, la réponse courante ne prétend pas être immuable. Les anciennes URL dont aucun instantané n’a été conservé ne sont pas reconstruites après modification.
 
-Le HTML statique est enregistré par le CMS. Dans l’essai local HTTP-WASM, après sauvegarde du mot exact `dynamic`, une **nouvelle requête sans activation du plugin** a bien renvoyé `<h2>dynamic</h2>` sans assets du plugin. Le run CI `44923074044` a également réussi une nouvelle requête HTTP après désactivation réelle du plugin ; un test de restauration de révision puis de désactivation couvre ce cas. Le contournement n’est appliqué qu’aux nouvelles sauvegardes mono-bloc pendant que le plugin est actif : des documents ou révisions plus anciens peuvent encore déclencher la détection par chaîne du noyau et perdre leur repli. Les fonctionnalités interactives et le style du plugin ne subsistent pas après désactivation.
+Le HTML statique est enregistré par le CMS. Le CMS 1.0.1 détecte les blocs dynamiques par leur type décodé : le filtre de modification du JSON spécifique au CMS 1.0.0 a été supprimé. Un test d’intégration et le parcours CI vérifient le repli après désactivation ; les résultats du nouveau commit doivent être consultés dans son run. Les fonctionnalités interactives et le style du plugin ne subsistent pas après désactivation.
 
 ## 6. Sécurité et limites connues
 
@@ -63,13 +63,9 @@ Dans la fixture locale, une URL CSS publique a été relue après modification e
 
 ## 9. Points d’extension du CMS et propositions
 
-Les points existants utilisés comprennent `content.editor`, `content.saving`, `settings.register`, `site.assets`, `system.checks`, `scheduler.register`, les registres de blocs/éditeurs et l’API des plugins. `site.template_candidates` et `site.template_paths` existent dans `src/Site/TemplateResolver.php`, mais ne remplacent pas à eux seuls un en-tête ou pied de page universel : le thème Aurora les appelle dans `templates/layouts/base.php` via `$site->partial('header')` et `$site->partial('footer')`.
+Les points existants utilisés comprennent `content.editor`, `settings.register`, `site.assets`, `system.checks`, `scheduler.register`, les registres de blocs/éditeurs et l’API des plugins. Depuis Prime CMS 1.0.1, `SiteView::partial()` applique `site.partial` et `EntryView::content()` détecte les blocs dynamiques par type. Le Theme Builder n’est pas encore implémenté et n’utilise donc pas encore ce filtre.
 
-Propositions à discuter côté CMS, **non implémentées** ici :
-
-1. Dans `src/Site/View/SiteView.php::partial(string $name, array $data = []): string`, un filtre par exemple `site.partial` recevant `(string $html, string $name, PageContext $context): string` permettrait aux plugins de remplacer un partial utilisé par le thème. Pour couvrir aussi les thèmes ne passant pas par `partial()`, il faudrait un contrat explicite de slots sémantiques header/footer dans les layouts. Les permissions, conditions, priorités, échappement et repli doivent être définis avant usage.
-2. Dans `src/Site/View/EntryView.php::content()`, détecter les blocs dynamiques à partir des **types des blocs décodés**, et non de la sous-chaîne brute `"dynamic"`. Cela éliminerait la collision et permettrait de traiter correctement les documents historiques sans réécriture par le plugin.
-3. Pour un futur rendu serveur de contenus croisés, dans `src/Cache/CachePurgeSubscriber.php` / `PageCache`, prévoir une API de dépendances permettant d’associer une page et les IDs de contenus utilisés, puis d’invalider les pages dépendantes lors des événements de contenu. Les widgets actuels utilisent une actualisation sans cache côté client plutôt que ce mécanisme.
+Pour un futur rendu serveur de contenus croisés, une API de dépendances dans `src/Cache/CachePurgeSubscriber.php` / `PageCache` permettrait d’associer une page et les IDs de contenus utilisés, puis d’invalider les pages dépendantes lors des événements de contenu. Cette proposition n’a pas été retenue pour l’instant : les widgets actuels gardent leur actualisation sans cache côté client.
 
 ## 10. Reste à faire et chemin de vérification
 

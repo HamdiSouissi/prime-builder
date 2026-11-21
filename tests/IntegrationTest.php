@@ -271,7 +271,11 @@ final class IntegrationTest extends TestCase
         $manager->deactivate('prime-builder');
         $entry = $app->get(EntryRepository::class)->find(1);
         self::assertNotNull($entry);
-        self::assertStringContainsString('<h2>Bonjour</h2>', (new EntryView($entry, $app->get(UrlGenerator::class)))->content());
+        // Use a fresh core-only registry, as on a new request after deactivation.
+        $coreRenderer = new \Prime\Editor\Renderer(new BlockRegistry(), new \Prime\Security\HtmlSanitizer());
+        $zones = new \Prime\Site\Zone\ZoneRepository($this->db($app), $coreRenderer);
+        $view = new EntryView($entry, $app->get(UrlGenerator::class), zones: $zones, dynamicBlocks: $app->get(\Prime\Site\Zone\DynamicBlockRegistry::class));
+        self::assertStringContainsString('<h2>Bonjour</h2>', $view->content());
         $manager->uninstall('prime-builder', deleteFiles: false);
         self::assertSame(false, $settings->has('plugin.prime-builder.kit_primary'));
         self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM pc_role_capabilities WHERE capability LIKE 'prime!_builder.%' ESCAPE '!'")->fetchColumn());
@@ -280,33 +284,6 @@ final class IntegrationTest extends TestCase
         $saved = $app->get(EntryRepository::class)->find(1);
         self::assertNotNull($saved);
         self::assertStringContainsString('<h2>Bonjour</h2>', $saved->contentHtml);
-    }
-
-    public function testDynamicWordDoesNotHideFallbackAfterDeactivation(): void
-    {
-        $app = $this->activated(null);
-        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
-        $document = $this->document();
-        $document['blocks'][0]['data']['elements'][0]['settings']['text'] = 'dynamic';
-        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
-        $entry = $app->get(EntryRepository::class)->find(1);
-        self::assertNotNull($entry);
-        self::assertSame('dynamic', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['text']);
-        self::assertStringNotContainsString('"dynamic"', $entry->content);
-        $revisions = $app->get(\Prime\Content\RevisionRepository::class)->forEntry(1);
-        self::assertNotEmpty($revisions);
-        $revisionId = $revisions[0]->id;
-        $document['blocks'][0]['data']['elements'][0]['settings']['text'] = 'Autre valeur';
-        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
-        $entry = $app->get(\Prime\Content\EntryService::class)->restoreRevision(1, $revisionId, $this->user($app, 1));
-        self::assertSame('dynamic', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['text']);
-        self::assertStringNotContainsString('"dynamic"', $entry->content);
-        $app->get(PluginManager::class)->deactivate('prime-builder');
-        // A new request without the plugin has a fresh core-only block registry.
-        $coreRenderer = new \Prime\Editor\Renderer(new BlockRegistry(), new \Prime\Security\HtmlSanitizer());
-        $zones = new \Prime\Site\Zone\ZoneRepository($this->db($app), $coreRenderer);
-        $view = new EntryView($entry, $app->get(UrlGenerator::class), zones: $zones, dynamicBlocks: $app->get(\Prime\Site\Zone\DynamicBlockRegistry::class));
-        self::assertStringContainsString('<h2>dynamic</h2>', $view->content());
     }
 
     public function testInvalidTreeAndPrivateCssAreNotExposed(): void

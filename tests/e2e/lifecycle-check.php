@@ -36,8 +36,8 @@ $plugin = "SELECT COUNT(*) FROM `{$prefix}plugins` WHERE `slug` = ?";
 $entry = $pdo->prepare("SELECT `content_html` FROM `{$prefix}entries` WHERE `id` = ?");
 $entry->execute([(int) $entryId]);
 $html = $entry->fetchColumn();
-if (!is_string($html) || !str_contains($html, '<h2>dynamic</h2>')) {
-    throw new RuntimeException('The published sentinel entry or its stored HTML is missing.');
+if (!is_string($html) || !str_contains($html, '<h2>Contenu conservé</h2>')) {
+    throw new RuntimeException('The published entry or its stored HTML is missing.');
 }
 if (countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}role_capabilities` WHERE `capability` = ?", ['*']) < 1) {
     throw new RuntimeException('The unrelated administrator capability is missing.');

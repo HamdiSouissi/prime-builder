@@ -7,7 +7,7 @@
   "license": "proprietary",
   "namespace": "PrimeBuilder\\",
   "main": "PrimeBuilder\\Plugin",
-  "requires": { "prime": ">=1.0.0", "php": "^8.2" },
+  "requires": { "prime": ">=1.0.1", "php": "^8.2" },
   "icon": "assets/icon.svg",
   "accent": "brand",
   "settings_url": "/admin/prime-builder"

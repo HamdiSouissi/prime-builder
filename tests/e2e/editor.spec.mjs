@@ -270,12 +270,12 @@ test('built-in default widgets save and remain accessible together', async ({ pa
 });
 
 // Keep this last: the CI workflow next disables the plugin and makes a fresh uncached HTTP request.
-test('save a sentinel-word document for the deactivation check', async ({ page }) => {
+test('save a page for the deactivation check', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
   const code = await page.evaluate(async entryId => {
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
-    const element = { id: 'sentinel', type: 'heading', settings: { text: 'dynamic', level: 2 }, styles: {}, children: [] };
+    const element = { id: 'lifecycle', type: 'heading', settings: { text: 'Contenu conservé', level: 2 }, styles: {}, children: [] };
     const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
       body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [element] } }] }, status: 'published', published_at: '' }),
@@ -284,5 +284,5 @@ test('save a sentinel-word document for the deactivation check', async ({ page }
   }, id);
   expect(code).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-heading h2')).toHaveText('dynamic');
+  await expect(page.locator('.pb-heading h2')).toHaveText('Contenu conservé');
 });

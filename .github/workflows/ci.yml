@@ -16,7 +16,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm test
+      - name: JavaScript tests
+        run: npm test 2>&1 | tee /tmp/prime-builder-node.log
+      - name: Report JavaScript summary
+        run: |
+          while IFS= read -r line; do echo "::notice title=Node tests::$line"; done < <(grep -E '^# (tests|pass|fail) ' /tmp/prime-builder-node.log)
 
   php:
     name: PHP validation, static analysis and translations
@@ -55,15 +59,18 @@ jobs:
       - name: Install CMS test dependencies
         working-directory: cms
         run: composer install --no-interaction --prefer-dist --no-progress
+      - name: PHP syntax
+        working-directory: cms
+        run: find content/plugins/prime-builder -name '*.php' -type f -print0 | xargs -0 -n1 php -l | tee /tmp/prime-builder-php-lint.log
       - name: PHPUnit
         working-directory: cms
-        run: vendor/bin/phpunit --bootstrap tests/bootstrap.php content/plugins/prime-builder/tests
+        run: vendor/bin/phpunit --colors=never --bootstrap tests/bootstrap.php content/plugins/prime-builder/tests 2>&1 | tee /tmp/prime-builder-phpunit.log
       - name: PHPStan level 8
         working-directory: cms
-        run: vendor/bin/phpstan analyse --configuration content/plugins/prime-builder/phpstan.neon --no-progress
-      - name: PHP-CS-Fixer
+        run: vendor/bin/phpstan analyse --configuration content/plugins/prime-builder/phpstan.neon --no-progress --no-ansi 2>&1 | tee /tmp/prime-builder-phpstan.log
+      - name: PHP-CS-Fixer (CMS configuration)
         working-directory: cms
-        run: vendor/bin/php-cs-fixer fix --config content/plugins/prime-builder/.php-cs-fixer.dist.php --dry-run --diff
+        run: vendor/bin/php-cs-fixer fix content/plugins/prime-builder --config .php-cs-fixer.dist.php --dry-run --diff --no-ansi 2>&1 | tee /tmp/prime-builder-fixer.log
       - name: Install CMS for language check
         working-directory: cms
         run: |
@@ -75,6 +82,13 @@ jobs:
       - name: Translation catalogue
         working-directory: cms
         run: php bin/prime lang:check --strict 2>&1 | tee /tmp/prime-lang.log
+      - name: Report verification summaries
+        run: |
+          echo "::notice title=PHP syntax::$(tail -1 /tmp/prime-builder-php-lint.log)"
+          echo "::notice title=PHPUnit::$(grep -E '^OK \(' /tmp/prime-builder-phpunit.log | tail -1)"
+          echo "::notice title=PHPStan::$(grep -F '[OK]' /tmp/prime-builder-phpstan.log | tail -1 | xargs)"
+          echo "::notice title=PHP-CS-Fixer::$(grep -E 'Found [0-9]+ of [0-9]+ files' /tmp/prime-builder-fixer.log | tail -1)"
+          echo "::notice title=Translation catalogue::$(awk 'NF {line=$0} END {print line}' /tmp/prime-lang.log)"
       - name: Report language check on failure
         if: failure()
         run: if test -f /tmp/prime-lang.log; then echo "::error title=Language log (base64)::$(base64 -w0 /tmp/prime-lang.log)"; fi
@@ -141,6 +155,8 @@ jobs:
       - name: Playwright
         working-directory: builder/tests/e2e
         run: npm test 2>&1 | tee /tmp/prime-builder-e2e.log
+      - name: Report Playwright summary
+        run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
       - name: Report browser test output on failure
         if: failure()
         run: if test -f /tmp/prime-builder-e2e.log; then echo "::error title=Browser test log (base64)::$(tail -140 /tmp/prime-builder-e2e.log | base64 -w0)"; fi
@@ -149,7 +165,7 @@ jobs:
         run: |
           php bin/prime plugin:deactivate prime-builder
           curl --fail --silent --show-error 'http://127.0.0.1:8080/test-prime-builder?pb-lifecycle-test=1' > /tmp/prime-builder-disabled.html
-          grep -F '<h2>dynamic</h2>' /tmp/prime-builder-disabled.html
+          grep -F '<h2>Contenu conservé</h2>' /tmp/prime-builder-disabled.html
           if grep -q '/assets/plugins/prime-builder/' /tmp/prime-builder-disabled.html; then echo 'Plugin assets appeared after deactivation'; exit 1; fi
           php bin/prime plugin:activate prime-builder
       - name: Uninstall and verify data cleanup and public fallback
@@ -168,7 +184,7 @@ jobs:
           test ! -e storage/prime-builder/styles
           php ../builder/tests/e2e/lifecycle-check.php verify
           curl --fail --silent --show-error 'http://127.0.0.1:8080/test-prime-builder?pb-uninstall-test=1' > /tmp/prime-builder-uninstalled.html
-          grep -F '<h2>dynamic</h2>' /tmp/prime-builder-uninstalled.html
+          grep -F '<h2>Contenu conservé</h2>' /tmp/prime-builder-uninstalled.html
           if grep -q '/assets/plugins/prime-builder/' /tmp/prime-builder-uninstalled.html; then echo 'Plugin assets appeared after uninstall'; exit 1; fi
       - uses: actions/upload-artifact@v4
         if: always()
