@@ -376,8 +376,10 @@ final class BuiltinWidgets
             icon: 'anchor',
             defaults: ['anchor' => 'section'],
             renderer: static function (array $s) use ($e): string {
-                return '<div id="' . $e(preg_replace('/[^a-zA-Z0-9_-]/';
-            }, '', (string) ($s['anchor'] ?? 'section')) ?? 'section') . '" class="pb-anchor"></div>',
+                $anchor = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) ($s['anchor'] ?? 'section')) ?? 'section';
+
+                return '<div id="' . $e($anchor) . '" class="pb-anchor"></div>';
+            },
         ));
 
         $registry->register(new WidgetDefinition(
