@@ -145,7 +145,6 @@ final class Plugin extends AbstractPlugin
         });
 
         // 7. REST API
-        $context->api()->put('/documents/{id:\d+}', [BuilderApi::class, 'saveDocument'], permission: self::CAP_EDIT);
         $context->api()->patch('/documents/{id:\d+}', [BuilderApi::class, 'saveDocument'], permission: self::CAP_EDIT);
         $context->api()->get('/templates', [BuilderApi::class, 'listTemplates'], permission: self::CAP_TEMPLATES);
         $context->api()->post('/forms/{id}/submit', [BuilderApi::class, 'submitForm'], public: true);
@@ -239,8 +238,10 @@ final class Plugin extends AbstractPlugin
 
     public function activate(PluginContext $context): void
     {
-        $context->notices()->push(
-            Notice::info(t('plugin::prime-builder.notices.welcome'))
+        $context->notices()->add(
+            id: 'welcome',
+            message: 'plugin::prime-builder.notices.welcome',
+            type: Notice::INFO,
         );
     }
 }

@@ -18,7 +18,7 @@ final class PublicController
 
     public function css(Request $request): Response
     {
-        $file = (string) $request->routeParam('file', '');
+        $file = (string) $request->attribute('file', '');
         $compiler = new CssCompiler(
             (int) $this->context->settings()->get('breakpoint_tablet', 1024),
             (int) $this->context->settings()->get('breakpoint_mobile', 767),

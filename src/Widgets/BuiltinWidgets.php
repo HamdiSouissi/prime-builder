@@ -108,7 +108,9 @@ final class BuiltinWidgets
             category: 'basic',
             icon: 'move-vertical',
             defaults: ['height' => '40px'],
-            renderer: static fn (array $s) use ($e): string => '<div class="pb-spacer" aria-hidden="true" style="height:' . $e($s['height'] ?? '40px') . '"></div>',
+            renderer: static function (array $s) use ($e): string {
+                return '<div class="pb-spacer" aria-hidden="true" style="height:' . $e($s['height'] ?? '40px') . '"></div>';
+            },
         ));
 
         $registry->register(new WidgetDefinition(
@@ -117,7 +119,9 @@ final class BuiltinWidgets
             category: 'basic',
             icon: 'star',
             defaults: ['name' => 'star', 'label' => ''],
-            renderer: static fn (array $s) use ($e): string => '<span class="pb-icon" aria-label="' . $e($s['label'] ?? '') . '" data-pb-icon="' . $e($s['name'] ?? 'star') . '">★</span>',
+            renderer: static function (array $s) use ($e): string {
+                return '<span class="pb-icon" aria-label="' . $e($s['label'] ?? '') . '" data-pb-icon="' . $e($s['name'] ?? 'star') . '">★</span>';
+            },
         ));
 
         $registry->register(new WidgetDefinition(
@@ -126,7 +130,9 @@ final class BuiltinWidgets
             category: 'basic',
             icon: 'box',
             defaults: ['title' => 'Titre', 'description' => 'Description courte.'],
-            renderer: static fn (array $s) use ($e): string => '<div class="pb-icon-box"><div class="pb-icon-box__icon" aria-hidden="true">★</div><h3 class="pb-icon-box__title">' . $e($s['title'] ?? '') . '</h3><p class="pb-icon-box__desc">' . $e($s['description'] ?? '') . '</p></div>',
+            renderer: static function (array $s) use ($e): string {
+                return '<div class="pb-icon-box"><div class="pb-icon-box__icon" aria-hidden="true">★</div><h3 class="pb-icon-box__title">' . $e($s['title'] ?? '') . '</h3><p class="pb-icon-box__desc">' . $e($s['description'] ?? '') . '</p></div>';
+            },
         ));
 
         $registry->register(new WidgetDefinition(
@@ -135,7 +141,9 @@ final class BuiltinWidgets
             category: 'basic',
             icon: 'layout-template',
             defaults: ['url' => '', 'title' => 'Titre', 'description' => 'Description.'],
-            renderer: static fn (array $s) use ($e, $u): string => '<div class="pb-image-box">' . (($u($s['url'] ?? '') !== '') ? '<img src="' . $u($s['url'] ?? '') . '" alt="' . $e($s['alt'] ?? '') . '" loading="lazy" class="pb-image-box__img">' : '') . '<h3 class="pb-image-box__title">' . $e($s['title'] ?? '') . '</h3><p class="pb-image-box__desc">' . $e($s['description'] ?? '') . '</p></div>',
+            renderer: static function (array $s) use ($e, $u): string {
+                return '<div class="pb-image-box">' . (($u($s['url'] ?? '') !== '') ? '<img src="' . $u($s['url'] ?? '') . '" alt="' . $e($s['alt'] ?? '') . '" loading="lazy" class="pb-image-box__img">' : '') . '<h3 class="pb-image-box__title">' . $e($s['title'] ?? '') . '</h3><p class="pb-image-box__desc">' . $e($s['description'] ?? '') . '</p></div>';
+            },
         ));
 
         $registry->register(new WidgetDefinition(
@@ -163,7 +171,9 @@ final class BuiltinWidgets
             category: 'basic',
             icon: 'hash',
             defaults: ['number' => '100', 'title' => 'Projets'],
-            renderer: static fn (array $s) use ($e): string => '<div class="pb-counter"><span class="pb-counter__value">' . $e($s['number'] ?? '0') . '</span><span class="pb-counter__title">' . $e($s['title'] ?? '') . '</span></div>',
+            renderer: static function (array $s) use ($e): string {
+                return '<div class="pb-counter"><span class="pb-counter__value">' . $e($s['number'] ?? '0') . '</span><span class="pb-counter__title">' . $e($s['title'] ?? '') . '</span></div>';
+            },
         ));
 
         $registry->register(new WidgetDefinition(
@@ -185,7 +195,9 @@ final class BuiltinWidgets
             category: 'basic',
             icon: 'message-square-quote',
             defaults: ['quote' => 'Un outil remarquable.', 'author' => 'Camille', 'role' => 'Design'],
-            renderer: static fn (array $s) use ($e): string => '<figure class="pb-testimonial"><blockquote class="pb-testimonial__quote">' . $e($s['quote'] ?? '') . '</blockquote><figcaption class="pb-testimonial__author"><strong>' . $e($s['author'] ?? '') . '</strong> <span>' . $e($s['role'] ?? '') . '</span></figcaption></figure>',
+            renderer: static function (array $s) use ($e): string {
+                return '<figure class="pb-testimonial"><blockquote class="pb-testimonial__quote">' . $e($s['quote'] ?? '') . '</blockquote><figcaption class="pb-testimonial__author"><strong>' . $e($s['author'] ?? '') . '</strong> <span>' . $e($s['role'] ?? '') . '</span></figcaption></figure>';
+            },
         ));
 
         $registry->register(new WidgetDefinition(
@@ -243,7 +255,9 @@ final class BuiltinWidgets
             icon: 'toggle-left',
             scripts: ['accordion.js'],
             defaults: ['title' => 'Afficher plus', 'content' => 'Détails'],
-            renderer: static fn (array $s) use ($e): string => '<div class="pb-toggle" data-pb-accordion><button type="button" class="pb-accordion__trigger" aria-expanded="false" data-pb-acc-trigger>' . $e($s['title'] ?? '') . '</button><div class="pb-accordion__panel" hidden>' . $e($s['content'] ?? '') . '</div></div>',
+            renderer: static function (array $s) use ($e): string {
+                return '<div class="pb-toggle" data-pb-accordion><button type="button" class="pb-accordion__trigger" aria-expanded="false" data-pb-acc-trigger>' . $e($s['title'] ?? '') . '</button><div class="pb-accordion__panel" hidden>' . $e($s['content'] ?? '') . '</div></div>';
+            },
         ));
 
         $registry->register(new WidgetDefinition(
@@ -361,7 +375,9 @@ final class BuiltinWidgets
             category: 'basic',
             icon: 'anchor',
             defaults: ['anchor' => 'section'],
-            renderer: static fn (array $s) use ($e): string => '<div id="' . $e(preg_replace('/[^a-zA-Z0-9_-]/', '', (string) ($s['anchor'] ?? 'section')) ?? 'section') . '" class="pb-anchor"></div>',
+            renderer: static function (array $s) use ($e): string {
+                return '<div id="' . $e(preg_replace('/[^a-zA-Z0-9_-]/';
+            }, '', (string) ($s['anchor'] ?? 'section')) ?? 'section') . '" class="pb-anchor"></div>',
         ));
 
         $registry->register(new WidgetDefinition(
@@ -379,7 +395,9 @@ final class BuiltinWidgets
             category: 'site',
             icon: 'layout',
             defaults: ['zone' => 'sidebar'],
-            renderer: static fn (array $s) use ($e): string => '<div class="pb-theme-zone" data-pb-zone="' . $e($s['zone'] ?? 'sidebar') . '"></div>',
+            renderer: static function (array $s) use ($e): string {
+                return '<div class="pb-theme-zone" data-pb-zone="' . $e($s['zone'] ?? 'sidebar') . '"></div>';
+            },
         ));
 
         // 2. Pro & Dynamic widgets

@@ -21,7 +21,7 @@ final class EditorController
 
     public function edit(Request $request): Response
     {
-        $id = (int) $request->routeParam('id', 0);
+        $id = (int) $request->attribute('id', 0);
         if ($id <= 0) {
             return new Response(t('plugin::prime-builder.errors.not_found'), 404);
         }

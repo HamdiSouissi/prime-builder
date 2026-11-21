@@ -157,7 +157,7 @@ document.querySelector('[data-pb-redo]')?.addEventListener('click', () => store.
 
 document.querySelector('[data-pb-save]')?.addEventListener('click', async () => {
   const res = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
-    method: 'PUT',
+    method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
       'X-Prime-CSRF': csrf,

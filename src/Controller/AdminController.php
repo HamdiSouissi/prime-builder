@@ -56,7 +56,7 @@ final class AdminController
 
     public function deleteTemplate(Request $request): Response
     {
-        $id = (int) $request->routeParam('id', 0);
+        $id = (int) $request->attribute('id', 0);
         if ($id > 0) {
             $this->templates->delete($id);
         }
@@ -87,7 +87,7 @@ final class AdminController
 
     public function exportTemplate(Request $request): Response
     {
-        $id = (int) $request->routeParam('id', 0);
+        $id = (int) $request->attribute('id', 0);
         $tpl = $this->templates->find($id);
         if ($tpl === null) {
             return Response::json(['error' => 'Not found'], 404);
@@ -129,7 +129,7 @@ final class AdminController
 
     public function deleteSubmission(Request $request): Response
     {
-        $id = (int) $request->routeParam('id', 0);
+        $id = (int) $request->attribute('id', 0);
         if ($id > 0) {
             $this->submissions->delete($id);
         }

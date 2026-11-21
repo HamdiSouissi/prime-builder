@@ -29,7 +29,7 @@ final class BuilderApi
 
     public function saveDocument(Request $request): Response
     {
-        $id = (int) $request->routeParam('id', 0);
+        $id = (int) $request->attribute('id', 0);
         if ($id <= 0) {
             return Response::json(['error' => 'Invalid entry ID'], 400);
         }
@@ -40,7 +40,11 @@ final class BuilderApi
             return Response::json(['error' => 'Entry not found'], 404);
         }
 
-        $payload = $request->json();
+        $raw = $request->rawBody();
+        $payload = json_decode($raw, true);
+        if (!is_array($payload)) {
+            $payload = $request->body();
+        }
         $doc = is_array($payload['document'] ?? null) ? $payload['document'] : $payload;
         if (!is_array($doc)) {
             return Response::json(['error' => 'Invalid payload'], 422);
@@ -89,10 +93,13 @@ final class BuilderApi
 
     public function submitForm(Request $request): Response
     {
-        $formId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) $request->routeParam('id', 'contact')) ?? 'contact';
-        $data = $request->json();
+        $formId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) $request->attribute('id', 'contact')) ?? 'contact';
+        $data = json_decode($request->rawBody(), true);
         if (!is_array($data) || $data === []) {
-            $data = $request->all();
+            $data = $request->body();
+        }
+        if (!is_array($data)) {
+            $data = [];
         }
 
         // Honeypot check

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PrimeBuilder\Jobs;
 
+use Prime\Jobs\Job;
 use Prime\Jobs\JobHandlerInterface;
 use Prime\Mail\Mailer;
 use Prime\Plugins\PluginContext;
@@ -19,7 +20,7 @@ final class FormEmailJob implements JobHandlerInterface
     /**
      * @param array<string, mixed> $payload
      */
-    public function handle(array $payload): void
+    public function handle(array $payload, Job $job): void
     {
         $to = trim((string) ($payload['to'] ?? ''));
         if ($to === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
@@ -32,7 +33,7 @@ final class FormEmailJob implements JobHandlerInterface
 
         try {
             $mailer = $this->context->app()->get(Mailer::class);
-            if (method_exists($mailer, 'sendTemplate')) {
+            if ($mailer instanceof Mailer && method_exists($mailer, 'sendTemplate')) {
                 $mailer->sendTemplate($template, $to, $subject, $data);
             }
         } catch (Throwable) {
