@@ -8,6 +8,9 @@ use Prime\Content\ContentTypeRegistry;
 use Prime\Content\Entry;
 use Prime\Content\EntryQuery;
 use Prime\Site\UrlGenerator;
+use Prime\Site\Zone\DynamicBlockRegistry;
+use Prime\Site\Zone\ZoneRepository;
+use Prime\Themes\ThemeManager;
 
 /** Read-only, public content provider. It shares a single bounded query per render. */
 final class Content
@@ -20,6 +23,9 @@ final class Content
         private readonly EntryQuery $query,
         private readonly ContentTypeRegistry $types,
         private readonly UrlGenerator $urls,
+        private readonly ?ThemeManager $themes = null,
+        private readonly ?ZoneRepository $zones = null,
+        private readonly ?DynamicBlockRegistry $dynamicBlocks = null,
     ) {
     }
 
@@ -66,6 +72,23 @@ final class Content
             $html .= '</li>';
         }
         return $html . '</ul>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    public function themeZone(array $settings, bool $live): string
+    {
+        $slug = is_string($settings['zone'] ?? null) ? $settings['zone'] : '';
+        if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/D', $slug) !== 1) {
+            return '<p>' . Renderer::escape(t('plugin::prime-builder.ui.theme_zone_choose')) . '</p>';
+        }
+        if (!$live) {
+            // Persist no zone contents: a zone can later be removed or made unavailable.
+            return '<p>' . Renderer::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>';
+        }
+        if ($this->themes === null || $this->zones === null || !isset($this->themes->zones()[$slug])) {
+            return '';
+        }
+        return $this->zones->renderLive($slug, $this->dynamicBlocks);
     }
 
     /** @param array<string, mixed> $settings */

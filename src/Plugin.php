@@ -29,8 +29,11 @@ use Prime\Security\Csrf;
 use Prime\Security\HtmlSanitizer;
 use Prime\Site\PageContext;
 use Prime\Site\UrlGenerator;
+use Prime\Site\Zone\DynamicBlockRegistry;
+use Prime\Site\Zone\ZoneRepository;
 use Prime\Support\Str;
 use Prime\Themes\ThemeAssetRegistry;
+use Prime\Themes\ThemeManager;
 use PrimeBuilder\Controller\ContactForms;
 use PrimeBuilder\Controller\Dashboard;
 use PrimeBuilder\Controller\Documents;
@@ -96,7 +99,7 @@ final class Plugin extends AbstractPlugin
         $originals = OriginalContent::fromAppKey($context->app()->config()->get('app.key'));
         $htmlContent = HtmlContent::fromAppKey($context->app()->config()->get('app.key'));
         $partials = new Partials($context);
-        $content = new Content($context->app()->get(EntryQuery::class), $context->app()->get(ContentTypeRegistry::class), $context->app()->get(UrlGenerator::class));
+        $content = new Content($context->app()->get(EntryQuery::class), $context->app()->get(ContentTypeRegistry::class), $context->app()->get(UrlGenerator::class), $context->app()->get(ThemeManager::class), $context->app()->get(ZoneRepository::class), $context->app()->get(DynamicBlockRegistry::class));
         $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
         foreach (['content.saved', 'content.updated', 'content.published', 'content.deleted', 'content.trashed', 'content.restored', 'content.status_changed'] as $event) {
             $context->hooks()->on($event, static function () use ($content): void {

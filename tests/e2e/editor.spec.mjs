@@ -315,7 +315,7 @@ test('context menu saves a reusable template with keyboard, reload and deletion'
 test('new basic widgets each expose content, style and advanced controls', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  for (const name of ['Icône', 'Liste d’icônes', 'Boîte image', 'Témoignage', 'Bascule', 'Réseaux sociaux', 'Note par étoiles', 'Carrousel d’images', 'Carte OpenStreetMap']) {
+  for (const name of ['Icône', 'Liste d’icônes', 'Boîte image', 'Témoignage', 'Bascule', 'Réseaux sociaux', 'Note par étoiles', 'Carrousel d’images', 'Carte OpenStreetMap', 'Zone du thème']) {
     await page.locator('[data-pb-panel="widgets"]').click();
     await page.getByRole('button', { name: `Ajouter ${name}`, exact: true }).click();
     await expect(page.locator('[data-pb-fields] input, [data-pb-fields] select, [data-pb-fields] textarea').first()).toBeVisible();
@@ -506,6 +506,49 @@ test('OpenStreetMap is requested only after activation and remains a link withou
     await expect(fallback.getByRole('link', { name: 'Ouvrir la carte sur OpenStreetMap' })).toBeVisible();
     await expect(fallback.locator('[data-pb-map-load]')).toBeHidden();
   } finally { await noJs.close(); }
+});
+
+test('theme zone follows the core zone and leaves a safe no-JavaScript fallback', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+  const saveZone = text => page.request.post('/admin/appearance/zones/sidebar/save', {
+    headers: { 'Accept': 'application/json', 'X-CSRF-Token': csrf },
+    data: { content: { version: 1, blocks: [{ id: 'zone_text', type: 'paragraph', data: { text } }, { id: 'zone_search', type: 'dynamic', data: { name: 'search_form', attrs: {} } }] } },
+  });
+  expect((await saveZone('Contenu de zone initial')).status()).toBe(200);
+  await page.getByRole('button', { name: 'Ajouter Zone du thème' }).click();
+  await page.getByLabel('Choisir une zone du thème').selectOption('sidebar');
+  await page.locator('[data-pb-status]').selectOption('published');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto('/test-prime-builder');
+  const zone = page.locator('.pb-theme_zone');
+  await expect(zone).toContainText('Contenu de zone initial');
+  const searchInput = zone.getByRole('search').locator('input[type="search"]');
+  const searchId = await searchInput.getAttribute('id');
+  expect(searchId).toMatch(/^pb-zone-/);
+  await expect(zone.getByRole('search').locator('label')).toHaveAttribute('for', searchId);
+  expect(await page.locator('[id]').evaluateAll(nodes => nodes.map(node => node.id))).toEqual(expect.arrayContaining([searchId]));
+  expect(await page.locator('[id]').evaluateAll(nodes => nodes.filter(node => node.id === searchId).length)).toBe(1);
+  await expectAccessible(page);
+  expect((await saveZone('Contenu de zone actualisé')).status()).toBe(200);
+  await page.reload();
+  await expect(zone).toContainText('Contenu de zone actualisé');
+  await expect(zone).not.toContainText('Contenu de zone initial');
+  const noJs = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    await expect(fallback.locator('.pb-theme_zone')).toContainText('La zone du thème est disponible avec JavaScript');
+    await expect(fallback.locator('.pb-theme_zone')).not.toContainText('Contenu de zone initial');
+    await expect(fallback.locator('.pb-theme_zone')).not.toContainText('Contenu de zone actualisé');
+  } finally { await noJs.close(); }
+  const reset = await page.request.post('/admin/appearance/zones/sidebar/save', {
+    headers: { 'Accept': 'application/json', 'X-CSRF-Token': csrf },
+    data: { content: { version: 1, blocks: [] } },
+  });
+  expect(reset.status()).toBe(200);
 });
 
 test('external videos contact their providers only after keyboard activation', async ({ page, browser }) => {
@@ -733,7 +776,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(34);
+  await expect(page.locator('.pb-element')).toHaveCount(35);
   await expectAccessible(page);
 });
 

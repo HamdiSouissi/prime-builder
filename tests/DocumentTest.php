@@ -390,6 +390,23 @@ final class DocumentTest extends TestCase
         self::assertStringNotContainsString('data-pb-embed-video', $invalid);
     }
 
+    public function testThemeZoneValidatesTheSlugAndHasAReadableFallback(): void
+    {
+        $node = $this->element('theme_zone');
+        $node['settings'] = ['zone' => 'sidebar'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $entry = \Prime\Content\Entry::fromRow(['id' => 1]);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer(), entry: $entry))->render($result['data']);
+        self::assertStringContainsString('data-pb-live="/api/prime-builder/v1/documents/1/live"', $html);
+        self::assertStringContainsString('class="pb-element pb-theme_zone"', $html);
+        self::assertStringContainsString('<p>', $html);
+        foreach (['../sidebar', 'SIDEbar', 'a b', str_repeat('a', 81)] as $bad) {
+            $node['settings'] = ['zone' => $bad];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+    }
+
     public function testMapRendersSafeLinksAndRejectsInvalidCoordinates(): void
     {
         $html = $this->renderBasicWidget('map', ['title' => 'Centre & gare', 'latitude' => '48.790000', 'longitude' => '2.450000', 'zoom' => 14]);

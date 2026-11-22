@@ -45,7 +45,7 @@ final class Renderer
             if (!is_array($element)) {
                 continue;
             }
-            if (in_array($element['type'] ?? null, ['posts', 'current_content'], true)) {
+            if (in_array($element['type'] ?? null, ['posts', 'current_content', 'theme_zone'], true)) {
                 return true;
             }
             if (is_array($element['children'] ?? null) && $this->containsLive($element['children'])) {
@@ -77,6 +77,13 @@ final class Renderer
                         $output[$id] = $this->content->posts($settings, true);
                     } elseif ($type === 'current_content') {
                         $output[$id] = $this->content->current($settings, $this->entry);
+                    } elseif ($type === 'theme_zone') {
+                        try {
+                            $output[$id] = $this->content->themeZone($settings, true);
+                        } catch (Throwable $exception) {
+                            $this->logger?->error('Prime Builder theme zone failed', ['message' => $exception->getMessage()]);
+                            $output[$id] = '';
+                        }
                     }
                 }
                 if (is_array($element['children'] ?? null)) {
@@ -172,6 +179,7 @@ final class Renderer
             'video', 'audio' => $this->renderMedia($type, $settings),
             'posts' => $this->content?->posts($settings, $this->live) ?? '',
             'current_content' => $this->content?->current($settings, $this->entry) ?? '',
+            'theme_zone' => $this->content?->themeZone($settings, $this->live) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>',
             'form' => $this->renderForm($settings, $id),
             'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry, is_string($settings['block_anchor'] ?? null) ? $settings['block_anchor'] : null),
             'original_content' => $this->renderOriginal($settings, false),

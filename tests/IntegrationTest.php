@@ -257,6 +257,60 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/gallery.js', $assets->renderScripts());
     }
 
+    public function testThemeZoneUsesDeclaredCoreZonesAndRefreshesWithoutPersistingTheirContents(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $pdo->exec('CREATE TABLE pc_zones (id ' . $idColumn . ', theme VARCHAR(80), slug VARCHAR(80), content LONGTEXT, content_html LONGTEXT, created_at DATETIME, updated_at DATETIME)');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $zoneDocument = ['version' => 1, 'blocks' => [
+            ['id' => 'greeting', 'type' => 'paragraph', 'data' => ['text' => 'Bonjour depuis la zone']],
+            ['id' => 'search', 'type' => 'dynamic', 'data' => ['name' => 'search_form', 'attrs' => []]],
+        ]];
+        $zones->save('sidebar', $zoneDocument);
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('enum', $config['widgets']['theme_zone']['fields']['zone']['type']);
+        self::assertSame(true, in_array('sidebar', $config['widgets']['theme_zone']['fields']['zone']['values'], true));
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'zone', 'type' => 'theme_zone', 'settings' => ['zone' => 'sidebar'], 'styles' => [], 'children' => []],
+            ['id' => 'undeclared', 'type' => 'theme_zone', 'settings' => ['zone' => 'not_declared'], 'styles' => [], 'children' => []],
+        ];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('La zone du thème est disponible avec JavaScript', $entry->contentHtml);
+        self::assertStringNotContainsString('Bonjour depuis la zone', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $live->status(), $live->body());
+        self::assertStringContainsString('no-store', (string) $live->header('Cache-Control'));
+        $widgets = json_decode($live->body(), true)['data']['widgets'];
+        self::assertStringContainsString('Bonjour depuis la zone', $widgets['zone']);
+        self::assertStringContainsString('role="search"', $widgets['zone']);
+        self::assertSame('', $widgets['undeclared']);
+        $zoneDocument['blocks'][0]['data']['text'] = 'Zone mise à jour';
+        $zones->save('sidebar', $zoneDocument);
+        $updated = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $updated->status());
+        self::assertStringContainsString('Zone mise à jour', json_decode($updated->body(), true)['data']['widgets']['zone']);
+        self::assertStringNotContainsString('Bonjour depuis la zone', $updated->body());
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/2', ['content' => $document], $token)->status());
+        $app->get(\Prime\Auth\Auth::class)->logout();
+        self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/2/live')->status());
+        self::assertSame(200, $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live')->status());
+    }
+
     public function testMapAssetsAndCspAreScopedToThePageAndRespectFrameDenials(): void
     {
         $app = $this->activated(null);

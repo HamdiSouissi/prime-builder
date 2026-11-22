@@ -125,6 +125,20 @@ final class Documents
                     }
                     $field['option_labels'] = $labels;
                 }
+                if ($name === 'theme_zone' && $fieldName === 'zone') {
+                    // Use the actual active theme's declared zones, including its parent.
+                    $field['type'] = 'enum';
+                    $field['values'] = [];
+                    $field['option_labels'] = [];
+                    try {
+                        foreach ($this->plugin->app()->get(\Prime\Themes\ThemeManager::class)->zones() as $slug => $zone) {
+                            $field['values'][] = $slug;
+                            $field['option_labels'][$slug] = \Prime\Content\LabelTranslator::resolve($zone['label']);
+                        }
+                    } catch (\Throwable) {
+                        // A missing or broken theme must not prevent opening the editor.
+                    }
+                }
                 $fields[$fieldName] = $field;
             }
             $definitions[$name] = [
