@@ -59,12 +59,13 @@ final class Renderer
      * Collect live widget bodies by stable element ID. Values are server-generated HTML.
      *
      * @param array<string, mixed> $data
+     * @param array<array-key, mixed> $query
      * @return array<string, string>
      */
-    public function liveWidgets(array $data): array
+    public function liveWidgets(array $data, array $query = []): array
     {
         $output = [];
-        $walk = function (array $elements) use (&$walk, &$output): void {
+        $walk = function (array $elements) use (&$walk, &$output, $query): void {
             foreach ($elements as $element) {
                 if (!is_array($element)) {
                     continue;
@@ -74,7 +75,10 @@ final class Renderer
                 $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
                 if (is_string($id) && preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $id) === 1 && $this->content !== null) {
                     if ($type === 'posts') {
-                        $output[$id] = $this->content->posts($settings, true);
+                        $rawPage = $query['pb_page_' . $id] ?? null;
+                        $rawPage = is_int($rawPage) ? (string) $rawPage : $rawPage;
+                        $page = is_string($rawPage) && preg_match('/^[1-9][0-9]{0,3}$/D', $rawPage) === 1 && (int) $rawPage <= 1000 ? (int) $rawPage : 1;
+                        $output[$id] = $this->content->posts($settings, true, $id, $page);
                     } elseif ($type === 'current_content') {
                         $output[$id] = $this->content->current($settings, $this->entry);
                     } elseif ($type === 'search_form') {
@@ -182,7 +186,7 @@ final class Renderer
             'gallery' => $this->renderGallery($settings),
             'image_carousel' => $this->renderImageCarousel($settings),
             'video', 'audio' => $this->renderMedia($type, $settings),
-            'posts' => $this->content?->posts($settings, $this->live) ?? '',
+            'posts' => $this->content?->posts($settings, $this->live, $id) ?? '',
             'current_content' => $this->content?->current($settings, $this->entry) ?? '',
             'search_form' => $this->content?->searchForm($settings, $id) ?? '',
             'theme_zone' => $this->content?->themeZone($settings, $this->live) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>',

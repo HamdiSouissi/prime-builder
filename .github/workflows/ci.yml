@@ -233,6 +233,8 @@ jobs:
           # Keep the CMS limiter enabled but give this test fixture enough headroom;
           # plugin form quotas are separate and covered by their own integration tests.
           php bin/prime settings:set api.rate_limit_authenticated 10000 2>&1 | tee -a /tmp/prime-install.log
+          php bin/prime content:create --type=post --title='Grille Alpha' --slug=grille-alpha --status=published --publish-at='2020-01-01 00:00:00' --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          php bin/prime content:create --type=post --title='Grille Bêta' --slug=grille-beta --status=published --publish-at='2020-01-02 00:00:00' --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
           php bin/prime content:create --type=post --title='Actualité publique' --slug=actualite-publique --status=published --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
           php bin/prime content:create --type=post --title='Brouillon confidentiel' --slug=brouillon-confidentiel --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
           php bin/prime content:create --type=page --title='Test Prime Builder' --slug=test-prime-builder --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log

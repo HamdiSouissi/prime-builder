@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace PrimeBuilder\Tests;
 
 use PHPUnit\Framework\TestCase;
+use Prime\Content\ContentType;
 use Prime\Content\ContentTypeRegistry;
+use Prime\Content\EntryQuery;
 use Prime\Content\EntryRepository;
+use Prime\Content\Taxonomy;
+use Prime\Content\TaxonomyRegistry;
 use Prime\Editor\BlockRegistry;
 use Prime\Editor\EditorRegistry;
 use Prime\Hooks\Hooks;
@@ -20,12 +24,15 @@ use Prime\Plugins\PluginManager;
 use Prime\Security\Csrf;
 use Prime\Settings\Settings;
 use Prime\Site\PageContext;
+use Prime\Site\PermalinkSettings;
 use Prime\Site\UrlGenerator;
+use Prime\Site\UrlResolver;
 use Prime\Site\View\EntryView;
 use Prime\Themes\ThemeAssetRegistry;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Tests\Support\DatabaseFixture;
+use PrimeBuilder\Widgets\Content;
 
 require_once __DIR__ . '/Support/DatabaseFixture.php';
 
@@ -463,6 +470,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, substr_count($styles, '/assets/plugins/prime-builder/css/widgets/toggle.css'));
         self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/tabs.css', $styles);
         self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/form.css', $styles);
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/posts.css', $styles);
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
         $documentPosition = strpos($styles, 'href="/prime-builder/css/');
         $widgetPosition = strpos($styles, '/assets/plugins/prime-builder/css/widgets/image_box.css');
@@ -489,6 +497,7 @@ final class IntegrationTest extends TestCase
         $assets = new ThemeAssetRegistry();
         $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
         self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/posts.css'));
         $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
         self::assertSame(200, $live->status(), $live->body());
         self::assertStringContainsString('no-store', (string) $live->header('Cache-Control'));
@@ -525,6 +534,175 @@ final class IntegrationTest extends TestCase
         self::assertSame($first, $provider->posts(['limit' => 12], true));
         $provider->invalidate();
         self::assertStringContainsString('Nouvelle valeur', $provider->posts(['limit' => 12], true));
+    }
+
+    public function testPostsGridFiltersPublicEntriesAndPaginatesIndependently(): void
+    {
+        $app = $this->activated(null);
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec("INSERT INTO pc_terms (id, taxonomy, name, slug) VALUES (31, 'category', 'Un', 'un'), (32, 'category', 'Deux', 'deux')");
+        $first = $this->insertGridEntry($pdo, 'post', 'published', 'A & une', 'a-une', 2);
+        $second = $this->insertGridEntry($pdo, 'post', 'published', 'B <img src=x>', 'b-deux', 2);
+        $third = $this->insertGridEntry($pdo, 'post', 'published', 'C trois', 'c-trois', 2);
+        $otherAuthor = $this->insertGridEntry($pdo, 'post', 'published', 'Autre auteur', 'autre-auteur', 1);
+        $otherTerm = $this->insertGridEntry($pdo, 'post', 'published', 'Autre terme', 'autre-terme', 2);
+        $draft = $this->insertGridEntry($pdo, 'post', 'draft', 'Brouillon secret', 'brouillon-secret', 2);
+        $future = $this->insertGridEntry($pdo, 'post', 'published', 'Futur secret', 'futur-secret', 2, published: '2099-01-01 00:00:00');
+        $insertTerm = $pdo->prepare('INSERT INTO pc_entry_terms (entry_id, term_id) VALUES (?, ?)');
+        foreach ([$first, $second, $third, $otherAuthor, $draft, $future] as $entryId) {
+            $insertTerm->execute([$entryId, 31]);
+        }
+        $insertTerm->execute([$otherTerm, 32]);
+        $pdo->exec("UPDATE pc_entries SET excerpt = '<em>Extrait</em> & texte' WHERE id = " . $first);
+        $types = $app->get(ContentTypeRegistry::class);
+        $types->register(new ContentType(name: 'book', labels: ['singular' => 'Livre'], public: true, rewriteBase: 'livres'));
+        $types->register(new ContentType(name: 'vault', labels: ['singular' => 'Privé'], public: false));
+        $this->insertGridEntry($pdo, 'book', 'published', 'Livre public', 'livre-public', 2);
+        $this->insertGridEntry($pdo, 'vault', 'published', 'Type privé', 'type-prive', 2);
+        $app->get(TaxonomyRegistry::class)->register(new Taxonomy(name: 'secret_tax', labels: ['singular' => 'Secret'], contentTypes: ['post'], public: false));
+
+        $provider = $app->get(Content::class);
+        $settings = [
+            'content_type' => 'post', 'taxonomy' => 'category', 'term_ids' => '31', 'author_id' => 2,
+            'order_by' => 'title', 'order_direction' => 'asc', 'limit' => 2, 'layout' => 'cards', 'columns' => 4, 'show_excerpt' => 'show',
+        ];
+        $html = $provider->posts($settings, true);
+        self::assertStringContainsString('pb-post-list--cards pb-post-columns-4', $html);
+        self::assertStringContainsString('A &amp; une', $html);
+        self::assertStringContainsString('B &lt;img src=x&gt;', $html);
+        self::assertStringContainsString('Extrait &amp; texte', $html);
+        self::assertStringNotContainsString('<img', $html);
+        self::assertStringNotContainsString('C trois', $html);
+        self::assertStringNotContainsString('Autre auteur', $html);
+        self::assertStringNotContainsString('Autre terme', $html);
+        self::assertStringNotContainsString('secret', $html);
+        self::assertLessThan(strpos($html, 'B &lt;img'), strpos($html, 'A &amp; une'));
+        self::assertStringContainsString('Autre terme', $provider->posts([...$settings, 'term_ids' => '31,32', 'limit' => 12], true));
+        self::assertStringContainsString('C trois', $provider->posts([...$settings, 'order_direction' => 'desc', 'limit' => 1, 'layout' => 'list'], true));
+        self::assertStringContainsString('href="/livres/livre-public"', $provider->posts(['content_type' => 'book'], true));
+        self::assertStringContainsString('href="/livres"', $provider->posts(['content_type' => 'book'], false));
+        self::assertSame('', $provider->posts(['content_type' => 'vault'], true));
+        self::assertSame('', $provider->posts([...$settings, 'taxonomy' => 'secret_tax'], true));
+        self::assertSame('', $provider->posts([...$settings, 'taxonomy' => 'tag', 'term_ids' => '31; DROP TABLE pc_entries'], true));
+
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $paginated = [...$settings, 'pagination' => 'show'];
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'one', 'type' => 'posts', 'settings' => $paginated, 'styles' => [], 'children' => []],
+            ['id' => 'two', 'type' => 'posts', 'settings' => $paginated, 'styles' => [], 'children' => []],
+        ];
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $response = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live?pb_page_one=2&pb_page_two=bogus');
+        self::assertSame(200, $response->status(), $response->body());
+        $widgets = json_decode($response->body(), true)['data']['widgets'];
+        self::assertStringContainsString('C trois', $widgets['one']);
+        self::assertStringContainsString('Page 2 sur 2', $widgets['one']);
+        self::assertStringContainsString('aria-current="page"', $widgets['one']);
+        self::assertStringContainsString('data-pb-post-page="1"', $widgets['one']);
+        self::assertStringContainsString('A &amp; une', $widgets['two']);
+        self::assertStringContainsString('Page 1 sur 2', $widgets['two']);
+        self::assertStringNotContainsString('C trois', $widgets['two']);
+        $invalid = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live?pb_page_one%5B%5D=2&pb_page_two=1001');
+        $widgets = json_decode($invalid->body(), true)['data']['widgets'];
+        self::assertStringContainsString('Page 1 sur 2', $widgets['one']);
+        self::assertStringContainsString('Page 1 sur 2', $widgets['two']);
+    }
+
+    public function testPostsGridCountsQueriesForOneAndTwelvePostsAndSharesIdenticalWidgets(): void
+    {
+        $app = $this->activated(null);
+        $db = $this->db($app);
+        for ($i = 1; $i <= 12; $i++) {
+            $this->insertGridEntry($db->pdo(), 'post', 'published', sprintf('Article %02d', $i), sprintf('grid-post-%02d', $i), 2);
+        }
+        $makeProvider = fn (): Content => $this->gridProvider($app);
+        $settings = ['content_type' => 'post', 'author_id' => 2, 'order_by' => 'title', 'order_direction' => 'asc', 'pagination' => 'show'];
+        $db->enableQueryLog();
+        $provider = $makeProvider();
+        $db->clearQueryLog();
+        $one = $provider->posts([...$settings, 'limit' => 1], true, 'first');
+        $oneQueries = count($db->queryLog());
+        self::assertSame(1, substr_count($one, '<article>'));
+        self::assertSame(2, $oneQueries, 'One count and one bounded SELECT for one item');
+        $provider = $makeProvider();
+        $db->clearQueryLog();
+        $twelve = $provider->posts([...$settings, 'limit' => 12], true, 'first');
+        $twelveQueries = count($db->queryLog());
+        self::assertSame(12, substr_count($twelve, '<article>'));
+        self::assertSame($oneQueries, $twelveQueries, 'Twelve items must not add a query per result');
+        $again = $provider->posts([...$settings, 'limit' => 12], true, 'other');
+        self::assertSame($twelveQueries, count($db->queryLog()), 'Identical widgets share their query');
+        self::assertSame(12, substr_count($again, '<article>'));
+        $provider = $makeProvider();
+        $db->clearQueryLog();
+        $provider->posts(['author_id' => 2, 'limit' => 1], true, 'one');
+        $provider->posts(['author_id' => 2, 'limit' => 12], true, 'two');
+        self::assertSame(1, count($db->queryLog()), 'Non-paginated widgets share a bounded SELECT');
+        $db->enableQueryLog(false);
+    }
+
+    public function testPostsGridBatchesHierarchicalUrlsAndRejectsUnreachableAncestors(): void
+    {
+        $app = $this->activated(null);
+        $db = $this->db($app);
+        $pdo = $db->pdo();
+        for ($i = 1; $i <= 12; $i++) {
+            $grand = $this->insertGridEntry($pdo, 'page', 'published', sprintf('Racine %02d', $i), sprintf('grand-%02d', $i), 1);
+            $parent = $this->insertGridEntry($pdo, 'page', 'published', sprintf('Parent %02d', $i), sprintf('parent-%02d', $i), 1, $grand);
+            $this->insertGridEntry($pdo, 'page', 'published', sprintf('Enfant %02d', $i), sprintf('enfant-%02d', $i), 2, $parent);
+        }
+        $private = $this->insertGridEntry($pdo, 'page', 'draft', 'Parent privé', 'parent-prive', 1);
+        $this->insertGridEntry($pdo, 'page', 'published', 'Enfant inaccessible', 'enfant-inaccessible', 3, $private);
+        $this->insertGridEntry($pdo, 'page', 'published', 'Orphelin', 'orphelin', 3, 999999);
+        $cycle = $this->insertGridEntry($pdo, 'page', 'published', 'Cycle', 'cycle', 3);
+        $pdo->exec('UPDATE pc_entries SET parent_id = ' . $cycle . ' WHERE id = ' . $cycle);
+        $future = $this->insertGridEntry($pdo, 'page', 'published', 'Parent futur', 'parent-futur', 1, published: '2099-01-01 00:00:00');
+        $this->insertGridEntry($pdo, 'page', 'published', 'Enfant futur', 'enfant-futur', 3, $future);
+        $ancestor = 0;
+        $segments = [];
+        for ($i = 1; $i <= 12; $i++) {
+            $slug = sprintf('long-%02d', $i);
+            $segments[] = $slug;
+            $ancestor = $this->insertGridEntry($pdo, 'page', 'published', $slug, $slug, 1, $ancestor);
+            if ($i === 11) {
+                $this->insertGridEntry($pdo, 'page', 'published', 'Limite accessible', 'limite', 4, $ancestor);
+            }
+        }
+        $this->insertGridEntry($pdo, 'page', 'published', 'Trop profond', 'trop-profond', 3, $ancestor);
+        $settings = ['content_type' => 'page', 'author_id' => 2, 'order_by' => 'title', 'order_direction' => 'asc', 'pagination' => 'show'];
+        $db->enableQueryLog();
+        $provider = $this->gridProvider($app);
+        $db->clearQueryLog();
+        $one = $provider->posts([...$settings, 'limit' => 1], true, 'one');
+        $oneQueries = count($db->queryLog());
+        self::assertSame(1, substr_count($one, '<article>'));
+        self::assertSame(4, $oneQueries, 'Count, entries, and two batches of ancestors');
+        self::assertStringContainsString('href="/grand-01/parent-01/enfant-01"', $one);
+        $provider = $this->gridProvider($app);
+        $db->clearQueryLog();
+        $twelve = $provider->posts([...$settings, 'limit' => 12], true, 'one');
+        self::assertSame(12, substr_count($twelve, '<article>'));
+        self::assertSame($oneQueries, count($db->queryLog()), 'Hierarchy adds one query per level, not per page');
+        self::assertStringContainsString('href="/grand-12/parent-12/enfant-12"', $twelve);
+        $provider->posts([...$settings, 'limit' => 12], true, 'two');
+        self::assertSame($oneQueries, count($db->queryLog()), 'Repeated widget also shares ancestor batches');
+        $db->enableQueryLog(false);
+        $context = $app->get(UrlResolver::class)->resolve(Request::create('GET', '/grand-12/parent-12/enfant-12'));
+        self::assertSame(PageContext::TYPE_ENTRY, $context->type);
+        self::assertSame('Enfant 12', $context->entry?->title);
+        $unsafe = $provider->posts(['content_type' => 'page', 'author_id' => 3, 'limit' => 12], true);
+        self::assertStringNotContainsString('Enfant inaccessible', $unsafe);
+        self::assertStringNotContainsString('parent-prive', $unsafe);
+        self::assertStringNotContainsString('Orphelin', $unsafe);
+        self::assertStringNotContainsString('Cycle', $unsafe);
+        self::assertStringNotContainsString('Enfant futur', $unsafe);
+        self::assertStringNotContainsString('Trop profond', $unsafe);
+        $boundary = $provider->posts(['content_type' => 'page', 'author_id' => 4], true);
+        $path = '/' . implode('/', array_slice($segments, 0, 11)) . '/limite';
+        self::assertStringContainsString('href="' . $path . '"', $boundary);
+        self::assertSame('Limite accessible', $app->get(UrlResolver::class)->resolve(Request::create('GET', $path))->entry?->title);
     }
 
     public function testHistoricalStylesRemainImmutableAndStillRespectVisibility(): void
@@ -1783,6 +1961,22 @@ final class IntegrationTest extends TestCase
             'id' => 'one', 'type' => 'heading', 'settings' => ['text' => 'Bonjour', 'level' => 2],
             'styles' => ['desktop' => ['color' => '#c9441f']], 'children' => [],
         ]]]]]];
+    }
+
+    private function insertGridEntry(\PDO $pdo, string $type, string $status, string $title, string $slug, int $author, int $parent = 0, string $published = '2020-01-01 00:00:00'): int
+    {
+        $statement = $pdo->prepare('INSERT INTO pc_entries (type, status, title, slug, excerpt, content, content_html, content_text, author_id, parent_id, menu_order, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $statement->execute([$type, $status, $title, $slug, '', '{"blocks":[]}', '', '', $author, $parent, 0, $published, '2020-01-01 00:00:00', '2020-01-01 00:00:00']);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function gridProvider(Application $app): Content
+    {
+        $types = $app->get(ContentTypeRegistry::class);
+        $entries = $app->get(EntryRepository::class);
+        // A fresh URL generator per comparison prevents a warm ancestor cache from masking N+1.
+        $urls = new UrlGenerator(new PermalinkSettings(), $types, $entries);
+        return new Content($app->get(EntryQuery::class), $types, $urls, taxonomies: $app->get(TaxonomyRegistry::class), entries: $entries);
     }
 
     private function activated(?string $as): Application

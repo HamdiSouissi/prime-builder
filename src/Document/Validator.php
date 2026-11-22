@@ -11,6 +11,7 @@ use PrimeBuilder\Widgets\Map;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\PrimeBlock;
 use PrimeBuilder\Widgets\Registry;
+use PrimeBuilder\Widgets\TermIds;
 
 /** Normalizes untrusted layout data, placing hard limits on size, depth and node count. */
 final class Validator
@@ -182,6 +183,7 @@ final class Validator
             'json_object' => is_object(json_decode($value)) ? $value : null,
             'media_list' => $this->mediaList($value),
             'price_items' => $this->priceItems($value),
+            'term_ids' => ($ids = TermIds::parse($value)) === null ? null : implode(',', $ids),
             'rich' => $this->sanitizer->sanitizeBasic($value),
             'href' => $value === '' ? '' : $this->sanitizer->sanitizeHref($value),
             'url' => $value === '' ? '' : $this->sanitizer->sanitizeResourceUrl($value),

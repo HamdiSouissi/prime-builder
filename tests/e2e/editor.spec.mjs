@@ -855,7 +855,7 @@ test('responsive container controls and unsaved style reset update the preview',
 test('recent posts and current content refresh safely with a no-JS fallback', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  await page.getByRole('button', { name: 'Ajouter Articles récents' }).click();
+  await page.getByRole('button', { name: 'Ajouter Grille d’articles' }).click();
   await page.getByRole('button', { name: 'Éléments', exact: true }).last().click();
   await page.getByRole('button', { name: 'Ajouter Contenu actuel' }).click();
   await page.locator('[data-pb-status]').selectOption('published');
@@ -873,6 +873,85 @@ test('recent posts and current content refresh safely with a no-JS fallback', as
   await expect(fallback.locator('.pb-posts')).not.toContainText('Brouillon confidentiel');
   await expect(fallback.locator('.pb-current_content')).toHaveText('Test Prime Builder');
   await withoutJs.close();
+});
+
+test('posts grid configures public filters and offers keyboard pagination with a safe fallback', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const termsResponse = await page.request.get('/api/v1/terms/category');
+  expect(termsResponse.status()).toBe(200);
+  const terms = (await termsResponse.json()).data;
+  const category = terms.find(term => term.slug === 'non-classe');
+  expect(category?.id).toBeTruthy();
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const content = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] };
+    return (await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content, status: 'published', published_at: '' }),
+    })).status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  await page.getByRole('button', { name: 'Ajouter Grille d’articles', exact: true }).click();
+  await page.getByLabel('Type de contenu public').selectOption('post');
+  await page.getByLabel('Taxonomie publique (facultative)').selectOption('category');
+  await page.getByLabel('Identifiants de termes séparés par des virgules (10 maximum)').fill(String(category.id));
+  await page.getByLabel('Identifiant de l’auteur (facultatif)').fill('1');
+  await page.getByLabel('Trier par').selectOption('title');
+  await page.getByLabel('Ordre de tri').selectOption('asc');
+  await page.getByLabel('Nombre d’articles').fill('1');
+  await page.getByLabel('Pagination', { exact: true }).selectOption('show');
+  await page.getByLabel('Présentation').selectOption('list');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.locator('.pb-posts .pb-post-list').last()).toBeVisible();
+  await expect(frame.locator('.pb-posts .pb-post-list').last()).not.toHaveClass(/pb-post-list--cards/);
+  await page.getByLabel('Présentation').selectOption('cards');
+  await page.getByLabel('Colonnes des cartes (1 à 4)').fill('2');
+  await expect(frame.locator('.pb-post-list--cards.pb-post-columns-2').last()).toBeVisible();
+  const gridId = await frame.locator('.pb-posts').last().getAttribute('data-pb-id');
+  expect(gridId).toBeTruthy();
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await expectAccessible(page);
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  const liveRequest = page.waitForRequest(request => request.url().includes(`/documents/${id}/live`));
+  await page.goto('/test-prime-builder?campaign=ete&pb_page_other=5#top');
+  const initialUrl = new URL((await liveRequest).url());
+  expect(initialUrl.searchParams.has('campaign')).toBe(false);
+  expect(initialUrl.searchParams.has('pb_page_other')).toBe(false);
+  const grid = page.locator(`[data-pb-id="${gridId}"]`);
+  await expect(grid.getByRole('link', { name: 'Actualité publique' })).toBeVisible();
+  await expect(grid).not.toContainText('Brouillon confidentiel');
+  await expect(page.locator('link[href*="/css/widgets/posts.css"]')).toHaveCount(1);
+  const next = grid.getByRole('link', { name: 'Suivant' });
+  await expect(next).toHaveAttribute('href', new RegExp(`pb_page_${gridId}=2`));
+  await next.focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => new URL(page.url()).searchParams.get(`pb_page_${gridId}`)).toBe('2');
+  expect(new URL(page.url()).searchParams.get('campaign')).toBe('ete');
+  expect(new URL(page.url()).searchParams.get('pb_page_other')).toBe('5');
+  await expect(grid.getByRole('link', { name: 'Grille Alpha' })).toBeVisible();
+  await expect(grid.locator('[aria-current="page"]')).toHaveText('Page 2 sur 3');
+  const previous = grid.getByRole('link', { name: 'Précédent' });
+  await previous.focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => new URL(page.url()).searchParams.has(`pb_page_${gridId}`)).toBe(false);
+  await expect(grid.getByRole('link', { name: 'Actualité publique' })).toBeVisible();
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    await expect(fallback.locator('.pb-posts').getByRole('link', { name: 'Voir les articles récents' })).toBeVisible();
+    await expect(fallback.locator('.pb-posts')).not.toContainText('Actualité publique');
+    await expect(fallback.locator('.pb-posts nav')).toHaveCount(0);
+  } finally { await noJs.close(); }
 });
 
 test('a non-privileged Prime block is previewed and persisted', async ({ page }) => {

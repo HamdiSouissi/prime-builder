@@ -15,6 +15,7 @@ use Prime\Content\Exception\ContentException;
 use Prime\Content\Exception\ContentForbiddenException;
 use Prime\Content\Exception\ContentLockedException;
 use Prime\Content\Exception\ContentValidationException;
+use Prime\Content\TaxonomyRegistry;
 use Prime\Editor\BlockRegistry;
 use Prime\Http\Request;
 use Prime\Http\Response;
@@ -66,6 +67,7 @@ final class Documents
             'toggle' => ['title' => $copy('toggle_title'), 'text' => $copy('accordion_text'), 'initial' => 'closed'],
             'star_rating' => ['value' => 4],
             'counter' => ['title' => $copy('counter')],
+            'posts' => ['content_type' => 'post', 'order_by' => 'published_at', 'order_direction' => 'desc', 'limit' => 3, 'pagination' => 'hide', 'layout' => 'cards', 'columns' => 3, 'show_excerpt' => 'hide'],
             'form' => ['title' => $copy('form_title'), 'button_text' => $copy('form_button')],
             'prime_block' => ['block_type' => 'paragraph', 'block_data' => (string) json_encode(['text' => $copy('prime_block')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)],
             'tabs' => ['label' => $copy('tabs_label'), 'title_1' => $copy('tab_1'), 'text_1' => $copy('tab_text_1'), 'title_2' => $copy('tab_2'), 'text_2' => $copy('tab_text_2')],
@@ -128,6 +130,30 @@ final class Documents
                         }
                     }
                     $field['option_labels'] = $labels;
+                }
+                if ($name === 'posts' && in_array($fieldName, ['content_type', 'taxonomy'], true)) {
+                    // The CMS owns content types and taxonomies; expose only public definitions.
+                    // The renderer rechecks these definitions when the document is displayed.
+                    $field['type'] = 'enum';
+                    $field['values'] = [];
+                    $field['option_labels'] = [];
+                    try {
+                        if ($fieldName === 'content_type') {
+                            foreach ($this->plugin->app()->get(ContentTypeRegistry::class)->allPublic() as $type) {
+                                $field['values'][] = $type->name;
+                                $field['option_labels'][$type->name] = $type->label('plural');
+                            }
+                        } else {
+                            foreach ($this->plugin->app()->get(TaxonomyRegistry::class)->all() as $taxonomy) {
+                                if ($taxonomy->public) {
+                                    $field['values'][] = $taxonomy->name;
+                                    $field['option_labels'][$taxonomy->name] = $taxonomy->label('plural');
+                                }
+                            }
+                        }
+                    } catch (\Throwable) {
+                        // A faulty third-party registry must not prevent opening the editor.
+                    }
                 }
                 if ($name === 'theme_zone' && $fieldName === 'zone') {
                     // Use the actual active theme's declared zones, including its parent.
@@ -372,7 +398,8 @@ final class Documents
             return ApiError::response('not_found', 404, $request);
         }
         $renderer = new Renderer($registry, $sanitizer, $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals);
-        return Response::json(['data' => ['widgets' => $renderer->liveWidgets($result['data'])]])
+        $query = $request->query();
+        return Response::json(['data' => ['widgets' => $renderer->liveWidgets($result['data'], is_array($query) ? $query : [])]])
             ->withHeader('Cache-Control', 'no-store, private')
             ->withHeader('X-Content-Type-Options', 'nosniff');
     }

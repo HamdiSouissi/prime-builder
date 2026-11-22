@@ -32,6 +32,7 @@ require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
+require_once dirname(__DIR__) . '/src/Widgets/TermIds.php';
 require_once dirname(__DIR__) . '/src/Document/HtmlContent.php';
 require_once dirname(__DIR__) . '/src/Document/Validator.php';
 require_once dirname(__DIR__) . '/src/Document/Layout.php';
@@ -439,6 +440,47 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('<h3 data-pb-tab-heading>Premier</h3><p>Un</p>', $html);
         self::assertStringContainsString('<h3 data-pb-tab-heading>Second</h3><p>Deux</p>', $html);
         self::assertStringNotContainsString('<script>', $html);
+    }
+
+    public function testPostsGridValidatesItsConfigurationAndRendersASafeFallback(): void
+    {
+        $node = $this->element('posts', 'grid_one');
+        $node['settings'] = [
+            'content_type' => 'post', 'taxonomy' => 'category', 'term_ids' => ' 7, 2, 7 ', 'author_id' => 2,
+            'order_by' => 'title', 'order_direction' => 'asc', 'limit' => 12, 'pagination' => 'show',
+            'layout' => 'cards', 'columns' => 4, 'show_excerpt' => 'show',
+        ];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame('7,2', $result['data']['elements'][0]['settings']['term_ids']);
+        $definitions = (new Registry())->all();
+        self::assertSame('pro', $definitions['posts']['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/posts.css', $definitions['posts']['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definitions['posts']['script']);
+
+        // The persisted HTML contains no other entries and needs no database to render.
+        $connection = new Connection();
+        $provider = new Content(new EntryQuery($connection, new EntryRepository($connection)), new ContentTypeRegistry(), new UrlGenerator(new PermalinkSettings()));
+        $html = (new Renderer(new Registry(), new HtmlSanitizer(), content: $provider))->render($result['data']);
+        self::assertStringContainsString('data-pb-id="grid_one"', $html);
+        self::assertStringContainsString('href="/"', $html);
+        self::assertStringNotContainsString('pb-post-list', $html);
+        $node['settings']['content_type'] = 'page';
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer(), content: $provider))->render($result['data']);
+        self::assertStringContainsString('href="/recherche"', $html);
+
+        foreach (['0', '-2', '1,', '1 OR 1=1', str_repeat('9', 30), implode(',', range(1, 11))] as $invalid) {
+            $node['settings']['term_ids'] = $invalid;
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors'], $invalid);
+        }
+        $node['settings']['term_ids'] = '';
+        self::assertSame([], $this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        foreach (['limit' => 13, 'columns' => 5, 'author_id' => 0, 'order_by' => 'id; DROP TABLE entries', 'pagination' => 'yes'] as $field => $invalid) {
+            $invalidNode = $node;
+            $invalidNode['settings'][$field] = $invalid;
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$invalidNode]])['errors'], $field);
+        }
     }
 
     public function testSearchFormRendersAValidatedAccessibleGetFormUsingTheCoreUrl(): void
