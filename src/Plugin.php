@@ -234,10 +234,14 @@ final class Plugin extends AbstractPlugin
             }
             return $schedule;
         });
-        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context): void {
+        // The CSP hook runs after site.assets during a page render. Reset on every page,
+        // then include only the exact map origin if a map occurs in the entry or partials.
+        $hasMap = false;
+        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, &$hasMap): void {
             if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
                 return;
             }
+            $hasMap = false;
             $kitCss = Kit::fromSettings($context->settings());
             $snapshots = new Snapshots($context->app()->storagePath('prime-builder/styles'));
             $kitHash = substr(hash('sha256', $kitCss), 0, 16);
@@ -272,10 +276,11 @@ final class Plugin extends AbstractPlugin
                 }
             };
             $collect(is_array($data['elements'] ?? null) ? $data['elements'] : []);
+            $hasMap = isset($types['map']);
             Assets::register($assets, $types, (new Registry($context->app()->get(Hooks::class)))->all());
             $assets->style('prime-builder-document', '/prime-builder/css/' . $file, ['prime-builder-kit']);
         });
-        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, $partials, $registry): void {
+        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, $partials, $registry, &$hasMap): void {
             if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
                 return;
             }
@@ -304,7 +309,25 @@ final class Plugin extends AbstractPlugin
                 $assets->style('prime-builder-theme-' . $slot, '/prime-builder/theme/' . $file, ['prime-builder-kit']);
                 $collect(is_array($layout['elements'] ?? null) ? $layout['elements'] : []);
             }
+            $hasMap = $hasMap || isset($types['map']);
             Assets::register($assets, $types, $registry->all());
+        });
+        $context->hooks()->filter('site.csp', static function (mixed $directives) use (&$hasMap): mixed {
+            if (!$hasMap || !is_array($directives)) {
+                return $directives;
+            }
+            $current = $directives['frame-src'] ?? $directives['default-src'] ?? null;
+            if (!is_string($current) || trim($current) === '') {
+                return $directives;
+            }
+            $sources = preg_split('/\s+/', trim($current)) ?: [];
+            if (in_array("'none'", $sources, true)) {
+                return $directives;
+            }
+            if (!in_array('https://www.openstreetmap.org', $sources, true)) {
+                $directives['frame-src'] = $current . ' https://www.openstreetmap.org';
+            }
+            return $directives;
         });
         $context->hooks()->on('settings.updated', static function (mixed $name) use ($context): void {
             if (is_string($name) && str_starts_with($name, 'plugin.prime-builder.')) {

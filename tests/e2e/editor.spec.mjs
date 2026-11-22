@@ -315,7 +315,7 @@ test('context menu saves a reusable template with keyboard, reload and deletion'
 test('new basic widgets each expose content, style and advanced controls', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  for (const name of ['Icône', 'Liste d’icônes', 'Boîte image', 'Témoignage', 'Bascule', 'Réseaux sociaux', 'Note par étoiles', 'Carrousel d’images']) {
+  for (const name of ['Icône', 'Liste d’icônes', 'Boîte image', 'Témoignage', 'Bascule', 'Réseaux sociaux', 'Note par étoiles', 'Carrousel d’images', 'Carte OpenStreetMap']) {
     await page.locator('[data-pb-panel="widgets"]').click();
     await page.getByRole('button', { name: `Ajouter ${name}`, exact: true }).click();
     await expect(page.locator('[data-pb-fields] input, [data-pb-fields] select, [data-pb-fields] textarea').first()).toBeVisible();
@@ -461,6 +461,50 @@ test('gallery lightbox works with keyboard, restores focus and keeps image links
     await fallback.goto('/test-prime-builder');
     await expect(fallback.getByRole('link', { name: 'Agrandir l’image 1 : Couronne' })).toHaveAttribute('href', '/assets/plugins/prime-builder/icon.svg');
     await expect(fallback.locator('dialog')).toHaveCount(0);
+  } finally { await noJs.close(); }
+});
+
+test('OpenStreetMap is requested only after activation and remains a link without JavaScript', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Carte OpenStreetMap' }).click();
+  await page.getByLabel('Titre de la carte').fill('Carte de Créteil');
+  await page.getByLabel('Latitude (de −85 à 85, point décimal)').fill('48.790000');
+  await page.getByLabel('Longitude (de −180 à 180, point décimal)').fill('2.450000');
+  await page.getByLabel('Zoom (3 à 18)').fill('14');
+  await page.locator('[data-pb-status]').selectOption('published');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  const requests = [];
+  page.on('request', request => {
+    if (/openstreetmap\.org$/i.test(new URL(request.url()).hostname)) requests.push(request.url());
+  });
+  await page.route('https://www.openstreetmap.org/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html lang="fr"><head><title>Carte simulée</title></head><body>Carte simulée</body></html>' }));
+  const response = await page.goto('/test-prime-builder');
+  expect(response.headers()['content-security-policy']).toContain('https://www.openstreetmap.org');
+  const map = page.locator('.pb-map');
+  const button = map.getByRole('button', { name: 'Charger la carte OpenStreetMap' });
+  await expect(button).toBeVisible();
+  await expect(map.locator('iframe')).toHaveCount(0);
+  await expect(map.getByRole('link', { name: 'Ouvrir la carte sur OpenStreetMap' })).toHaveAttribute('href', 'https://www.openstreetmap.org/?mlat=48.790000&mlon=2.450000#map=14/48.790000/2.450000');
+  await expectAccessible(page);
+  expect(requests).toEqual([]);
+  await button.focus();
+  await page.keyboard.press('Enter');
+  const frame = map.locator('iframe');
+  await expect(frame).toHaveAttribute('title', 'Carte de Créteil');
+  await expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
+  await expect(frame).toHaveAttribute('src', /https:\/\/www\.openstreetmap\.org\/export\/embed\.html\?/);
+  await expect.poll(() => requests.length).toBe(1);
+  await expectAccessible(page);
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    await expect(fallback.locator('.pb-map iframe')).toHaveCount(0);
+    await expect(fallback.getByRole('link', { name: 'Ouvrir la carte sur OpenStreetMap' })).toBeVisible();
+    await expect(fallback.locator('[data-pb-map-load]')).toBeHidden();
   } finally { await noJs.close(); }
 });
 
@@ -689,7 +733,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(33);
+  await expect(page.locator('.pb-element')).toHaveCount(34);
   await expectAccessible(page);
 });
 

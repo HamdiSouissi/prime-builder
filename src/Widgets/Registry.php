@@ -42,6 +42,7 @@ final class Registry
             'testimonial' => ['text' => ['type' => 'rich', 'max' => 5000], 'author' => $text, 'job_title' => $text, 'image_url' => $url, 'alt' => $text, 'width' => $dimension, 'height' => $dimension],
             'toggle' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000], 'initial' => ['type' => 'enum', 'values' => ['closed', 'open']]],
             'social' => ['label' => $text, 'facebook' => ['type' => 'href', 'max' => 2048], 'instagram' => ['type' => 'href', 'max' => 2048], 'linkedin' => ['type' => 'href', 'max' => 2048], 'youtube' => ['type' => 'href', 'max' => 2048], 'mastodon' => ['type' => 'href', 'max' => 2048]],
+            'map' => ['title' => ['type' => 'text', 'max' => 1000, 'label' => 'plugin::prime-builder.ui.map_title'], 'latitude' => ['type' => 'latitude', 'max' => 16, 'label' => 'plugin::prime-builder.ui.map_latitude'], 'longitude' => ['type' => 'longitude', 'max' => 16, 'label' => 'plugin::prime-builder.ui.map_longitude'], 'zoom' => ['type' => 'integer', 'min' => 3, 'max' => 18, 'label' => 'plugin::prime-builder.ui.map_zoom']],
             'star_rating' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 5]],
             'counter' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 1000000000], 'prefix' => $text, 'suffix' => $text, 'title' => $text],
             'gallery' => ['images' => ['type' => 'media_list', 'max' => 10000]],
@@ -78,13 +79,15 @@ final class Registry
                 $definitions[$type]['hidden'] = true;
                 $definitions[$type]['read_only'] = true;
             }
-            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'video', 'audio', 'posts', 'form'], true)) {
+            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form'], true)) {
                 $definitions[$type]['style'] = '/assets/plugins/prime-builder/css/widgets/' . $type . '.css';
             }
             if ($type === 'tabs') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
             } elseif (in_array($type, ['posts', 'current_content'], true)) {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/content.js';
+            } elseif ($type === 'map') {
+                $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/map.js';
             } elseif ($type === 'image_carousel') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/image_carousel.js';
             } elseif ($type === 'gallery') {

@@ -163,6 +163,7 @@ final class Renderer
             'testimonial' => $this->renderTestimonial($settings),
             'toggle' => '<details' . (($settings['initial'] ?? 'closed') === 'open' ? ' open' : '') . '><summary>' . self::escape($this->fieldText($settings, 'title', t('plugin::prime-builder.widgets.toggle'))) . '</summary><div>' . $rich . '</div></details>',
             'social' => $this->renderSocial($settings),
+            'map' => $this->renderMap($settings),
             'star_rating' => $this->renderStarRating($settings),
             'counter' => '<div class="pb-counter-value">' . self::escape($this->fieldText($settings, 'prefix')) . max(0, min(1000000000, (int) ($settings['value'] ?? 0))) . self::escape($this->fieldText($settings, 'suffix')) . '</div><p>' . self::escape($this->fieldText($settings, 'title')) . '</p>',
             'tabs' => $this->renderTabs($settings, $id),
@@ -412,6 +413,21 @@ final class Renderer
             }
         }
         return $html . '</div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderMap(array $settings): string
+    {
+        $urls = Map::urls($settings['latitude'] ?? null, $settings['longitude'] ?? null, $settings['zoom'] ?? null);
+        if ($urls === null) {
+            return '<p>' . self::escape(t('plugin::prime-builder.ui.map_configure')) . '</p>';
+        }
+        $title = $this->fieldText($settings, 'title', t('plugin::prime-builder.widgets.map'));
+        $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.map_' . $key));
+        return '<div class="pb-map-content" data-pb-map data-pb-map-src="' . self::escape($urls['frame']) . '" data-pb-map-title="' . self::escape($title) . '">'
+            . '<p>' . $copy('privacy') . '</p>'
+            . '<button type="button" data-pb-map-load hidden>' . $copy('load') . '</button>'
+            . '<p><a href="' . self::escape($urls['link']) . '" rel="noopener noreferrer">' . $copy('open') . '</a> — <a href="https://www.openstreetmap.org/copyright" rel="noopener noreferrer">' . $copy('attribution') . '</a></p></div>';
     }
 
     /** @param array<string, mixed> $settings */

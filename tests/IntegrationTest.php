@@ -257,6 +257,36 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/gallery.js', $assets->renderScripts());
     }
 
+    public function testMapAssetsAndCspAreScopedToThePageAndRespectFrameDenials(): void
+    {
+        $app = $this->activated(null);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'map', 'type' => 'map', 'settings' => ['latitude' => '48.79', 'longitude' => '2.45'], 'styles' => [], 'children' => []],
+        ];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringNotContainsString('<iframe', $entry->contentHtml);
+        $hooks = $app->get(Hooks::class);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/map.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/map.js'));
+        $csp = new \Prime\Themes\PublicCsp($hooks);
+        self::assertStringContainsString('frame-src https://www.youtube-nocookie.com https://player.vimeo.com https://www.openstreetmap.org', $csp->headerValue());
+        self::assertSame(['frame-src' => "'none'"], $hooks->apply('site.csp', ['frame-src' => "'none'"]));
+        self::assertSame(['default-src' => "'self'", 'frame-src' => "'self' https://www.openstreetmap.org"], $hooks->apply('site.csp', ['default-src' => "'self'"]));
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/map.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/map.js', $assets->renderScripts());
+        self::assertStringNotContainsString('https://www.openstreetmap.org', $csp->headerValue());
+    }
+
     public function testVideoAssetsArePresentOnlyOnPagesWithVideo(): void
     {
         $app = $this->activated(null);
@@ -888,6 +918,7 @@ final class IntegrationTest extends TestCase
         $layout = ['version' => 1, 'elements' => [
             ['id' => 'title', 'type' => 'heading', 'settings' => ['text' => 'En-tête du constructeur', 'level' => 2], 'styles' => ['desktop' => ['color' => '#123456']], 'children' => []],
             ['id' => 'tabs', 'type' => 'tabs', 'settings' => ['title_1' => 'Un', 'text_1' => 'Contenu', 'title_2' => 'Deux', 'text_2' => 'Suite'], 'styles' => [], 'children' => []],
+            ['id' => 'map', 'type' => 'map', 'settings' => ['latitude' => '48.79', 'longitude' => '2.45'], 'styles' => [], 'children' => []],
             ['id' => 'anchor', 'type' => 'anchor', 'settings' => ['anchor' => 'section'], 'styles' => [], 'children' => []],
             ['id' => 'link', 'type' => 'button', 'settings' => ['text' => 'Lien', 'url' => '#section'], 'styles' => [], 'children' => []],
         ]];
@@ -947,6 +978,8 @@ final class IntegrationTest extends TestCase
         $hooks->emit('site.assets', $assets, $page);
         self::assertStringContainsString('/assets/plugins/prime-builder/js/tabs.js', $assets->renderScripts());
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/tabs.css'));
+        self::assertStringContainsString('/assets/plugins/prime-builder/js/map.js', $assets->renderScripts());
+        self::assertStringContainsString('https://www.openstreetmap.org', (new \Prime\Themes\PublicCsp($hooks))->headerValue());
         self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\.css)~', $assets->renderStyles(), $matches));
         $css = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
         self::assertSame(200, $css->status());
@@ -957,6 +990,7 @@ final class IntegrationTest extends TestCase
         $hooks->emit('site.assets', $assets, $excludedPage);
         self::assertStringNotContainsString('/prime-builder/theme/', $assets->renderStyles());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/tabs.css', $assets->renderStyles());
+        self::assertStringNotContainsString('https://www.openstreetmap.org', (new \Prime\Themes\PublicCsp($hooks))->headerValue());
         $fields['footer'] = $id;
         self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
         $footer = $hooks->apply('site.partial', null, 'footer', $page, ['after_save' => true]);

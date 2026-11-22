@@ -19,6 +19,7 @@ use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
 require_once dirname(__DIR__) . '/src/Widgets/Assets.php';
+require_once dirname(__DIR__) . '/src/Widgets/Map.php';
 require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
@@ -387,6 +388,28 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('<a href="https://www.youtube.com/playlist?list=PL123"', $invalid);
         self::assertStringNotContainsString('<source', $invalid);
         self::assertStringNotContainsString('data-pb-embed-video', $invalid);
+    }
+
+    public function testMapRendersSafeLinksAndRejectsInvalidCoordinates(): void
+    {
+        $html = $this->renderBasicWidget('map', ['title' => 'Centre & gare', 'latitude' => '48.790000', 'longitude' => '2.450000', 'zoom' => 14]);
+        self::assertStringContainsString('data-pb-map-title="Centre &amp; gare"', $html);
+        self::assertStringContainsString('https://www.openstreetmap.org/export/embed.html?bbox=', $html);
+        self::assertStringContainsString('marker=48.790000%2C2.450000', $html);
+        self::assertStringContainsString('href="https://www.openstreetmap.org/?mlat=48.790000&amp;mlon=2.450000#map=14/48.790000/2.450000"', $html);
+        self::assertStringContainsString('href="https://www.openstreetmap.org/copyright"', $html);
+        self::assertStringContainsString('data-pb-map-load hidden', $html);
+        self::assertStringNotContainsString('<iframe', $html);
+        self::assertStringNotContainsString('<script', $html);
+        foreach ([['latitude' => '85.1'], ['latitude' => 'NaN'], ['latitude' => '48,79'], ['latitude' => '1\" onload=alert(1)'], ['longitude' => '-180.1'], ['longitude' => '1e3'], ['zoom' => 2]] as $bad) {
+            $node = $this->element('map');
+            $node['settings'] = $bad;
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+        $html = $this->renderBasicWidget('map', ['latitude' => '-85', 'longitude' => '180', 'zoom' => 18]);
+        self::assertStringContainsString('marker=-85.000000%2C180.000000', $html);
+        $html = $this->renderBasicWidget('map', []);
+        self::assertStringNotContainsString('data-pb-map-src', $html);
     }
 
     public function testImageCarouselRendersEverySlideWithoutJavaScript(): void

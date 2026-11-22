@@ -519,6 +519,7 @@ function makeField(name, schema, current, onChange) {
   } else {
     input = document.createElement('input');
     input.type = schema.type === 'integer' ? 'number' : 'text';
+    if (schema.type === 'latitude' || schema.type === 'longitude') input.inputMode = 'decimal';
     if (schema.min != null) input.min = schema.min;
     if (schema.max != null && schema.type === 'integer') input.max = schema.max;
     if (schema.max != null && schema.type !== 'integer') input.maxLength = schema.max;
