@@ -831,7 +831,7 @@ test('media carousel keeps native video controls and stops hidden playback', asy
   await expect(slides).toHaveCount(2);
   await expect(slides.nth(0)).toBeVisible();
   await expect(slides.nth(1)).toBeHidden();
-  await expect(carousel.getByRole('img', { name: 'Icône Prime Builder' })).toBeVisible();
+  await expect(carousel.getByRole('img', { name: 'Paysage abstrait' })).toBeVisible();
   await expect(page.locator('link[href*="/css/widgets/media_carousel.css"]')).toHaveCount(1);
   await expect(page.locator('script[src*="/js/image_carousel.js"]')).toHaveCount(1);
   expect(mediaRequests).toBe(0);
