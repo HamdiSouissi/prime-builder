@@ -1417,7 +1417,7 @@ test('image selection uses the Prime media picker', async ({ page }) => {
   }], has_more: false } }));
   await page.route('**/admin/media/api/folders', route => route.fulfill({ json: { flat_folders: [], counts: { all: 1, unclassified: 1 } } }));
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  await page.getByRole('button', { name: 'Ajouter Image' }).click();
+  await page.getByRole('button', { name: 'Ajouter Image', exact: true }).click();
   await page.getByRole('button', { name: 'Choisir dans la médiathèque' }).click();
   const modal = page.getByRole('dialog', { name: 'Choisir dans la médiathèque' });
   await expect(modal).toBeVisible();
@@ -2751,7 +2751,15 @@ test('current entry title, excerpt, image and information use real CMS metadata'
     await expect(frame.locator('.pb-entry_excerpt p')).toHaveText('Un résumé initial pour le jardin.');
     await page.locator('[data-pb-panel="widgets"]').click();
     await page.getByRole('button', { name: 'Ajouter Image à la une du contenu', exact: true }).click();
-    await page.getByRole('combobox', { name: 'Taille de l’image à la une', exact: true }).selectOption('medium');
+    const imageSize = page.getByRole('combobox', { name: 'Taille de l’image à la une', exact: true });
+    await imageSize.selectOption('thumbnail');
+    const thumbnail = frame.locator('.pb-entry_featured_image img');
+    await expect(thumbnail).toHaveAttribute('width', '150');
+    await expect(thumbnail).not.toHaveAttribute('srcset');
+    await thumbnail.scrollIntoViewIfNeeded();
+    await expect.poll(() => thumbnail.evaluate(image => [image.naturalWidth, image.naturalHeight])).toEqual([150, 150]);
+    await expect.poll(() => thumbnail.evaluate(image => image.currentSrc === image.src)).toBe(true);
+    await imageSize.selectOption('medium');
     await expect(frame.locator('.pb-entry_featured_image img')).toHaveAttribute('alt', 'Feuillage initial');
     await page.locator('[data-pb-panel="widgets"]').click();
     await page.getByRole('button', { name: 'Ajouter Informations du contenu', exact: true }).click();

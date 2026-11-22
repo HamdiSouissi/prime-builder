@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PrimeBuilder\Widgets;
 
+use DOMDocument;
+use DOMElement;
 use Prime\Site\View\EntryView;
 
 /** Render individual pieces of the current entry using the CMS's public view. */
@@ -41,7 +43,24 @@ final class CurrentEntry
             return '';
         }
         $size = is_string($settings['size'] ?? null) && in_array($settings['size'], ['thumbnail', 'medium', 'large', 'full'], true) ? $settings['size'] : 'large';
-        return $entry->featuredImage($size, ['class' => 'pb-entry-featured-image__image', 'loading' => 'lazy']);
+        $image = $entry->featuredImage($size, ['class' => 'pb-entry-featured-image__image', 'loading' => 'lazy']);
+        if ($image === '' || $size !== 'thumbnail') {
+            return $image;
+        }
+        // Core's responsive srcsets intentionally exclude the square cropped
+        // thumbnail. If left on a <picture>, a browser selects a non-cropped
+        // source despite the thumbnail's 150×150 intrinsic dimensions.
+        // Keep the CMS-generated <img> and its escaped alt/dimensions, but not
+        // the proportional sources. If no thumbnail exists, core uses original.
+        $document = new DOMDocument('1.0', 'UTF-8');
+        $loaded = $document->loadHTML('<?xml encoding="UTF-8">' . $image, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD | LIBXML_NOERROR | LIBXML_NOWARNING);
+        $node = $loaded ? $document->getElementsByTagName('img')->item(0) : null;
+        if (!$node instanceof DOMElement) {
+            return '';
+        }
+        $node->removeAttribute('srcset');
+        $node->removeAttribute('sizes');
+        return $document->saveHTML($node) ?: '';
     }
 
     /** @param array<string, mixed> $settings */

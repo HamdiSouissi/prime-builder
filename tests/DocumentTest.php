@@ -1037,13 +1037,33 @@ final class DocumentTest extends TestCase
         $entry = \Prime\Content\Entry::fromRow(['id' => 9, 'title' => 'Titre alternatif']);
         $media = \Prime\Media\Media::fromRow([
             'id' => 3, 'kind' => 'image', 'disk_path' => 'photo.png', 'width' => 1200, 'height' => 600, 'alt' => 'Une & photo',
-            'variants' => ['medium' => ['path' => 'photo-medium.png', 'width' => 300, 'height' => 150]],
+            'variants' => [
+                'thumbnail' => ['path' => 'photo-thumb.png', 'width' => 150, 'height' => 150, 'webp' => 'photo-thumb.webp'],
+                'medium' => ['path' => 'photo-medium.png', 'width' => 300, 'height' => 150, 'webp' => 'photo-medium.webp'],
+            ],
         ]);
         $view = new \Prime\Site\View\EntryView($entry, new UrlGenerator(new PermalinkSettings()), featuredMedia: $media);
         $html = CurrentEntry::featuredImage($result['data']['elements'][0]['settings'], $view);
         self::assertStringContainsString('src="/uploads/photo-medium.png"', $html);
         self::assertStringContainsString('alt="Une &amp; photo"', $html);
         self::assertStringContainsString('width="300" height="150" loading="lazy"', $html);
+        self::assertStringContainsString('<picture', $html);
+        $thumbnail = CurrentEntry::featuredImage(['size' => 'thumbnail'], $view);
+        self::assertStringContainsString('src="/uploads/photo-thumb.png"', $thumbnail);
+        self::assertStringContainsString('alt="Une &amp; photo"', $thumbnail);
+        self::assertStringContainsString('width="150" height="150" loading="lazy"', $thumbnail);
+        self::assertStringNotContainsString('<picture', $thumbnail);
+        self::assertStringNotContainsString('srcset=', $thumbnail);
+        self::assertStringNotContainsString('sizes=', $thumbnail);
+        $smallMedia = \Prime\Media\Media::fromRow([
+            'id' => 4, 'kind' => 'image', 'disk_path' => 'small.png', 'width' => 100, 'height' => 50, 'alt' => 'Forêt « & »',
+        ]);
+        $smallView = new \Prime\Site\View\EntryView($entry, new UrlGenerator(new PermalinkSettings()), featuredMedia: $smallMedia);
+        $fallback = CurrentEntry::featuredImage(['size' => 'thumbnail'], $smallView);
+        self::assertStringContainsString('src="/uploads/small.png"', $fallback);
+        self::assertStringContainsString('alt="Forêt « &amp; »"', $fallback);
+        self::assertStringContainsString('width="100" height="50"', $fallback);
+        self::assertStringNotContainsString('srcset=', $fallback);
         self::assertSame('', CurrentEntry::featuredImage([], null));
         $node['settings']['size'] = 'unsafe';
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
