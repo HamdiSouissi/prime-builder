@@ -503,3 +503,7 @@ La révision `6b0c37eef31460ee3dddf899fcd93c1359d8641f`, [run 45045723884](https
 ### Rapport de la grille
 
 La révision `07dd91f8a07601422834d0fd2b8eb0250d61757a`, qui ne modifie que `RETOUR.md` et cet historique, est `completed` / `success` sur [45046152527](https://github.com/HamdiSouissi/prime-builder/actions/runs/45046152527), avec les huit jobs verts. Ce run ne comprend pas le compte à rebours développé ensuite.
+
+### Compte à rebours UTC
+
+La révision `0e95497dc5d76fb28b1077f0d058e0a8823b73c9`, [run 45047142483](https://github.com/HamdiSouissi/prime-builder/actions/runs/45047142483), est `completed` / `success` avec huit jobs : `lint` — `No syntax errors detected in content/plugins/prime-builder/.php-cs-fixer.dist.php` et `[OK] No errors` ; `cs` — `Found 0 of 48 files that can be fixed in 1.577 seconds, 94.00 MB memory used` ; les deux PHPUnit/MySQL — `OK (87 tests, 1439 assertions)` ; Node — `# tests 17`, `# pass 17`, `# fail 0` ; i18n — `Catalogue de traduction cohérent.` ; smoke — `Smoke: all routes, public content and document CSS passed.` ; Playwright — `45 passed (2.4m)`, désactivation et désinstallation réussies. Le navigateur CMS vérifie la saisie UTC, l’horloge simulée à Honolulu, l’expiration, axe, le mobile et le repli sans JavaScript ; les tests PHP vérifient aussi les ressources dédupliquées dans les parties de thème. Les valeurs dépendent de l’horloge du visiteur ; sans JS seule l’échéance enregistrée reste affichée.
