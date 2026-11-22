@@ -389,6 +389,20 @@ final class DocumentTest extends TestCase
         self::assertStringNotContainsString('data-pb-embed-video', $invalid);
     }
 
+    public function testImageCarouselRendersEverySlideWithoutJavaScript(): void
+    {
+        $html = $this->renderBasicWidget('image_carousel', ['label' => 'Nos images', 'images' => "/uploads/a.jpg|Montagne & ciel\n/uploads/b.jpg|Océan"]);
+        self::assertStringContainsString('data-pb-carousel-label="Nos images"', $html);
+        self::assertSame(2, substr_count($html, 'data-pb-slide'));
+        self::assertStringContainsString('src="/uploads/a.jpg" alt="Montagne &amp; ciel"', $html);
+        self::assertStringContainsString('src="/uploads/b.jpg" alt="Océan"', $html);
+        self::assertStringNotContainsString(' hidden', $html);
+        self::assertStringNotContainsString('<button', $html);
+        $bad = $this->element('image_carousel');
+        $bad['settings'] = ['images' => 'javascript:alert(1)|Danger'];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$bad]])['errors']);
+    }
+
     public function testGalleryRendersAccessibleImageLinksAsNoScriptFallback(): void
     {
         $html = $this->renderBasicWidget('gallery', ['images' => "/uploads/a.jpg|Fleur & cascade\n/uploads/b.jpg|"]);

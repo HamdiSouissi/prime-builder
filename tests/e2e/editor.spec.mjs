@@ -315,7 +315,7 @@ test('context menu saves a reusable template with keyboard, reload and deletion'
 test('new basic widgets each expose content, style and advanced controls', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  for (const name of ['Icône', 'Liste d’icônes', 'Boîte image', 'Témoignage', 'Bascule', 'Réseaux sociaux', 'Note par étoiles']) {
+  for (const name of ['Icône', 'Liste d’icônes', 'Boîte image', 'Témoignage', 'Bascule', 'Réseaux sociaux', 'Note par étoiles', 'Carrousel d’images']) {
     await page.locator('[data-pb-panel="widgets"]').click();
     await page.getByRole('button', { name: `Ajouter ${name}`, exact: true }).click();
     await expect(page.locator('[data-pb-fields] input, [data-pb-fields] select, [data-pb-fields] textarea').first()).toBeVisible();
@@ -370,6 +370,49 @@ test('toggle works with keyboard on the public page, including without JavaScrip
     await fallback.keyboard.press('Enter');
     await expect(native).toHaveAttribute('open', '');
     await expect(native.getByText('Une réponse accessible.')).toBeVisible();
+  } finally { await noJs.close(); }
+});
+
+test('image carousel works with keyboard and leaves all slides readable without JavaScript', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const status = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const element = { id: 'carousel_demo', type: 'image_carousel', settings: { label: 'Images de vacances', images: '/assets/plugins/prime-builder/icon.svg|Montagne\n/assets/plugins/prime-builder/icon.svg?second=1|Océan' }, styles: {}, children: [] };
+    const result = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [element] } }] }, status: 'published', published_at: '' }),
+    });
+    return result.status;
+  }, id);
+  expect(status).toBe(200);
+  await page.goto('/test-prime-builder');
+  const carousel = page.getByRole('region', { name: 'Images de vacances' });
+  const slides = carousel.locator('[data-pb-slide]');
+  await expect(slides).toHaveCount(2);
+  await expect(slides.nth(0)).toBeVisible();
+  await expect(slides.nth(1)).toBeHidden();
+  const next = carousel.getByRole('button', { name: 'Image suivante' });
+  await next.focus();
+  await page.keyboard.press('Enter');
+  await expect(slides.nth(0)).toBeHidden();
+  await expect(slides.nth(1)).toBeVisible();
+  await expect(carousel.getByRole('status')).toHaveText('Image 2 sur 2');
+  await page.keyboard.press('ArrowLeft');
+  await expect(slides.nth(0)).toBeVisible();
+  await expect(carousel.getByRole('status')).toHaveText('Image 1 sur 2');
+  await expect(next).toBeFocused();
+  await expectAccessible(page);
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const images = fallback.locator('[data-pb-carousel] [data-pb-slide]');
+    await expect(images).toHaveCount(2);
+    await expect(images.nth(0)).toBeVisible();
+    await expect(images.nth(1)).toBeVisible();
+    await expect(fallback.locator('.pb-carousel-controls')).toHaveCount(0);
   } finally { await noJs.close(); }
 });
 
@@ -646,7 +689,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(32);
+  await expect(page.locator('.pb-element')).toHaveCount(33);
   await expectAccessible(page);
 });
 

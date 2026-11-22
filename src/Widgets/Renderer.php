@@ -167,6 +167,7 @@ final class Renderer
             'counter' => '<div class="pb-counter-value">' . self::escape($this->fieldText($settings, 'prefix')) . max(0, min(1000000000, (int) ($settings['value'] ?? 0))) . self::escape($this->fieldText($settings, 'suffix')) . '</div><p>' . self::escape($this->fieldText($settings, 'title')) . '</p>',
             'tabs' => $this->renderTabs($settings, $id),
             'gallery' => $this->renderGallery($settings),
+            'image_carousel' => $this->renderImageCarousel($settings),
             'video', 'audio' => $this->renderMedia($type, $settings),
             'posts' => $this->content?->posts($settings, $this->live) ?? '',
             'current_content' => $this->content?->current($settings, $this->entry) ?? '',
@@ -411,6 +412,26 @@ final class Renderer
             }
         }
         return $html . '</div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderImageCarousel(array $settings): string
+    {
+        $lines = preg_split('/\R/u', $this->fieldText($settings, 'images')) ?: [];
+        $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.carousel_' . $key));
+        $label = $this->fieldText($settings, 'label', t('plugin::prime-builder.widgets.image_carousel'));
+        $html = '<div class="pb-carousel-content" data-pb-carousel data-pb-carousel-label="' . self::escape($label) . '"'
+            . ' data-pb-carousel-role="' . $copy('role') . '" data-pb-carousel-slide-role="' . $copy('slide_role') . '"'
+            . ' data-pb-carousel-previous="' . $copy('previous') . '" data-pb-carousel-next="' . $copy('next') . '"'
+            . ' data-pb-carousel-position="' . $copy('position') . '"><div class="pb-carousel-slides">';
+        foreach (array_slice($lines, 0, 20) as $line) {
+            $parts = explode('|', $line, 2);
+            $url = $this->sanitizer->sanitizeResourceUrl(trim($parts[0]));
+            if ($url !== null) {
+                $html .= '<div data-pb-slide><img src="' . self::escape($url) . '" alt="' . self::escape(trim(strip_tags($parts[1] ?? ''))) . '" loading="lazy" decoding="async"></div>';
+            }
+        }
+        return $html . '</div></div>';
     }
 
     /** @param array<string, mixed> $settings */

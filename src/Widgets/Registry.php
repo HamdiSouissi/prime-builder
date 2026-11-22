@@ -45,6 +45,7 @@ final class Registry
             'star_rating' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 5]],
             'counter' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 1000000000], 'prefix' => $text, 'suffix' => $text, 'title' => $text],
             'gallery' => ['images' => ['type' => 'media_list', 'max' => 10000]],
+            'image_carousel' => ['label' => ['type' => 'text', 'max' => 1000, 'label' => 'plugin::prime-builder.ui.carousel_label'], 'images' => ['type' => 'media_list', 'max' => 10000]],
             'video' => ['url' => $url, 'video_title' => $text, 'captions' => $url, 'caption_language' => ['type' => 'enum', 'values' => ['fr', 'en']], 'transcript' => ['type' => 'rich', 'max' => 20000]],
             'audio' => ['url' => $url, 'transcript' => ['type' => 'rich', 'max' => 20000]],
             'posts' => ['limit' => ['type' => 'integer', 'min' => 1, 'max' => 12], 'show_excerpt' => ['type' => 'enum', 'values' => ['show', 'hide']]],
@@ -77,13 +78,15 @@ final class Registry
                 $definitions[$type]['hidden'] = true;
                 $definitions[$type]['read_only'] = true;
             }
-            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'video', 'audio', 'posts', 'form'], true)) {
+            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'video', 'audio', 'posts', 'form'], true)) {
                 $definitions[$type]['style'] = '/assets/plugins/prime-builder/css/widgets/' . $type . '.css';
             }
             if ($type === 'tabs') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
             } elseif (in_array($type, ['posts', 'current_content'], true)) {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/content.js';
+            } elseif ($type === 'image_carousel') {
+                $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/image_carousel.js';
             } elseif ($type === 'gallery') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/gallery.js';
             } elseif ($type === 'video') {
