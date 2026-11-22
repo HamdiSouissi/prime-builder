@@ -28,6 +28,7 @@ use PrimeBuilder\Widgets\Renderer;
 
 require_once dirname(__DIR__) . '/src/Widgets/Assets.php';
 require_once dirname(__DIR__) . '/src/Widgets/Content.php';
+require_once dirname(__DIR__) . '/src/Widgets/CodeHighlighter.php';
 require_once dirname(__DIR__) . '/src/Widgets/Countdown.php';
 require_once dirname(__DIR__) . '/src/Widgets/Map.php';
 require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
@@ -329,6 +330,76 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('<figure><blockquote><p>Très <strong>utile</strong>.</p></blockquote>', $html);
         self::assertStringContainsString('alt="" width="100" height="100" loading="lazy"', $html);
         self::assertStringContainsString('<cite>Camille</cite> <span>Designer</span>', $html);
+    }
+
+    public function testAnimatedHeadingHasOneReadableHeadingAndValidatedEffects(): void
+    {
+        $html = $this->renderBasicWidget('animated_heading', [
+            'before' => 'Construisons', 'highlight' => 'ensemble & durablement', 'after' => 'demain', 'level' => 3, 'effect' => 'rise',
+        ]);
+        self::assertStringContainsString('<h3 class="pb-animated-heading">Construisons <span class="pb-animated-highlight pb-animated-highlight--rise">ensemble &amp; durablement</span> demain</h3>', $html);
+        self::assertSame(1, substr_count($html, 'ensemble'));
+        self::assertStringNotContainsString('aria-live', $html);
+        self::assertStringNotContainsString('<h', $this->renderBasicWidget('animated_heading', []));
+        $node = $this->element('animated_heading');
+        foreach ([['effect' => 'rise" onload="alert(1)'], ['level' => 7], ['highlight' => str_repeat('a', 301)]] as $bad) {
+            $node['settings'] = $bad;
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+    }
+
+    public function testCodeIsPreservedEscapedAndHighlightedWithoutExecutingMarkup(): void
+    {
+        $source = "  const value = \"<script>alert('x')</script>\";\n// café & thé\n";
+        $node = $this->element('code');
+        $node['settings'] = ['label' => 'Exemple & test', 'language' => 'javascript', 'source' => $source];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame($source, $result['data']['elements'][0]['settings']['source']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertStringContainsString('<pre class="pb-code-content" role="region" aria-label="Exemple &amp; test" tabindex="0"><code class="language-javascript">', $html);
+        self::assertStringContainsString('<span class="pb-code-token--keyword">const</span>', $html);
+        self::assertStringContainsString('<span class="pb-code-token--string">&quot;&lt;script&gt;', $html);
+        self::assertStringContainsString('<span class="pb-code-token--comment">// café &amp; thé</span>', $html);
+        self::assertStringNotContainsString('<script>', $html);
+        self::assertSame($source, html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        foreach (['text', 'html', 'css', 'javascript', 'json', 'php'] as $language) {
+            $input = "<img src=x onerror=alert(1)> & \"texte\"\n";
+            $rendered = $this->renderBasicWidget('code', ['language' => $language, 'source' => $input]);
+            self::assertSame($input, html_entity_decode(strip_tags($rendered), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            self::assertStringNotContainsString('<img', $rendered);
+        }
+        $samples = [
+            'html' => ['<h1>Bonjour</h1>', 'tag'],
+            'css' => ['p { color: #fff; }', 'number'],
+            'javascript' => ['const message = "Salut";', 'keyword'],
+            'json' => ['{"ok":true}', 'string'],
+            'php' => ['<?php $value = 3;', 'variable'],
+        ];
+        foreach ($samples as $language => [$input, $token]) {
+            $highlighted = \PrimeBuilder\Widgets\CodeHighlighter::render($input, $language);
+            self::assertStringContainsString('pb-code-token--' . $token, $highlighted);
+            self::assertSame($input, html_entity_decode(strip_tags($highlighted), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        }
+        foreach (['javascript' => '"' . str_repeat('\\"', 9999), 'html' => str_repeat('<a', 10000)] as $language => $input) {
+            $highlighted = \PrimeBuilder\Widgets\CodeHighlighter::render($input, $language);
+            self::assertSame($input, html_entity_decode(strip_tags($highlighted), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        }
+        $long = str_repeat('const ', 1500);
+        $bounded = \PrimeBuilder\Widgets\CodeHighlighter::render($long, 'javascript');
+        self::assertSame(1000, substr_count($bounded, 'pb-code-token--keyword'));
+        self::assertSame($long, html_entity_decode(strip_tags($bounded), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        foreach ([['language' => 'javascript" onclick="alert(1)'], ['source' => "bad\0code"], ['source' => str_repeat('x', 20001)]] as $bad) {
+            $node['settings'] = $bad;
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+        $definitions = (new Registry())->all();
+        foreach (['animated_heading', 'code'] as $type) {
+            self::assertSame('pro', $definitions[$type]['category']);
+            self::assertSame('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $definitions[$type]['style']);
+            self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/' . $type . '.css');
+            self::assertArrayNotHasKey('script', $definitions[$type]);
+        }
     }
 
     public function testReviewRendersAnAccessibleEditorialRatingAndSafeAttribution(): void

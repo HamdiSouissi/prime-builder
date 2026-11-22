@@ -474,6 +474,77 @@ test('countdown uses a UTC deadline, announces expiry and keeps its date without
   } finally { await noJs.close(); }
 });
 
+test('animated heading and highlighted code stay readable and safe without JavaScript', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] }, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  await page.getByRole('button', { name: 'Ajouter Titre animé', exact: true }).click();
+  await page.getByLabel('Texte avant la mise en valeur').fill('Créons');
+  await page.getByLabel('Texte mis en valeur').fill('ensemble');
+  await page.getByLabel('Texte après la mise en valeur').fill('demain');
+  await page.getByLabel('Effet du titre').selectOption('rise');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.locator('.pb-animated_heading h2')).toHaveText('Créons ensemble demain');
+  await expect(frame.locator('link[href*="/css/widgets/animated_heading.css"]')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-panel="widgets"]').click();
+  await page.getByRole('button', { name: 'Ajouter Code coloré', exact: true }).click();
+  await page.getByLabel('Libellé du code').fill('Exemple sécurisé');
+  await page.getByLabel('Langage du code').selectOption('javascript');
+  const source = `const message = "</code><img src=x onerror=alert(1)>";\n// café & thé\nconst longLine = "${'x'.repeat(240)}";`;
+  await page.getByLabel('Code source', { exact: true }).fill(source);
+  await expect(frame.locator('.pb-code code')).toHaveText(source);
+  await expect(frame.locator('.pb-code .pb-code-token--keyword').first()).toHaveText('const');
+  await expect(frame.locator('link[href*="/css/widgets/code.css"]')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/test-prime-builder');
+  await expect(page.getByRole('heading', { name: 'Créons ensemble demain', exact: true })).toHaveCount(1);
+  await expect(page.locator('.pb-animated-highlight')).toHaveCSS('animation-name', 'none');
+  const code = page.getByRole('region', { name: 'Exemple sécurisé' });
+  await expect(code.locator('code')).toHaveText(source);
+  await expect(code.locator('img, script')).toHaveCount(0);
+  for (const type of ['animated_heading', 'code']) {
+    await expect(page.locator(`link[href*="/css/widgets/${type}.css"]`)).toHaveCount(1);
+    await expect(page.locator(`script[src*="/js/${type}.js"]`)).toHaveCount(0);
+  }
+  await expectAccessible(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  expect(await code.evaluate(node => node.scrollWidth > node.clientWidth)).toBe(true);
+  await code.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => code.evaluate(node => node.scrollLeft)).toBeGreaterThan(0);
+  await expectAccessible(page);
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    await expect(fallback.getByRole('heading', { name: 'Créons ensemble demain', exact: true })).toBeVisible();
+    await expect(fallback.getByRole('region', { name: 'Exemple sécurisé' }).locator('code')).toHaveText(source);
+    await expect(fallback.locator('.pb-code img, .pb-code script')).toHaveCount(0);
+  } finally { await noJs.close(); }
+});
+
 test('review and flip box remain accessible with keyboard, reduced motion and no JavaScript', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
@@ -1189,7 +1260,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(42);
+  await expect(page.locator('.pb-element')).toHaveCount(44);
   await expectAccessible(page);
 });
 

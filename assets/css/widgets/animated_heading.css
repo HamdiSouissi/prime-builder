@@ -1,0 +1,6 @@
+.pb-animated-heading{overflow-wrap:anywhere}
+.pb-animated-highlight--underline{background-image:linear-gradient(currentColor,currentColor);background-repeat:no-repeat;background-position:left bottom;background-size:100% .1em;animation:pb-heading-underline .8s ease-out both}
+.pb-animated-highlight--rise{display:inline-block;animation:pb-heading-rise .55s ease-out both}
+@keyframes pb-heading-underline{from{background-size:0 .1em}to{background-size:100% .1em}}
+@keyframes pb-heading-rise{from{transform:translateY(.16em)}to{transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.pb-animated-highlight--underline,.pb-animated-highlight--rise{animation:none}}

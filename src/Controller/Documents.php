@@ -62,6 +62,8 @@ final class Documents
             'testimonial' => ['text' => $copy('testimonial_text'), 'author' => $copy('testimonial_author')],
             'review' => ['title' => t('plugin::prime-builder.widgets.review'), 'level' => 2, 'rating' => 5, 'text' => $copy('testimonial_text'), 'author' => $copy('testimonial_author')],
             'flip_box' => ['front_title' => t('plugin::prime-builder.ui.flip_front_default'), 'front_text' => $copy('card_text'), 'back_title' => t('plugin::prime-builder.ui.flip_back_default'), 'back_text' => $copy('card_text'), 'level' => 2],
+            'animated_heading' => ['before' => t('plugin::prime-builder.ui.animated_default_before'), 'highlight' => t('plugin::prime-builder.ui.animated_default_highlight'), 'level' => 2, 'effect' => 'underline'],
+            'code' => ['label' => t('plugin::prime-builder.ui.code_default_label'), 'language' => 'text', 'source' => $copy('code')],
             'call_to_action' => ['title' => $copy('cta_title'), 'level' => 2, 'text' => $copy('cta_text'), 'button_text' => $copy('button')],
             'price_table' => ['title' => $copy('price_table_title'), 'level' => 2, 'price' => $copy('price_table_price'), 'period' => $copy('price_table_period'), 'features' => $copy('price_table_features'), 'button_text' => $copy('button')],
             'price_list' => ['title' => $copy('price_list_title'), 'level' => 2, 'items' => $copy('price_list_items')],

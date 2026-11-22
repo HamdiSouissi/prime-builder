@@ -54,6 +54,18 @@ final class Registry
                 'level' => ['type' => 'integer', 'min' => 2, 'max' => 6],
                 'url' => ['type' => 'href', 'max' => 2048], 'button_text' => $text,
             ],
+            'animated_heading' => [
+                'before' => ['type' => 'text', 'max' => 300, 'label' => 'plugin::prime-builder.ui.animated_before'],
+                'highlight' => ['type' => 'text', 'max' => 300, 'label' => 'plugin::prime-builder.ui.animated_highlight'],
+                'after' => ['type' => 'text', 'max' => 300, 'label' => 'plugin::prime-builder.ui.animated_after'],
+                'level' => ['type' => 'integer', 'min' => 1, 'max' => 6],
+                'effect' => ['type' => 'enum', 'values' => ['underline', 'rise'], 'label' => 'plugin::prime-builder.ui.animated_effect', 'option_labels' => ['underline' => 'plugin::prime-builder.ui.animated_underline', 'rise' => 'plugin::prime-builder.ui.animated_rise']],
+            ],
+            'code' => [
+                'label' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.code_label'],
+                'language' => ['type' => 'enum', 'values' => ['text', 'html', 'css', 'javascript', 'json', 'php'], 'label' => 'plugin::prime-builder.ui.code_language', 'option_labels' => ['text' => 'plugin::prime-builder.ui.code_plain']],
+                'source' => ['type' => 'code', 'max' => 20000, 'label' => 'plugin::prime-builder.ui.code_source'],
+            ],
             'call_to_action' => ['title' => $text, 'level' => ['type' => 'integer', 'min' => 2, 'max' => 6], 'text' => ['type' => 'rich', 'max' => 10000], 'image_url' => $url, 'alt' => $text, 'width' => $dimension, 'height' => $dimension, 'url' => ['type' => 'href', 'max' => 2048], 'button_text' => $text],
             'price_table' => ['title' => $text, 'level' => ['type' => 'integer', 'min' => 2, 'max' => 6], 'text' => ['type' => 'rich', 'max' => 5000], 'price' => ['type' => 'text', 'max' => 120, 'label' => 'plugin::prime-builder.ui.price'], 'period' => ['type' => 'text', 'max' => 120, 'label' => 'plugin::prime-builder.ui.period'], 'features' => ['type' => 'multiline', 'max' => 5000, 'label' => 'plugin::prime-builder.ui.price_features'], 'url' => ['type' => 'href', 'max' => 2048], 'button_text' => $text],
             'price_list' => ['title' => $text, 'level' => ['type' => 'integer', 'min' => 2, 'max' => 6], 'items' => ['type' => 'price_items', 'max' => 10000, 'label' => 'plugin::prime-builder.ui.price_items']],
@@ -111,7 +123,7 @@ final class Registry
         foreach ($fields as $type => $schema) {
             $definitions[$type] = [
                 'label' => 'plugin::prime-builder.widgets.' . $type,
-                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'search_form'], true) ? 'pro' : 'base'),
+                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'search_form'], true) ? 'pro' : 'base'),
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];
@@ -119,7 +131,7 @@ final class Registry
                 $definitions[$type]['hidden'] = true;
                 $definitions[$type]['read_only'] = true;
             }
-            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'search_form'], true)) {
+            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'search_form'], true)) {
                 $definitions[$type]['style'] = '/assets/plugins/prime-builder/css/widgets/' . $type . '.css';
             }
             if ($type === 'tabs') {

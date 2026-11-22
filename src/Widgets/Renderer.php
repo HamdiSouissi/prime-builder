@@ -176,6 +176,8 @@ final class Renderer
             'testimonial' => $this->renderTestimonial($settings),
             'review' => $this->renderReview($settings),
             'flip_box' => $this->renderFlipBox($settings),
+            'animated_heading' => $this->renderAnimatedHeading($settings),
+            'code' => $this->renderCode($settings),
             'call_to_action' => $this->renderCallToAction($settings),
             'price_table' => $this->renderPriceTable($settings),
             'price_list' => $this->renderPriceList($settings),
@@ -249,6 +251,40 @@ final class Renderer
     private function fieldText(array $settings, string $key, string $fallback = ''): string
     {
         return is_string($settings[$key] ?? null) && trim($settings[$key]) !== '' ? $settings[$key] : $fallback;
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderAnimatedHeading(array $settings): string
+    {
+        $level = max(1, min(6, (int) ($settings['level'] ?? 2)));
+        $effect = ($settings['effect'] ?? '') === 'rise' ? 'rise' : 'underline';
+        $parts = [];
+        $before = $this->fieldText($settings, 'before');
+        $highlight = $this->fieldText($settings, 'highlight');
+        $after = $this->fieldText($settings, 'after');
+        if ($before !== '') {
+            $parts[] = self::escape($before);
+        }
+        if ($highlight !== '') {
+            $parts[] = '<span class="pb-animated-highlight pb-animated-highlight--' . $effect . '">' . self::escape($highlight) . '</span>';
+        }
+        if ($after !== '') {
+            $parts[] = self::escape($after);
+        }
+        return $parts === [] ? '' : '<h' . $level . ' class="pb-animated-heading">' . implode(' ', $parts) . '</h' . $level . '>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderCode(array $settings): string
+    {
+        $language = is_string($settings['language'] ?? null) ? $settings['language'] : 'text';
+        if (!in_array($language, ['text', 'html', 'css', 'javascript', 'json', 'php'], true)) {
+            $language = 'text';
+        }
+        $source = is_string($settings['source'] ?? null) ? $settings['source'] : '';
+        $label = $this->fieldText($settings, 'label', t('plugin::prime-builder.ui.code_default_label'));
+        return '<pre class="pb-code-content" role="region" aria-label="' . self::escape($label) . '" tabindex="0"><code class="language-' . $language . '">'
+            . CodeHighlighter::render($source, $language) . '</code></pre>';
     }
 
     /** @param array<string, mixed> $settings */

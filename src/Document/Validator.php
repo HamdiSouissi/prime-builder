@@ -180,6 +180,8 @@ final class Validator
         }
         return match ($type) {
             'text', 'multiline' => trim(strip_tags($value)),
+            // Code is data, not HTML: preserve whitespace and tags for the escaped renderer.
+            'code' => str_contains($value, "\0") ? null : $value,
             'datetime_utc' => $value === '' || Countdown::canonical($value) !== null ? $value : null,
             'latitude', 'longitude' => $value === '' || Map::coordinate($value, $type === 'latitude') !== null ? trim($value) : null,
             'json_object' => is_object(json_decode($value)) ? $value : null,

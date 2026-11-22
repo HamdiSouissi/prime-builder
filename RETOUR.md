@@ -45,6 +45,8 @@ Le compte à rebours UTC est dans `0e95497dc5d76fb28b1077f0d058e0a8823b73c9`, [r
 
 L’avis éditorial et la boîte retournable sont dans `a0fae2a001c2251b6d12858fc5c4d62ef8b2a677`, [run 45048321515](https://github.com/HamdiSouissi/prime-builder/actions/runs/45048321515), `completed` / `success` avec huit jobs verts : syntaxe `No syntax errors detected in content/plugins/prime-builder/.php-cs-fixer.dist.php`, PHPStan `[OK] No errors`, PHP-CS-Fixer `Found 0 of 48 files that can be fixed in 1.661 seconds, 94.00 MB memory used`, chacun des PHPUnit/MySQL `OK (90 tests, 1508 assertions)`, Node `# tests 19` / `# pass 19` / `# fail 0`, i18n `Catalogue de traduction cohérent.`, smoke `Smoke: all routes, public content and document CSS passed.`, Playwright `46 passed (2.0m)`, étapes de désactivation et désinstallation réussies. Le parcours CMS vérifie les onglets et l’aperçu, le clavier, axe, le mobile et le repli sans JS ; PHPUnit vérifie aussi les ressources dans les partials. Une fixture Chromium isolée a été examinée à 1440 et 375 px et teste les collisions d’ID et le mouvement réduit. Les avis sont saisis manuellement et leur authenticité n’est pas vérifiée.
 
+Le titre animé et le code coloré sont en cours de validation : harnais PHP-WASM 2/2 et PHP-WASM/SQLite 3/3, Node 19/19, PHPStan ciblé, et fixture Chromium isolée à 1440 et 375 px avec axe, mouvement réduit, défilement clavier et repli sans JS. Ces vérifications locales ne remplacent pas PHPUnit/MySQL ni les parcours CMS en CI.
+
 ## Prochaines étapes et vérifications
 
 - **B** : terminer base, Pro, puis contenu courant ; un test PHPUnit par widget, interaction clavier/ARIA et ressources conditionnelles. La grille dispose d’un comptage de requêtes ciblé ; voir ses limites.
@@ -163,11 +165,11 @@ Le statut concerne le **périmètre indiqué dans la ligne**, pas une parité co
 | Table de prix | **Fait et testé** pour la version statique : prix et période en texte, avantages et lien facultatif ; `DT::testPriceTableRendersEscapedPriceBenefitsAndOptionalLink`, IT assets et E2E dans `45042052075`. | Non |
 | Liste de prix | **Fait et testé** pour la version statique : 30 lignes maximum, nom/prix/description en texte ; `DT::testPriceListValidatesAndRendersTextOnlyRows`, IT assets et E2E dans `45042052075`. | Non |
 | Compte à rebours | **Fait et testé** : échéance UTC, titre/niveau et message de fin ; `DT::testCountdownValidatesUtcDeadlinesAndRendersAnAccessibleStaticFallback`, `IT::testCountdownPersistsUtcDatesAndLoadsDeduplicatedAssetsOnlyWhereNeeded` et E2E dans `45047142483`. Date de repli sans JS ; horloge du visiteur, non destinée à contrôler un accès. | Oui, `countdown.js` si widget |
-| Titre animé | **Non fait**. | — |
+| Titre animé | **Non fait — implémentation en cours de validation CI** : titre sémantique, soulignement ou mouvement réduit ; sans JS. | Non |
 | Citation | **Fait et testé** pour une citation simple : texte filtré et auteur ; D, P. | Non |
 | Boutons de partage | **Non fait**. | — |
 | Sommaire automatique | **Non fait**. | — |
-| Code avec coloration | **Non fait** — partiel : le pont `prime_block` accepte un bloc code statique, sans coloration dédiée ; `IT::testPrimeBlockPersistsCoreHtmlWithoutAllowingPrivilegedBlocks` teste le pont paragraphe. | Non |
+| Code avec coloration | **Non fait — implémentation en cours de validation CI** : source échappée et coloration légère HTML/CSS/JavaScript/JSON/PHP, limitée à 1 000 unités ; texte brut ensuite, sans analyse syntaxique complète. | Non |
 | Fil d’Ariane | **Non fait** comme widget ; celui d’Aurora appartient au thème. | — |
 | Formulaire de recherche | **Fait et testé** dans une page : formulaire GET, libellé, texte indicatif et bouton ; `DT::testSearchFormRendersAValidatedAccessibleGetFormUsingTheCoreUrl`, `IT::testSearchFormPersistsUsableHtmlAndRefreshesTheCoreSearchPath` et E2E dans `45043366114`. Repli sans JS susceptible de devenir périmé après modification de l’adresse ; widget exclu des partials. | Oui, `content.js` si recherche |
 | Logo du site | **Non fait** comme widget. | — |
