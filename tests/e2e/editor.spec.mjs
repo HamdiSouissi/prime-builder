@@ -820,13 +820,13 @@ test('portfolio filters projects with the keyboard and shows all without JavaScr
   await expect(frame.locator('.pb-portfolio')).toContainText('Nouveau regard');
   await expect(frame.locator('link[href*="/css/widgets/portfolio.css"]')).toHaveCount(1);
   await expectAccessible(page);
-  await page.screenshot({ path: test.info().outputPath('portfolio-screen-editor-desktop.jpg'), fullPage: true, quality: 20 });
+  await page.screenshot({ path: test.info().outputPath('portfolio-screen-editor-desktop.jpg'), fullPage: true, quality: 15 });
   await page.setViewportSize({ width: 375, height: 812 });
   await showMobilePreview(page, frame, '.pb-portfolio');
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await expect.poll(() => frame.locator('html').evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0);
   await expectAccessible(page);
-  await page.screenshot({ path: test.info().outputPath('portfolio-screen-editor-mobile.jpg'), fullPage: true, quality: 20 });
+  await page.screenshot({ path: test.info().outputPath('portfolio-screen-editor-mobile.jpg'), fullPage: true, quality: 15 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole('button', { name: 'Style', exact: true }).click();
   await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
@@ -868,11 +868,11 @@ test('portfolio filters projects with the keyboard and shows all without JavaScr
   await expect(items.nth(1)).toBeVisible();
   await expect(items.nth(2)).toBeVisible();
   await expectAccessible(page);
-  await page.screenshot({ path: test.info().outputPath('portfolio-screen-public-desktop.jpg'), fullPage: true, quality: 20 });
+  await page.screenshot({ path: test.info().outputPath('portfolio-screen-public-desktop.jpg'), fullPage: true, quality: 15 });
   await page.setViewportSize({ width: 375, height: 812 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await expectAccessible(page);
-  await page.screenshot({ path: test.info().outputPath('portfolio-screen-public-mobile.jpg'), fullPage: true, quality: 20 });
+  await page.screenshot({ path: test.info().outputPath('portfolio-screen-public-mobile.jpg'), fullPage: true, quality: 15 });
 
   const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
   try {
