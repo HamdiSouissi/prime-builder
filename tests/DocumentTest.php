@@ -39,6 +39,7 @@ require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
 require_once dirname(__DIR__) . '/src/Widgets/ShareButtons.php';
+require_once dirname(__DIR__) . '/src/Widgets/TableOfContents.php';
 require_once dirname(__DIR__) . '/src/Widgets/Portfolio.php';
 require_once dirname(__DIR__) . '/src/Widgets/Slideshow.php';
 require_once dirname(__DIR__) . '/src/Widgets/TermIds.php';
@@ -945,6 +946,52 @@ final class DocumentTest extends TestCase
         self::assertSame('/assets/plugins/prime-builder/css/widgets/share_buttons.css', $definition['style']);
         self::assertSame('/assets/plugins/prime-builder/js/share_buttons.js', $definition['script']);
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/share_buttons.css');
+    }
+
+    public function testTableOfContentsBuildsNestedLinksAndAvoidsReservedAnchors(): void
+    {
+        $toc = $this->element('table_of_contents', 'toc');
+        $toc['settings'] = ['label' => 'Sommaire <b>utile</b>', 'min_level' => 2, 'max_level' => 4];
+        $anchor = $this->element('anchor', 'manual');
+        $anchor['settings'] = ['anchor' => 'pb-toc-intro'];
+        $first = $this->element('heading', 'intro');
+        $first['settings'] = ['text' => 'Un & deux', 'level' => 2];
+        $block = $this->element('prime_block', 'coreheading');
+        $block['settings'] = ['block_type' => 'heading', 'block_data' => '{"level":4,"text":"<em>Chapitre</em> &amp; suite"}', 'block_anchor' => 'legacy'];
+        $animated = $this->element('animated_heading', 'animated');
+        $animated['settings'] = ['before' => 'Créer', 'highlight' => 'ensemble', 'level' => 3];
+        $last = $this->element('heading', 'last');
+        $last['settings'] = ['text' => 'Conclusion', 'level' => 2];
+        $hidden = $this->element('heading', 'hidden');
+        $hidden['settings'] = ['text' => 'Secret masqué', 'level' => 2];
+        $hidden['hidden'] = true;
+        $nested = $this->element('container', 'nested');
+        $nested['children'] = [$block, $animated, $hidden, $last];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$toc, $anchor, $first, $nested]]);
+        self::assertSame([], $result['errors']);
+        $renderer = new Renderer(new Registry(), new HtmlSanitizer());
+        $html = $renderer->render($result['data']);
+        self::assertStringContainsString('<nav class="pb-toc" aria-label="Sommaire utile">', $html);
+        self::assertStringContainsString('<ol><li><a href="#pb-toc-intro-2">Un &amp; deux</a><ol><li><a href="#pb-toc-coreheading">Chapitre &amp; suite</a></li><li><a href="#pb-toc-animated">Créer ensemble</a></li></ol></li><li><a href="#pb-toc-last">Conclusion</a></li></ol>', $html);
+        self::assertStringContainsString('data-pb-id="intro" id="pb-toc-intro-2" tabindex="-1"', $html);
+        self::assertStringContainsString('id="pb-toc-intro"', $html);
+        self::assertStringContainsString('id="legacy"', $html);
+        self::assertStringNotContainsString('href="#pb-toc-hidden"', $html);
+        self::assertStringNotContainsString('<b>', $html);
+        $noToc = $renderer->render(['version' => 1, 'elements' => [$first]]);
+        self::assertStringNotContainsString('pb-toc-intro', $noToc);
+        self::assertStringContainsString('<h2>Un &amp; deux</h2>', $noToc);
+        $empty = $renderer->render(['version' => 1, 'elements' => [$toc]]);
+        self::assertStringContainsString(Renderer::escape(t('plugin::prime-builder.ui.toc_empty')), $empty);
+        $toc['settings'] = ['min_level' => 7];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$toc]])['errors']);
+        $toc['settings'] = ['label' => str_repeat('x', 201)];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$toc]])['errors']);
+        $definition = (new Registry())->all()['table_of_contents'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/table_of_contents.css', $definition['style']);
+        self::assertArrayNotHasKey('script', $definition);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/table_of_contents.css');
     }
 
     public function testThemeZoneValidatesTheSlugAndHasAReadableFallback(): void

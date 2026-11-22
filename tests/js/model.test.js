@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { History, add, changedElement, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, update } from '../../assets/js/model.js';
+import { History, add, changedElement, containsWidget, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, update } from '../../assets/js/model.js';
 
 test('preview diff selects a single changed subtree and rejects structural or multiple changes', () => {
   const parent = createElement('container'), first = createElement('heading'), second = createElement('text');
@@ -15,6 +15,15 @@ test('preview diff selects a single changed subtree and rejects structural or mu
   assert.equal(changedElement(tree, add(tree, createElement('button'), parent.id)), null);
   assert.equal(changedElement(tree, update(tree, first.id, { type: 'button' })), null);
   assert.equal(changedElement(tree, [{ ...parent, children: null }]), null);
+});
+
+test('preview detects a table of contents anywhere in the document', () => {
+  const parent = createElement('container');
+  const toc = createElement('table_of_contents');
+  assert.equal(containsWidget([], 'table_of_contents'), false);
+  assert.equal(containsWidget([parent], 'table_of_contents'), false);
+  assert.equal(containsWidget(add([parent], toc, parent.id), 'table_of_contents'), true);
+  assert.equal(containsWidget(null, 'table_of_contents'), false);
 });
 
 test('adding creates a new tree without mutating the original', () => {

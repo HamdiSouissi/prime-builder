@@ -17,6 +17,9 @@ export function inheritedStyle(styles, device, name) {
   }
   return null;
 }
+export function containsWidget(elements, type) {
+  return Array.isArray(elements) && elements.some(element => element?.type === type || containsWidget(element?.children, type));
+}
 export function find(elements, id) {
   for (const element of elements) {
     if (element.id === id) return element;

@@ -674,6 +674,35 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/share_buttons.js', $assets->renderScripts());
     }
 
+    public function testTableOfContentsPersistsItsTargetsAndOnlyLoadsItsStyles(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Sommaire automatique', $config['widgets']['table_of_contents']['label']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'toc', 'type' => 'table_of_contents', 'settings' => ['label' => 'Plan de la page'], 'styles' => [], 'children' => []],
+            ['id' => 'first', 'type' => 'heading', 'settings' => ['text' => 'Introduction', 'level' => 2], 'styles' => [], 'children' => []],
+            ['id' => 'second', 'type' => 'heading', 'settings' => ['text' => 'Détails', 'level' => 3], 'styles' => [], 'children' => []],
+        ];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('aria-label="Plan de la page"', $entry->contentHtml);
+        self::assertStringContainsString('<a href="#pb-toc-first">Introduction</a><ol><li><a href="#pb-toc-second">Détails</a>', $entry->contentHtml);
+        self::assertStringContainsString('id="pb-toc-first" tabindex="-1"', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/table_of_contents.css'));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/table_of_contents.js', $assets->renderScripts());
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/table_of_contents.css', $assets->renderStyles());
+    }
+
     public function testSearchFormPersistsUsableHtmlAndRefreshesTheCoreSearchPath(): void
     {
         $app = $this->activated('admin');

@@ -1623,7 +1623,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
     return { status: result.status, count: elements.length };
   }, id);
   expect(status).toBe(200);
-  expect(count).toBe(50);
+  expect(count).toBe(51);
   await page.goto('/test-prime-builder');
   await expect(page.locator('.pb-element')).toHaveCount(count);
   await expectAccessible(page);
@@ -2287,6 +2287,105 @@ test('departure dialog traps and restores focus and closes on Escape', async ({ 
   await expect(dialog).not.toBeVisible();
   await expect(back).toBeFocused();
   expect(nativeDialogs).toBe(0);
+});
+
+test('table of contents follows document headings and works without JavaScript', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const status = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const element = (id, type, settings, children = [], extra = {}) => ({ id, type, settings, styles: {}, children, ...extra });
+    const elements = [
+      element('toc', 'table_of_contents', { label: 'Sur cette page', min_level: 2, max_level: 4 }),
+      element('manual', 'anchor', { anchor: 'pb-toc-intro' }),
+      element('intro', 'heading', { text: 'Bienvenue', level: 2 }),
+      element('nested', 'container', {}, [
+        element('detail', 'heading', { text: 'Les détails', level: 3 }),
+        element('animated', 'animated_heading', { before: 'Créer', highlight: 'ensemble', level: 4 }),
+        element('secret', 'heading', { text: 'Titre masqué', level: 2 }, [], { hidden: true }),
+      ]),
+      element('end', 'heading', { text: 'Conclusion', level: 2 }),
+    ];
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements } }] }, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(status).toBe(200);
+  await page.reload();
+  const frame = page.frameLocator('[data-pb-frame]');
+  const preview = frame.getByRole('navigation', { name: 'Sur cette page' });
+  await expect(preview.getByRole('link', { name: 'Bienvenue' })).toHaveAttribute('href', '#pb-toc-intro-2');
+  await expect(preview.getByRole('link', { name: 'Les détails' })).toBeVisible();
+  await expect(preview.getByRole('link', { name: 'Créer ensemble' })).toBeVisible();
+  await expect(preview.getByRole('link', { name: 'Titre masqué' })).toHaveCount(0);
+  await expect(frame.locator('link[href*="/css/widgets/table_of_contents.css"]')).toHaveCount(1);
+
+  await page.locator('[data-pb-panel="navigator"]').click();
+  await page.locator('[data-pb-tree-select="intro"]').click();
+  const fullPreview = page.waitForResponse(response => response.url().endsWith('/render') && response.request().postData()?.includes('Notre introduction'));
+  await page.getByLabel('Texte', { exact: true }).fill('Notre introduction');
+  const rendered = await fullPreview;
+  expect(rendered.ok()).toBeTruthy();
+  expect(rendered.request().postDataJSON()).not.toHaveProperty('target');
+  await expect(preview.getByRole('link', { name: 'Notre introduction' })).toBeVisible();
+
+  await page.locator('[data-pb-panel="navigator"]').click();
+  await page.locator('[data-pb-tree-select="toc"]').click();
+  await expect(page.getByLabel('Nom du sommaire', { exact: true })).toHaveValue('Sur cette page');
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('toc-screen-editor-desktop.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await showMobilePreview(page, frame, '.pb-table_of_contents');
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('toc-screen-editor-mobile.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+
+  await page.goto('/test-prime-builder');
+  const toc = page.getByRole('navigation', { name: 'Sur cette page' });
+  const link = toc.getByRole('link', { name: 'Notre introduction' });
+  await expect(link).toHaveAttribute('href', '#pb-toc-intro-2');
+  await expect(page.locator('link[href*="/css/widgets/table_of_contents.css"]')).toHaveCount(1);
+  await expect(page.locator('script[src*="/js/table_of_contents.js"]')).toHaveCount(0);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('toc-screen-public-desktop.jpg'), fullPage: true, quality: 20 });
+  await link.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/#pb-toc-intro-2$/);
+  await expect(page.locator('#pb-toc-intro-2')).toBeFocused();
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/test-prime-builder');
+  await expect(toc).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('toc-screen-public-mobile.jpg'), fullPage: true, quality: 20 });
+  const longTextWidth = await link.evaluate(node => {
+    const original = node.textContent;
+    node.textContent = 'W'.repeat(160);
+    const width = document.documentElement.scrollWidth;
+    node.textContent = original;
+    return width;
+  });
+  expect(longTextWidth).toBeLessThanOrEqual(375);
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const fallbackLink = fallback.getByRole('navigation', { name: 'Sur cette page' }).getByRole('link', { name: 'Notre introduction' });
+    await fallbackLink.focus();
+    await fallback.keyboard.press('Enter');
+    await expect(fallback).toHaveURL(/#pb-toc-intro-2$/);
+    await expect(fallback.locator('#pb-toc-intro-2')).toBeFocused();
+  } finally { await noJs.close(); }
 });
 
 test('share buttons use ordinary private-by-default links on desktop and mobile', async ({ page, browser }) => {

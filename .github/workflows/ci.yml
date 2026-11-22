@@ -297,38 +297,38 @@ jobs:
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
       # Temporary transport: the sandbox cannot download the artifact host.
-      - name: Report share-screen-editor-desktop capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-desktop 0
-      - name: Report share-screen-editor-desktop capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-desktop 1
-      - name: Report share-screen-editor-desktop capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-desktop 2
-      - name: Report share-screen-editor-desktop capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-desktop 3
-      - name: Report share-screen-editor-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-mobile 0
-      - name: Report share-screen-editor-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-mobile 1
-      - name: Report share-screen-editor-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-mobile 2
-      - name: Report share-screen-editor-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-mobile 3
-      - name: Report share-screen-public-desktop capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-public-desktop 0
-      - name: Report share-screen-public-desktop capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-public-desktop 1
-      - name: Report share-screen-public-desktop capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-public-desktop 2
-      - name: Report share-screen-public-desktop capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-public-desktop 3
-      - name: Report share-screen-public-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-public-mobile 0
-      - name: Report share-screen-public-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-public-mobile 1
-      - name: Report share-screen-public-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-public-mobile 2
-      - name: Report share-screen-public-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh share-screen-public-mobile 3
+      - name: Report toc-screen-editor-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-editor-desktop 0
+      - name: Report toc-screen-editor-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-editor-desktop 1
+      - name: Report toc-screen-editor-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-editor-desktop 2
+      - name: Report toc-screen-editor-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-editor-desktop 3
+      - name: Report toc-screen-editor-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-editor-mobile 0
+      - name: Report toc-screen-editor-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-editor-mobile 1
+      - name: Report toc-screen-editor-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-editor-mobile 2
+      - name: Report toc-screen-editor-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-editor-mobile 3
+      - name: Report toc-screen-public-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-public-desktop 0
+      - name: Report toc-screen-public-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-public-desktop 1
+      - name: Report toc-screen-public-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-public-desktop 2
+      - name: Report toc-screen-public-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-public-desktop 3
+      - name: Report toc-screen-public-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-public-mobile 0
+      - name: Report toc-screen-public-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-public-mobile 1
+      - name: Report toc-screen-public-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-public-mobile 2
+      - name: Report toc-screen-public-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh toc-screen-public-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |

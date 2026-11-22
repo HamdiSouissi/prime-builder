@@ -39,6 +39,8 @@ final class CatalogTest extends TestCase
         self::assertSame('Navigation menu', $en['widgets']['navigation']);
         self::assertSame('Boutons de partage', $fr['widgets']['share_buttons']);
         self::assertSame('Share buttons', $en['widgets']['share_buttons']);
+        self::assertSame('Sommaire automatique', $fr['widgets']['table_of_contents']);
+        self::assertSame('Table of contents', $en['widgets']['table_of_contents']);
         self::assertStringContainsString('landscape.svg', $fr['defaults']['portfolio_items']);
         self::assertStringContainsString('landscape.svg', $en['defaults']['portfolio_items']);
     }

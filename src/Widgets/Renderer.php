@@ -14,6 +14,8 @@ use Throwable;
 /** Render safe, useful static HTML so saved pages remain readable without this plugin. */
 final class Renderer
 {
+    private ?TableOfContents $tableOfContents = null;
+
     public function __construct(
         private readonly Registry $registry,
         private readonly HtmlSanitizer $sanitizer,
@@ -32,10 +34,28 @@ final class Renderer
     public function render(array $data): string
     {
         $elements = is_array($data['elements'] ?? null) ? $data['elements'] : [];
+        $this->tableOfContents = $this->containsTableOfContents($elements) ? new TableOfContents($elements) : null;
         $refresh = $this->entry !== null && $this->containsLive($elements)
             ? ' data-pb-live="/api/prime-builder/v1/documents/' . $this->entry->id . '/live"'
             : '';
         return '<div class="pb-layout"' . $refresh . '>' . $this->renderElements($elements, $this->registry->all()) . '</div>';
+    }
+
+    /** @param array<mixed> $elements */
+    private function containsTableOfContents(array $elements): bool
+    {
+        foreach ($elements as $element) {
+            if (!is_array($element)) {
+                continue;
+            }
+            if (($element['type'] ?? null) === 'table_of_contents') {
+                return true;
+            }
+            if (is_array($element['children'] ?? null) && $this->containsTableOfContents($element['children'])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @param array<mixed> $elements */
@@ -127,7 +147,9 @@ final class Renderer
                     $content .= $this->renderElements($children, $definitions);
                 }
                 $hidden = ($element['hidden'] ?? false) === true ? ' hidden' : '';
-                $html .= '<div class="pb-element pb-' . self::escape($type) . '" data-pb-id="' . self::escape($id) . '"' . $hidden . '>' . $content . '</div>';
+                $target = $this->tableOfContents?->target($id);
+                $anchor = $target !== null ? ' id="' . self::escape($target) . '" tabindex="-1"' : '';
+                $html .= '<div class="pb-element pb-' . self::escape($type) . '" data-pb-id="' . self::escape($id) . '"' . $anchor . $hidden . '>' . $content . '</div>';
             } catch (Throwable $exception) {
                 $this->logger?->error('Prime Builder widget failed', ['widget' => $type, 'message' => $exception->getMessage()]);
             }
@@ -202,6 +224,7 @@ final class Renderer
             'search_form' => $this->content?->searchForm($settings, $id) ?? '',
             'navigation' => $this->content?->navigation($settings, $this->entry, $this->live) ?? Navigation::render($settings, null, false),
             'share_buttons' => $this->content?->shareButtons($settings, $this->entry) ?? ShareButtons::render($settings, ''),
+            'table_of_contents' => ($this->tableOfContents ?? new TableOfContents([]))->render($settings),
             'theme_zone' => $this->content?->themeZone($settings, $this->live) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>',
             'form' => $this->renderForm($settings, $id),
             'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry, is_string($settings['block_anchor'] ?? null) ? $settings['block_anchor'] : null),

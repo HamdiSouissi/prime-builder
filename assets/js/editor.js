@@ -1,4 +1,4 @@
-import { History, add, changedElement, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, update } from './model.js';
+import { History, add, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, update } from './model.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -840,9 +840,9 @@ function syncPreviewWidgetStyles(doc) {
 }
 async function renderPreview(sequence) {
   if (foreign || !frame.contentDocument) return;
-  // Keep the complete tree in the request for server-side validation, but render
-  // just one subtree when no structural or other pending changes exist.
-  const target = !previewNeedsFull && previewTargets.size === 1 ? [...previewTargets][0] : null;
+  // A table of contents depends on headings throughout the document. Reconcile
+  // the whole preview whenever one is present, even for a single-node edit.
+  const target = !previewNeedsFull && previewTargets.size === 1 && !containsWidget(history.present, 'table_of_contents') ? [...previewTargets][0] : null;
   try {
     const response = await fetch(`/api/prime-builder/v1/documents/${config.entryId}/render`, {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
