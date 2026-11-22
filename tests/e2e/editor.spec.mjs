@@ -2379,9 +2379,14 @@ test('navigation uses CMS menus with keyboard disclosures on desktop and mobile'
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await expectAccessible(page);
   await page.screenshot({ path: test.info().outputPath('navigation-screen-public-mobile.jpg'), fullPage: true, quality: 20 });
-  await discover.evaluate(link => { link.dataset.originalText = link.textContent; link.textContent = 'W'.repeat(160); });
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
-  await discover.evaluate(link => { link.textContent = link.dataset.originalText; });
+  const longTextWidth = await discover.evaluate(link => {
+    const original = link.textContent;
+    link.textContent = 'W'.repeat(160);
+    const width = document.documentElement.scrollWidth;
+    link.textContent = original;
+    return width;
+  });
+  expect(longTextWidth).toBeLessThanOrEqual(375);
   await page.keyboard.press('Escape');
   await expect(discoverToggle).toHaveAttribute('aria-expanded', 'false');
   await page.keyboard.press('Escape');
