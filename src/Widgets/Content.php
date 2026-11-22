@@ -16,6 +16,8 @@ use Prime\Site\PermalinkSettings;
 use Prime\Site\Seo\SeoManager;
 use Prime\Site\UrlGenerator;
 use Prime\Site\UrlResolver;
+use Prime\Site\View\EntryView;
+use Prime\Site\View\EntryViewFactory;
 use Prime\Site\Zone\DynamicBlockRegistry;
 use Prime\Site\Zone\ZoneRepository;
 use Prime\Themes\ThemeManager;
@@ -25,6 +27,10 @@ final class Content
 {
     /** @var array<string, array{items: list<Entry>, page: int, last_page: int}> */
     private array $postQueries = [];
+
+    private ?Entry $viewEntry = null;
+
+    private ?EntryView $entryView = null;
 
     public function __construct(
         private readonly EntryQuery $query,
@@ -39,12 +45,15 @@ final class Content
         private readonly ?SeoManager $seo = null,
         private readonly ?PermalinkSettings $permalinks = null,
         private readonly ?SiteIdentity $siteIdentity = null,
+        private readonly ?EntryViewFactory $entryViews = null,
     ) {
     }
 
     public function invalidate(): void
     {
         $this->postQueries = [];
+        $this->viewEntry = null;
+        $this->entryView = null;
     }
 
     /** @param array<string, mixed> $settings */
@@ -309,6 +318,39 @@ final class Content
     public function siteLogo(array $settings): string
     {
         return $this->siteIdentity?->logo($settings) ?? '';
+    }
+
+    /** @param array<string, mixed> $settings */
+    public function entryWidget(string $type, array $settings, ?Entry $entry, bool $live): string
+    {
+        // EntryService renders with the old entry before writing the new status,
+        // title and metadata. On a simultaneous publish that old entry may be a
+        // private draft; never persist any of its values in the public HTML.
+        $public = $entry !== null && $this->types->get($entry->type)?->public === true && UrlResolver::isPubliclyVisible($entry);
+        $view = $this->entryView($live || $public ? $entry : null);
+        return match ($type) {
+            'entry_title' => CurrentEntry::title($settings, $view),
+            'entry_excerpt' => CurrentEntry::excerpt($settings, $view),
+            'entry_featured_image' => CurrentEntry::featuredImage($settings, $view),
+            // A public taxonomy can later be made private by another plugin. Never
+            // persist its names or links in content_html or the page cache.
+            'entry_info' => CurrentEntry::info($settings, $view, $live && $this->taxonomies?->get('category')?->public === true),
+            default => '',
+        };
+    }
+
+    private function entryView(?Entry $entry): ?EntryView
+    {
+        if ($entry === null) {
+            return null;
+        }
+        // A renderer passes the same immutable Entry to every widget. Cache its
+        // hydrated author/media once, but never reuse a different Entry instance.
+        if ($this->viewEntry !== $entry || $this->entryView === null) {
+            $this->viewEntry = $entry;
+            $this->entryView = $this->entryViews?->makeOne($entry) ?? new EntryView($entry, $this->urls);
+        }
+        return $this->entryView;
     }
 
     /** @param array<string, mixed> $settings */

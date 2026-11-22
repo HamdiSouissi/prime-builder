@@ -1623,7 +1623,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
     return { status: result.status, count: elements.length };
   }, id);
   expect(status).toBe(200);
-  expect(count).toBe(54);
+  expect(count).toBe(58);
   await page.goto('/test-prime-builder');
   await expect(page.locator('.pb-element')).toHaveCount(count);
   await expectAccessible(page);
@@ -2679,6 +2679,206 @@ test('site title and logo use core identity and refresh without losing focus', a
     if (templateId) {
       const removed = await page.evaluate(async ({ templateId, csrf }) => (await fetch(`/api/prime-builder/v1/templates/${templateId}`, { method: 'DELETE', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' } })).status, { templateId, csrf });
       expect(removed).toBe(200);
+    }
+  }
+});
+
+test('current entry title, excerpt, image and information use real CMS metadata', async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  await login(page);
+  let csrf = null, restorePosts = false;
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  let mediaId = null, termId = null, postId = null, releaseLive = null;
+  try {
+    await page.goto('/admin/prime-builder/settings');
+    if (!await page.locator('input[name="posts"]').isChecked()) {
+      await page.locator('input[name="posts"]').check();
+      const saved = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/admin/prime-builder/settings'));
+      await page.locator('form[action="/admin/prime-builder/settings"] button[type="submit"]').click();
+      expect((await saved).status()).toBe(302);
+      restorePosts = true;
+    }
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    const upload = await page.evaluate(async csrf => {
+      const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = 300;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#c8e2d7'; ctx.fillRect(0, 0, 600, 300);
+      ctx.fillStyle = '#315f4f'; ctx.beginPath(); ctx.arc(200, 140, 90, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#f5faf7'; ctx.font = 'bold 38px sans-serif'; ctx.fillText('JARDIN', 320, 155);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const form = new FormData(); form.append('file', blob, 'jardin.png');
+      const response = await fetch('/api/v1/media', { method: 'POST', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' }, body: form });
+      return { status: response.status, body: await response.text() };
+    }, csrf);
+    expect(upload.status, upload.body).toBe(201);
+    mediaId = JSON.parse(upload.body).data.id;
+    let result = await api(`/api/v1/media/${mediaId}`, 'PATCH', { alt: 'Feuillage initial' });
+    expect(result.status, result.body).toBe(200);
+    result = await api('/api/v1/terms/category', 'POST', { name: 'Jardin & nature', slug: 'jardin-nature-test' });
+    expect(result.status, result.body).toBe(201);
+    termId = JSON.parse(result.body).data.id;
+    result = await api('/api/v1/content/post', 'POST', {
+      title: 'Guide du jardin', slug: 'guide-du-jardin-test', status: 'published', published_at: '2024-03-02 10:00:00',
+      excerpt: 'Un résumé initial pour le jardin.', featured_media_id: mediaId, terms: { category: [termId] },
+      content: { version: 1, blocks: [] },
+    });
+    expect(result.status, result.body).toBe(201);
+    const post = JSON.parse(result.body).data;
+    postId = post.id;
+    const publicUrl = post.url;
+    expect(publicUrl).toMatch(/^\//);
+    await page.goto(`/admin/prime-builder/edit/${postId}`);
+    const frame = page.frameLocator('[data-pb-frame]');
+    await page.getByRole('button', { name: 'Ajouter Titre du contenu', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Balise du titre du contenu', exact: true }).selectOption('h3');
+    await page.getByRole('combobox', { name: 'Lien vers le contenu', exact: true }).selectOption('show');
+    await expect(frame.locator('.pb-entry_title h3 a')).toHaveText('Guide du jardin');
+    await expect(frame.locator('.pb-entry_title h3 a')).toHaveAttribute('href', publicUrl);
+    await page.getByRole('button', { name: 'Style', exact: true }).click();
+    await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+    await page.locator('[data-pb-panel="widgets"]').click();
+    await page.getByRole('button', { name: 'Ajouter Extrait du contenu', exact: true }).click();
+    await page.getByLabel('Longueur maximale de l’extrait', { exact: true }).fill('100');
+    await expect(frame.locator('.pb-entry_excerpt p')).toHaveText('Un résumé initial pour le jardin.');
+    await page.locator('[data-pb-panel="widgets"]').click();
+    await page.getByRole('button', { name: 'Ajouter Image à la une du contenu', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Taille de l’image à la une', exact: true }).selectOption('medium');
+    await expect(frame.locator('.pb-entry_featured_image img')).toHaveAttribute('alt', 'Feuillage initial');
+    await page.locator('[data-pb-panel="widgets"]').click();
+    await page.getByRole('button', { name: 'Ajouter Informations du contenu', exact: true }).click();
+    await expect(frame.locator('.pb-entry_info time')).toHaveAttribute('datetime', /2024-03-02/);
+    await expect(frame.locator('.pb-entry_info a').filter({ hasText: 'Jardin & nature' })).toBeVisible();
+    await page.getByRole('combobox', { name: 'Afficher les catégories', exact: true }).selectOption('hide');
+    await expect(frame.locator('.pb-entry_info')).not.toContainText('Jardin & nature');
+    await page.getByRole('combobox', { name: 'Afficher les catégories', exact: true }).selectOption('show');
+    await expect(frame.locator('.pb-entry_info')).toContainText('Jardin & nature');
+    for (const type of ['entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info']) {
+      await expect(frame.locator(`link[href*="/css/widgets/${type}.css"]`)).toHaveCount(1);
+    }
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('entry-screen-editor-desktop.jpg'), fullPage: true, quality: 20 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await showMobilePreview(page, frame, '.pb-entry_info');
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('entry-screen-editor-mobile.jpg'), fullPage: true, quality: 20 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator('[data-pb-save]').click();
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    result = await api(`/api/v1/content/post/${postId}`, 'PATCH', { title: 'Guide actualisé', excerpt: 'Un résumé actualisé pour le jardin.' });
+    expect(result.status, result.body).toBe(200);
+    result = await api(`/api/v1/media/${mediaId}`, 'PATCH', { alt: 'Feuillage actualisé' });
+    expect(result.status, result.body).toBe(200);
+
+    const livePattern = `**/api/prime-builder/v1/documents/${postId}/live`;
+    const gate = new Promise(resolve => { releaseLive = resolve; });
+    let intercepted = false;
+    await page.route(livePattern, async route => { intercepted = true; await gate; await route.continue(); });
+    await page.goto(publicUrl);
+    await expect.poll(() => intercepted).toBe(true);
+    const title = page.locator('.pb-entry_title a');
+    await expect(title).toHaveText('Guide du jardin');
+    await title.focus();
+    const response = page.waitForResponse(result => result.url().endsWith(`/api/prime-builder/v1/documents/${postId}/live`));
+    releaseLive(); releaseLive = null;
+    const live = await response;
+    expect(live.ok()).toBeTruthy(); await live.finished();
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await expect(title).toBeFocused();
+    await expect(title).toHaveText('Guide du jardin');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.pb-entry_title a')).toHaveText('Guide actualisé');
+    await expect(page.locator('.pb-entry_excerpt')).toHaveText('Un résumé actualisé pour le jardin.');
+    await expect(page.locator('.pb-entry_featured_image img')).toHaveAttribute('alt', 'Feuillage actualisé');
+    await expect(page.locator('.pb-entry_info a').filter({ hasText: 'Jardin & nature' })).toBeVisible();
+    await expect(page.locator('script[src*="/js/content.js"]')).toHaveCount(1);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('entry-screen-public-desktop.jpg'), fullPage: true, quality: 20 });
+    await page.unroute(livePattern);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(publicUrl);
+    await expect(page.locator('.pb-entry_title a')).toHaveText('Guide actualisé');
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    const longTextWidth = await page.locator('.pb-entry_title a').evaluate(node => {
+      const original = node.textContent; node.textContent = 'W'.repeat(160);
+      const width = document.documentElement.scrollWidth; node.textContent = original; return width;
+    });
+    expect(longTextWidth).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('entry-screen-public-mobile.jpg'), fullPage: true, quality: 20 });
+    const category = page.locator('.pb-entry_info a').filter({ hasText: 'Jardin & nature' });
+    await category.focus(); await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/jardin-nature-test/);
+
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const fallback = await noJs.newPage();
+      await fallback.goto(publicUrl);
+      await expect(fallback.locator('.pb-entry_title a')).toHaveText('Guide du jardin');
+      await expect(fallback.locator('.pb-entry_excerpt')).toHaveText('Un résumé initial pour le jardin.');
+      await expect(fallback.locator('.pb-entry_featured_image img')).toHaveAttribute('alt', 'Feuillage initial');
+      await expect(fallback.locator('.pb-entry_info time')).toHaveAttribute('datetime', /2024-03-02/);
+      // Categories are never stored: they could become private after the save.
+      await expect(fallback.locator('.pb-entry_info')).not.toContainText('Jardin & nature');
+      await fallback.locator('.pb-entry_title a').focus();
+      const navigation = fallback.waitForNavigation({ waitUntil: 'domcontentloaded' });
+      await fallback.keyboard.press('Enter'); await navigation;
+      await expect(fallback).toHaveURL(new RegExp(publicUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'));
+
+      result = await api(`/api/v1/content/post/${postId}`, 'PATCH', { status: 'draft', title: 'Ancien titre privé', excerpt: 'Ancien résumé privé' });
+      expect(result.status, result.body).toBe(200);
+      expect((await noJs.request.get(`/api/prime-builder/v1/documents/${postId}/live`)).status()).toBe(404);
+      expect((await noJs.request.get(publicUrl)).status()).toBe(404);
+      result = await api(`/api/v1/content/post/${postId}`, 'PATCH', { status: 'published', title: 'Guide republié', excerpt: 'Résumé republié' });
+      expect(result.status, result.body).toBe(200);
+      const republished = await fallback.goto(publicUrl);
+      expect(republished.status()).toBe(200);
+      await expect(fallback.locator('.pb-entry_title')).toBeEmpty();
+      await expect(fallback.locator('.pb-entry_excerpt')).toBeEmpty();
+      await expect(fallback.locator('body')).not.toContainText('Ancien titre privé');
+      const latest = await noJs.request.get(`/api/prime-builder/v1/documents/${postId}/live`);
+      expect(latest.status()).toBe(200);
+      expect(await latest.text()).toContain('Guide republié');
+      expect(await latest.text()).not.toContain('Ancien titre privé');
+    } finally { await noJs.close(); }
+  } finally {
+    if (releaseLive) releaseLive();
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (postId) {
+        await page.unroute(`**/api/prime-builder/v1/documents/${postId}/live`);
+        const trashed = await api(`/api/v1/content/post/${postId}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/post/${postId}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (termId) {
+        const deleted = await api(`/api/v1/terms/category/${termId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (mediaId) {
+        const deleted = await api(`/api/v1/media/${mediaId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+    } finally {
+      if (restorePosts) {
+        await page.goto('/admin/prime-builder/settings');
+        await page.locator('input[name="posts"]').uncheck();
+        const saved = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/admin/prime-builder/settings'));
+        await page.locator('form[action="/admin/prime-builder/settings"] button[type="submit"]').click();
+        expect((await saved).status()).toBe(302);
+      }
+      page.off('dialog', leave);
     }
   }
 });

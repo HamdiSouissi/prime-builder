@@ -218,8 +218,8 @@ test('breadcrumb refresh waits for focus to leave its saved fallback', async () 
   assert.equal(node.listeners.focusout.length, 0);
 });
 
-test('site identity refresh waits for each focused home link', async () => {
-  for (const type of ['site_title', 'site_logo']) {
+test('identity and entry widget refresh waits while a fallback contains focus', async () => {
+  for (const type of ['site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info']) {
     const document = {
       activeElement: null,
       querySelectorAll(selector) { assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },

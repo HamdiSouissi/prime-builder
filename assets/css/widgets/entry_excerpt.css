@@ -1,0 +1,4 @@
+.pb-entry_excerpt .pb-entry-excerpt__text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

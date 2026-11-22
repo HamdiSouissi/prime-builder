@@ -23,6 +23,7 @@ use PrimeBuilder\Widgets\Assets;
 use PrimeBuilder\Widgets\Breadcrumbs;
 use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\Countdown;
+use PrimeBuilder\Widgets\CurrentEntry;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
@@ -34,6 +35,7 @@ require_once dirname(__DIR__) . '/src/Widgets/Breadcrumbs.php';
 require_once dirname(__DIR__) . '/src/Widgets/Content.php';
 require_once dirname(__DIR__) . '/src/Widgets/CodeHighlighter.php';
 require_once dirname(__DIR__) . '/src/Widgets/Countdown.php';
+require_once dirname(__DIR__) . '/src/Widgets/CurrentEntry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Map.php';
 require_once dirname(__DIR__) . '/src/Widgets/MediaCarousel.php';
 require_once dirname(__DIR__) . '/src/Widgets/Navigation.php';
@@ -983,6 +985,97 @@ final class DocumentTest extends TestCase
         self::assertSame('/assets/plugins/prime-builder/css/widgets/site_logo.css', $definition['style']);
         self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/site_logo.css');
+    }
+
+    public function testEntryTitleUsesTheCoreViewAndValidatesItsTagAndLink(): void
+    {
+        $node = $this->element('entry_title', 'current-title');
+        $node['settings'] = ['tag' => 'h3', 'link' => 'show'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $entry = \Prime\Content\Entry::fromRow(['id' => 9, 'type' => 'post', 'title' => 'Un titre & <test>', 'slug' => 'mon-guide']);
+        $view = new \Prime\Site\View\EntryView($entry, new UrlGenerator(new PermalinkSettings()));
+        self::assertSame('<h3 class="pb-entry-title__text"><a href="/blog/mon-guide">Un titre &amp; &lt;test&gt;</a></h3>', CurrentEntry::title($result['data']['elements'][0]['settings'], $view));
+        self::assertSame('<h2 class="pb-entry-title__text">Un titre &amp; &lt;test&gt;</h2>', CurrentEntry::title(['tag' => 'script'], $view));
+        self::assertSame('', CurrentEntry::title([], null));
+        $node['settings']['tag'] = 'script';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['entry_title'];
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/entry_title.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/entry_title.css');
+    }
+
+    public function testEntryExcerptUsesTheCoreFallbackAndValidatesItsLength(): void
+    {
+        $node = $this->element('entry_excerpt', 'current-excerpt');
+        $node['settings'] = ['length' => 10];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $entry = \Prime\Content\Entry::fromRow(['id' => 9, 'excerpt' => '<b>Bonjour</b> à tous & merci']);
+        $view = new \Prime\Site\View\EntryView($entry, new UrlGenerator(new PermalinkSettings()));
+        self::assertSame('<p class="pb-entry-excerpt__text">Bonjour à…</p>', CurrentEntry::excerpt($result['data']['elements'][0]['settings'], $view));
+        $fallback = \Prime\Content\Entry::fromRow(['id' => 9, 'content_text' => 'Texte de repli & sûr']);
+        self::assertStringContainsString('Texte de repli &amp; sûr', CurrentEntry::excerpt([], new \Prime\Site\View\EntryView($fallback, new UrlGenerator(new PermalinkSettings()))));
+        $builder = \Prime\Content\Entry::fromRow(['id' => 9, 'content_text' => 'Texte du document', 'content' => '{"version":1,"blocks":[{"id":"layout","type":"prime-builder/layout","data":{"version":1,"elements":[]}}]}']);
+        self::assertSame('<p class="pb-entry-excerpt__text">Texte du document</p>', CurrentEntry::excerpt([], new \Prime\Site\View\EntryView($builder, new UrlGenerator(new PermalinkSettings()))));
+        self::assertSame('', CurrentEntry::excerpt([], null));
+        $node['settings']['length'] = 1001;
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['entry_excerpt'];
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/entry_excerpt.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/entry_excerpt.css');
+    }
+
+    public function testEntryFeaturedImageUsesTheCoreMediaViewAndValidatesItsSize(): void
+    {
+        $node = $this->element('entry_featured_image', 'current-image');
+        $node['settings'] = ['size' => 'medium'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $entry = \Prime\Content\Entry::fromRow(['id' => 9, 'title' => 'Titre alternatif']);
+        $media = \Prime\Media\Media::fromRow([
+            'id' => 3, 'kind' => 'image', 'disk_path' => 'photo.png', 'width' => 1200, 'height' => 600, 'alt' => 'Une & photo',
+            'variants' => ['medium' => ['path' => 'photo-medium.png', 'width' => 300, 'height' => 150]],
+        ]);
+        $view = new \Prime\Site\View\EntryView($entry, new UrlGenerator(new PermalinkSettings()), featuredMedia: $media);
+        $html = CurrentEntry::featuredImage($result['data']['elements'][0]['settings'], $view);
+        self::assertStringContainsString('src="/uploads/photo-medium.png"', $html);
+        self::assertStringContainsString('alt="Une &amp; photo"', $html);
+        self::assertStringContainsString('width="300" height="150" loading="lazy"', $html);
+        self::assertSame('', CurrentEntry::featuredImage([], null));
+        $node['settings']['size'] = 'unsafe';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['entry_featured_image'];
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/entry_featured_image.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/entry_featured_image.css');
+    }
+
+    public function testEntryInformationRendersPublicMetadataAndValidatesVisibility(): void
+    {
+        $node = $this->element('entry_info', 'current-info');
+        $node['settings'] = ['date' => 'show', 'author' => 'show', 'categories' => 'show'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $term = \Prime\Content\Term::fromRow(['id' => 4, 'taxonomy' => 'category', 'name' => 'Arts & <idées>', 'slug' => 'arts']);
+        $entry = \Prime\Content\Entry::fromRow(['id' => 9, 'author_id' => 7, 'published_at' => '2025-02-03 10:30:00'], terms: ['category' => [$term]], authorName: 'Camille & Co');
+        $view = new \Prime\Site\View\EntryView($entry, new UrlGenerator(new PermalinkSettings()));
+        $html = CurrentEntry::info($result['data']['elements'][0]['settings'], $view, true);
+        self::assertStringContainsString('<ul class="pb-entry-info__list" aria-label=', $html);
+        self::assertStringContainsString('<time datetime="2025-02-03T10:30:00+00:00">', $html);
+        self::assertStringContainsString('>Camille &amp; Co</a>', $html);
+        self::assertStringContainsString('>Arts &amp; &lt;idées&gt;</a>', $html);
+        self::assertStringNotContainsString('Arts &amp;', CurrentEntry::info([], $view, false));
+        self::assertSame('', CurrentEntry::info(['date' => 'hide', 'author' => 'hide', 'categories' => 'hide'], $view, true));
+        self::assertSame('', CurrentEntry::info([], null, true));
+        $node['settings']['author'] = 'maybe';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['entry_info'];
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/entry_info.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/entry_info.css');
     }
 
     public function testShareButtonsEncodePublicUrlsAndRejectUnsafeValues(): void

@@ -116,6 +116,7 @@ final class Plugin extends AbstractPlugin
             $context->app()->get(\Prime\Site\Seo\SeoManager::class),
             $context->app()->get(\Prime\Site\PermalinkSettings::class),
             $identity,
+            $context->app()->get(\Prime\Site\View\EntryViewFactory::class),
         );
         $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
         foreach (['settings.updated', 'theme.activated'] as $event) {
@@ -124,8 +125,9 @@ final class Plugin extends AbstractPlugin
             });
         }
         foreach (['media.updated', 'media.deleted'] as $event) {
-            $context->hooks()->on($event, static function () use ($identity, $partials, $context): void {
+            $context->hooks()->on($event, static function () use ($identity, $content, $partials, $context): void {
                 $identity->invalidate();
+                $content->invalidate();
                 // Core settings and theme changes purge pages, but media changes do
                 // not. A logo in a theme snapshot can appear on every cached page.
                 if ($partials->usesWidget('site_logo')) {

@@ -1,0 +1,21 @@
+.pb-entry_info .pb-entry-info__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.pb-entry_info .pb-entry-info__list li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pb-entry_info .pb-entry-info__list li > span {
+  margin-inline-end: 0.25em;
+}
+
+.pb-entry_info .pb-entry-info__list a {
+  color: inherit;
+}

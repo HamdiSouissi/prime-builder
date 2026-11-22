@@ -934,6 +934,177 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('brand-new.png', $header);
     }
 
+    public function testEntryWidgetsUseCoreMetadataRefreshAndLoadConditionalAssets(): void
+    {
+        $app = $this->activated(null);
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec("INSERT INTO pc_terms (id, taxonomy, name, slug, parent_id, menu_order, `count`) VALUES (11, 'category', 'Nature & idées', 'nature', 0, 0, 1)");
+        $pdo->exec('INSERT INTO pc_entry_terms (entry_id, term_id, position) VALUES (1, 11, 0)');
+        $media = $app->get(\Prime\Media\MediaRepository::class)->create([
+            'disk_path' => 'entry/photo.png', 'filename' => 'photo.png', 'original_name' => 'photo.png',
+            'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'width' => 1200, 'height' => 600, 'alt' => 'Paysage initial',
+            'variants' => ['medium' => ['path' => 'entry/photo-medium.png', 'width' => 300, 'height' => 150]],
+        ]);
+        $entries = $app->get(EntryRepository::class);
+        $entries->setMeta(1, ['_featured_media_id' => $media->id]);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'entry widgets', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'title', 'type' => 'entry_title', 'settings' => ['tag' => 'h3', 'link' => 'show'], 'styles' => [], 'children' => []],
+            ['id' => 'excerpt', 'type' => 'entry_excerpt', 'settings' => ['length' => 180], 'styles' => [], 'children' => []],
+            ['id' => 'photo', 'type' => 'entry_featured_image', 'settings' => ['size' => 'medium'], 'styles' => [], 'children' => []],
+            ['id' => 'info', 'type' => 'entry_info', 'settings' => [], 'styles' => [], 'children' => []],
+        ];
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        $html = json_decode($preview->body(), true)['data']['html'];
+        self::assertStringContainsString('<h3 class="pb-entry-title__text"><a href="/blog/article-publie">Article publié</a></h3>', $html);
+        self::assertStringContainsString('pb-entry-excerpt__text">Résumé</p>', $html);
+        self::assertStringContainsString('src="/uploads/entry/photo-medium.png"', $html);
+        self::assertStringContainsString('alt="Paysage initial"', $html);
+        self::assertStringContainsString('>Admin Prime</a>', $html);
+        self::assertStringContainsString('>Nature &amp; idées</a>', $html);
+        self::assertStringContainsString('<time datetime=', $html);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $entries->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('data-pb-live="/api/prime-builder/v1/documents/1/live"', $entry->contentHtml);
+        self::assertStringContainsString('Article publié', $entry->contentHtml);
+        // A taxonomy can cease being public after this HTML has been stored.
+        self::assertStringNotContainsString('Nature &amp; idées', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        foreach (['entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info'] as $type) {
+            self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/' . $type . '.css'));
+        }
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $other = $entries->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        foreach (['entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info'] as $type) {
+            self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $assets->renderStyles());
+        }
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+        $content = $app->get(Content::class);
+        self::assertStringContainsString('alt="Paysage initial"', $content->entryWidget('entry_featured_image', [], $entry, true));
+        $app->get(\Prime\Media\UploadService::class)->updateMetadata($media, ['alt' => 'Paysage modifié']);
+        // The same Entry instance must not retain a stale hydrated media object.
+        self::assertStringContainsString('alt="Paysage modifié"', $content->entryWidget('entry_featured_image', [], $entry, true));
+        $pdo->exec("UPDATE pc_entries SET title = 'Nouveau titre', excerpt = 'Nouvel extrait' WHERE id = 1");
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $live->status(), $live->body());
+        self::assertStringContainsString('no-store', (string) $live->header('Cache-Control'));
+        $widgets = json_decode($live->body(), true)['data']['widgets'];
+        self::assertStringContainsString('>Nouveau titre</a></h3>', $widgets['title']);
+        self::assertStringContainsString('>Nouvel extrait</p>', $widgets['excerpt']);
+        self::assertStringContainsString('alt="Paysage modifié"', $widgets['photo']);
+        self::assertStringContainsString('>Nature &amp; idées</a>', $widgets['info']);
+        $saved = $entries->find(1);
+        self::assertNotNull($saved);
+        self::assertStringContainsString('Article publié', $saved->contentHtml);
+        self::assertStringNotContainsString('Nouveau titre', $saved->contentHtml);
+        $app->get(TaxonomyRegistry::class)->register(new Taxonomy(name: 'category', labels: ['singular' => 'Catégorie'], contentTypes: ['post'], public: false));
+        $private = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $private->status());
+        $privateWidgets = json_decode($private->body(), true)['data']['widgets'];
+        self::assertStringNotContainsString('Nature', $privateWidgets['info']);
+        self::assertStringNotContainsString('/category/', $privateWidgets['info']);
+        $pdo->exec("UPDATE pc_entries SET status = 'draft' WHERE id = 1");
+        self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live')->status());
+    }
+
+    public function testEntryWidgetsDoNotPersistDraftMetadataDuringPublication(): void
+    {
+        $app = $this->activated(null);
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $media = $app->get(\Prime\Media\MediaRepository::class);
+        $secret = $media->create(['disk_path' => 'secret.png', 'filename' => 'secret.png', 'original_name' => 'secret.png', 'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'alt' => 'Image privée']);
+        $public = $media->create(['disk_path' => 'public.png', 'filename' => 'public.png', 'original_name' => 'public.png', 'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'alt' => 'Image publique']);
+        $entries = $app->get(EntryRepository::class);
+        $entries->setMeta(2, ['_featured_media_id' => $secret->id]);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'entry publish', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'title', 'type' => 'entry_title', 'settings' => ['link' => 'show'], 'styles' => [], 'children' => []],
+            ['id' => 'excerpt', 'type' => 'entry_excerpt', 'settings' => [], 'styles' => [], 'children' => []],
+            ['id' => 'image', 'type' => 'entry_featured_image', 'settings' => [], 'styles' => [], 'children' => []],
+            ['id' => 'info', 'type' => 'entry_info', 'settings' => [], 'styles' => [], 'children' => []],
+        ];
+        $initial = $this->send($app, 'PATCH', '/api/v1/content/post/2', [
+            'status' => 'published', 'title' => 'Titre public', 'excerpt' => 'Résumé public', 'featured_media_id' => $public->id, 'content' => $document,
+        ], $token);
+        self::assertSame(200, $initial->status(), $initial->body());
+        $entry = $entries->find(2);
+        self::assertNotNull($entry);
+        self::assertStringNotContainsString('Brouillon admin', $entry->contentHtml);
+        self::assertStringNotContainsString('Secret', $entry->contentHtml);
+        self::assertStringNotContainsString('secret.png', $entry->contentHtml);
+        self::assertStringNotContainsString('Image privée', $entry->contentHtml);
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/2/live');
+        self::assertSame(200, $live->status());
+        $widgets = json_decode($live->body(), true)['data']['widgets'];
+        self::assertStringContainsString('Titre public', $widgets['title']);
+        self::assertStringContainsString('Résumé public', $widgets['excerpt']);
+        self::assertStringContainsString('public.png', $widgets['image']);
+        self::assertStringNotContainsString('secret.png', $widgets['image']);
+
+        $draft = $this->send($app, 'PATCH', '/api/v1/content/post/2', ['status' => 'draft', 'title' => 'Titre privé', 'excerpt' => 'Résumé privé', 'featured_media_id' => $secret->id], $token);
+        self::assertSame(200, $draft->status(), $draft->body());
+        self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/2/live')->status());
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/2/render', ['data' => $document['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status());
+        self::assertStringContainsString('Titre privé', $preview->body());
+        $republished = $this->send($app, 'PATCH', '/api/v1/content/post/2', ['status' => 'published', 'title' => 'Titre republié', 'excerpt' => 'Résumé republié', 'featured_media_id' => $public->id], $token);
+        self::assertSame(200, $republished->status(), $republished->body());
+        $entry = $entries->find(2);
+        self::assertNotNull($entry);
+        self::assertStringNotContainsString('Titre privé', $entry->contentHtml);
+        self::assertStringNotContainsString('Résumé privé', $entry->contentHtml);
+        self::assertStringNotContainsString('secret.png', $entry->contentHtml);
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/2/live');
+        self::assertSame(200, $live->status());
+        $widgets = json_decode($live->body(), true)['data']['widgets'];
+        self::assertStringContainsString('Titre republié', $widgets['title']);
+        self::assertStringContainsString('Résumé republié', $widgets['excerpt']);
+        self::assertStringContainsString('public.png', $widgets['image']);
+        $future = \Prime\Content\Entry::fromRow(['id' => 10, 'type' => 'post', 'status' => 'published', 'title' => 'À venir', 'published_at' => '2999-01-01 00:00:00']);
+        $provider = $app->get(Content::class);
+        self::assertSame('', $provider->entryWidget('entry_title', [], $future, false));
+        self::assertStringContainsString('À venir', $provider->entryWidget('entry_title', [], $future, true));
+        $app->get(ContentTypeRegistry::class)->register(new ContentType(name: 'vault', labels: ['singular' => 'Privé'], public: false));
+        $privateType = \Prime\Content\Entry::fromRow(['id' => 11, 'type' => 'vault', 'status' => 'published', 'title' => 'Type privé']);
+        self::assertSame('', $provider->entryWidget('entry_title', [], $privateType, false));
+    }
+
+    public function testEntryExcerptFallsBackToBuilderTextWithoutRecursionAcrossSaves(): void
+    {
+        $app = $this->activated(null);
+        $this->db($app)->pdo()->exec('UPDATE pc_entries SET excerpt = NULL WHERE id = 1');
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'entry excerpt', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'text', 'type' => 'text', 'settings' => ['text' => '<p>Texte du jardin</p>'], 'styles' => [], 'children' => []],
+            ['id' => 'excerpt', 'type' => 'entry_excerpt', 'settings' => [], 'styles' => [], 'children' => []],
+        ];
+        for ($i = 0; $i < 3; $i++) {
+            $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+            self::assertSame(200, $response->status(), $response->body());
+            $entry = $app->get(EntryRepository::class)->find(1);
+            self::assertNotNull($entry);
+            // Core calls the Builder's text extractor without an Entry, so the
+            // excerpt widget cannot feed its own result into content_text.
+            self::assertSame('Texte du jardin', $entry->contentText);
+            $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+            self::assertSame(200, $live->status());
+            self::assertSame('<p class="pb-entry-excerpt__text">Texte du jardin</p>', json_decode($live->body(), true)['data']['widgets']['excerpt']);
+        }
+    }
+
     public function testShareButtonsPersistPublicLinksAndLoadOnlyTheirAssets(): void
     {
         $app = $this->activated('admin');
@@ -2062,8 +2233,10 @@ final class IntegrationTest extends TestCase
         $fields['header'] = json_decode($dynamicTemplate->body(), true)['data']['id'];
         self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
-        foreach (['navigation', 'share_buttons', 'breadcrumbs'] as $type) {
-            $unsupported = ['version' => 1, 'elements' => [['id' => 'dynamic', 'type' => $type, 'settings' => [], 'styles' => [], 'children' => []]]];
+        foreach (['navigation', 'share_buttons', 'breadcrumbs', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info'] as $type) {
+            $unsupported = ['version' => 1, 'elements' => [['id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                ['id' => 'dynamic', 'type' => $type, 'settings' => [], 'styles' => [], 'children' => []],
+            ]]]];
             $template = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => $type, 'kind' => 'section', 'data' => $unsupported], $admin);
             self::assertSame(201, $template->status(), $template->body());
             $fields['header'] = json_decode($template->body(), true)['data']['id'];
