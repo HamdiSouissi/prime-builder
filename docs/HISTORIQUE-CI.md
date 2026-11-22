@@ -511,3 +511,7 @@ La révision `0e95497dc5d76fb28b1077f0d058e0a8823b73c9`, [run 45047142483](https
 ### Rapport du compte à rebours
 
 La révision `009a76158c5e3de4da6bf76ad0ede5e098434300`, qui ne modifie que `RETOUR.md` et cet historique, est `completed` / `success` sur [45047540453](https://github.com/HamdiSouissi/prime-builder/actions/runs/45047540453), avec huit jobs verts. Ce run ne comprend pas les widgets avis et boîte retournable développés ensuite.
+
+### Avis et boîte retournable
+
+La révision `a0fae2a001c2251b6d12858fc5c4d62ef8b2a677`, [run 45048321515](https://github.com/HamdiSouissi/prime-builder/actions/runs/45048321515), est `completed` / `success` avec huit jobs : `lint` — `No syntax errors detected in content/plugins/prime-builder/.php-cs-fixer.dist.php` et `[OK] No errors` ; `cs` — `Found 0 of 48 files that can be fixed in 1.661 seconds, 94.00 MB memory used` ; les deux PHPUnit/MySQL — `OK (90 tests, 1508 assertions)` ; Node — `# tests 19`, `# pass 19`, `# fail 0` ; i18n — `Catalogue de traduction cohérent.` ; smoke — `Smoke: all routes, public content and document CSS passed.` ; Playwright — `46 passed (2.0m)` ; désactivation et désinstallation réussies. Le navigateur CMS teste édition, aperçu, clavier, mouvement réduit, axe, mobile et repli sans JS. Une fixture isolée a été examinée à 1440 et 375 px et vérifie également les collisions d’ID et la restitution du focus ; elle ne remplace pas le parcours CMS. L’avis est éditorial et son authenticité n’est pas vérifiée.
