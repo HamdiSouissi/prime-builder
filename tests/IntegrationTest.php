@@ -707,6 +707,233 @@ final class IntegrationTest extends TestCase
         self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live')->status());
     }
 
+    public function testSiteIdentityUsesCoreSettingsMediaAndRefreshesSavedDocuments(): void
+    {
+        $app = $this->activated('admin');
+        $this->db($app)->pdo()->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $this->db($app)->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Titre du site', $config['widgets']['site_title']['label']);
+        self::assertSame('Logo du site', $config['widgets']['site_logo']['label']);
+        self::assertSame('Lien vers l’accueil', $config['widgets']['site_logo']['fields']['link_home']['label']);
+        $settings = $app->get(Settings::class);
+        $settings->set('site.name', 'Atelier & <Co>');
+        $media = $app->get(\Prime\Media\MediaRepository::class)->create([
+            'disk_path' => 'identity/logo.png', 'filename' => 'logo.png', 'original_name' => 'logo.png',
+            'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'width' => 1200, 'height' => 400,
+            'variants' => ['medium' => ['path' => 'identity/logo-medium.png', 'width' => 300, 'height' => 100]],
+        ]);
+        $settings->set('site.logo_id', $media->id);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'title', 'type' => 'site_title', 'settings' => ['tag' => 'h3', 'link_home' => 'show'], 'styles' => [], 'children' => []],
+            ['id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                ['id' => 'logo', 'type' => 'site_logo', 'settings' => ['link_home' => 'hide'], 'styles' => [], 'children' => []],
+            ]],
+        ];
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        $html = json_decode($preview->body(), true)['data']['html'];
+        self::assertStringContainsString('<h3 class="pb-site-title__text"><a href="/">Atelier &amp; &lt;Co&gt;</a></h3>', $html);
+        self::assertStringContainsString('src="/uploads/identity/logo-medium.png"', $html);
+        self::assertStringContainsString('alt="Atelier &amp; &lt;Co&gt;"', $html);
+        self::assertStringContainsString('width="300" height="100" loading="lazy"', $html);
+        self::assertStringContainsString('pb-site-logo__unlinked', $html);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('data-pb-live="/api/prime-builder/v1/documents/1/live"', $entry->contentHtml);
+        self::assertStringContainsString('Atelier &amp; &lt;Co&gt;', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        foreach (['site_title', 'site_logo'] as $type) {
+            self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/' . $type . '.css'));
+        }
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        foreach (['site_title', 'site_logo'] as $type) {
+            self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $assets->renderStyles());
+        }
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+        $settings->set('site.name', 'Nouvel atelier');
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $live->status(), $live->body());
+        self::assertStringContainsString('no-store', (string) $live->header('Cache-Control'));
+        $widgets = json_decode($live->body(), true)['data']['widgets'];
+        self::assertStringContainsString('>Nouvel atelier</a></h3>', $widgets['title']);
+        self::assertStringContainsString('alt="Nouvel atelier"', $widgets['logo']);
+        self::assertStringNotContainsString('Atelier &amp;', $widgets['logo']);
+        $settings->set('site.logo_id', null);
+        $widgets = json_decode($this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live')->body(), true)['data']['widgets'];
+        self::assertStringContainsString('<span class="pb-site-logo__fallback">Nouvel atelier</span>', $widgets['logo']);
+        self::assertStringNotContainsString('<img', $widgets['logo']);
+        $documentMedia = $app->get(\Prime\Media\MediaRepository::class)->create([
+            'disk_path' => 'identity/not-image.pdf', 'filename' => 'not-image.pdf', 'original_name' => 'not-image.pdf',
+            'extension' => 'pdf', 'mime_type' => 'application/pdf', 'kind' => 'document',
+        ]);
+        $settings->set('site.logo_id', $documentMedia->id);
+        $widgets = json_decode($this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live')->body(), true)['data']['widgets'];
+        self::assertStringContainsString('pb-site-logo__fallback', $widgets['logo']);
+        self::assertStringNotContainsString('not-image.pdf', $widgets['logo']);
+        $saved = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($saved);
+        self::assertStringContainsString('Atelier &amp; &lt;Co&gt;', $saved->contentHtml);
+        self::assertStringNotContainsString('Nouvel atelier', $saved->contentHtml);
+    }
+
+    public function testSiteIdentityHonorsInheritedThemeOptionsAndPreviewOverrides(): void
+    {
+        $app = $this->activated('admin');
+        $this->db($app)->pdo()->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $this->db($app)->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $repository = $app->get(\Prime\Media\MediaRepository::class);
+        $global = $repository->create([
+            'disk_path' => 'global.png', 'filename' => 'global.png', 'original_name' => 'global.png',
+            'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'width' => 100, 'height' => 50,
+        ]);
+        $themeLogo = $repository->create([
+            'disk_path' => 'theme.png', 'filename' => 'theme.png', 'original_name' => 'theme.png',
+            'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'width' => 100, 'height' => 50,
+        ]);
+        $root = sys_get_temp_dir() . '/pb_identity_themes_' . bin2hex(random_bytes(6));
+        try {
+            foreach (['pb-identity-parent' => 'PbIdentityParent', 'pb-identity-child' => 'PbIdentityChild'] as $slug => $namespace) {
+                mkdir($root . '/themes/' . $slug . '/src', 0755, true);
+                $manifest = ['slug' => $slug, 'name' => $slug, 'version' => '1.0.0', 'namespace' => $namespace . '\\', 'main' => $namespace . '\\Theme'];
+                if ($slug === 'pb-identity-parent') {
+                    $manifest['options'] = [
+                        'sections' => ['identity' => ['label' => 'Identity']],
+                        'fields' => [
+                            'site_name' => ['section' => 'identity', 'type' => 'text', 'label' => 'Name', 'default' => 'Parent'],
+                            'site_logo_id' => ['section' => 'identity', 'type' => 'media', 'label' => 'Logo'],
+                        ],
+                    ];
+                } else {
+                    $manifest['parent'] = 'pb-identity-parent';
+                    $manifest['options'] = [
+                        'sections' => ['identity' => ['label' => 'Identity']],
+                        'fields' => ['site_name' => ['section' => 'identity', 'type' => 'text', 'label' => 'Name', 'default' => 'Child']],
+                    ];
+                }
+                file_put_contents($root . '/themes/' . $slug . '/theme.json', (string) json_encode($manifest));
+                file_put_contents($root . '/themes/' . $slug . '/src/Theme.php', '<?php namespace ' . $namespace . '; final class Theme extends \\Prime\\Themes\\AbstractTheme {}');
+            }
+            $settings = $app->get(Settings::class);
+            $settings->set('site.name', 'Nom global');
+            $settings->set('site.logo_id', $global->id);
+            $settings->set('theme.active', 'pb-identity-child');
+            $settings->set('theme_options.pb-identity-child', ['site_name' => 'Nom du thème', 'site_logo_id' => $themeLogo->id]);
+            $publisher = new \Prime\Themes\ThemeAssetPublisher($root . '/public');
+            $options = $app->get(\Prime\Themes\ThemeOptions::class);
+            $manager = new \Prime\Themes\ThemeManager(
+                app: $app,
+                themesPath: $root . '/themes',
+                validator: $app->get(\Prime\Themes\ThemeManifestValidator::class),
+                publisher: $publisher,
+                assets: $app->get(ThemeAssetRegistry::class),
+                options: $options,
+                hooks: $app->get(Hooks::class),
+                settings: $settings,
+            );
+            $app->container()->instance(\Prime\Themes\ThemeManager::class, $manager);
+            self::assertSame('pb-identity-child', $manager->active()->slug);
+            self::assertSame('pb-identity-parent', $manager->activeParent()?->slug);
+            $content = $app->get(Content::class);
+            self::assertStringContainsString('Nom du thème', $content->siteTitle([]));
+            self::assertStringContainsString('src="/uploads/theme.png"', $content->siteLogo([]));
+            self::assertStringContainsString('alt="Nom du thème"', $content->siteLogo([]));
+            $settings->set('theme_options.pb-identity-child', ['site_name' => '', 'site_logo_id' => 0]);
+            self::assertStringContainsString('Nom global', $content->siteTitle([]));
+            self::assertStringContainsString('src="/uploads/global.png"', $content->siteLogo([]));
+            // A fresh identity resolver observes the core's in-request customizer overrides.
+            $options->setPreviewOverrides(['site_name' => 'Aperçu du thème', 'site_logo_id' => $themeLogo->id]);
+            $preview = new \PrimeBuilder\Widgets\SiteIdentity($app);
+            self::assertStringContainsString('Aperçu du thème', $preview->title([]));
+            self::assertStringContainsString('src="/uploads/theme.png"', $preview->logo([]));
+            self::assertStringContainsString('alt="Aperçu du thème"', $preview->logo([]));
+            $options->setPreviewOverrides(null);
+        } finally {
+            \Prime\Themes\ThemeAssetPublisher::removeDirectory($root);
+        }
+    }
+
+    public function testSiteIdentityInThemePartialsRendersWithoutScriptAndPurgesMediaCache(): void
+    {
+        $app = $this->activated('admin');
+        $this->db($app)->pdo()->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $this->db($app)->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $settings = $app->get(Settings::class);
+        $settings->set('site.name', 'Identité initiale');
+        $repository = $app->get(\Prime\Media\MediaRepository::class);
+        $media = $repository->create([
+            'disk_path' => 'brand.png', 'filename' => 'brand.png', 'original_name' => 'brand.png',
+            'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'width' => 120, 'height' => 40,
+        ]);
+        $settings->set('site.logo_id', $media->id);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'templates', ['*'])['token'];
+        $layout = ['version' => 1, 'elements' => [
+            ['id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                ['id' => 'logo', 'type' => 'site_logo', 'settings' => [], 'styles' => [], 'children' => []],
+                ['id' => 'title', 'type' => 'site_title', 'settings' => ['tag' => 'p'], 'styles' => [], 'children' => []],
+            ]],
+        ]];
+        $template = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Identité', 'kind' => 'section', 'data' => $layout], $token);
+        self::assertSame(201, $template->status(), $template->body());
+        $id = json_decode($template->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $id, 'footer' => '', 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $hooks = $app->get(Hooks::class);
+        // Archives have no entry, and still receive the server-rendered site identity.
+        $page = new PageContext(type: PageContext::TYPE_ARCHIVE, path: '/blog');
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($header);
+        self::assertStringContainsString('src="/uploads/brand.png"', $header);
+        self::assertStringContainsString('alt="Identité initiale"', $header);
+        self::assertStringContainsString('>Identité initiale</a></p>', $header);
+        self::assertStringNotContainsString('data-pb-live=', $header);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        foreach (['site_title', 'site_logo'] as $type) {
+            self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/' . $type . '.css'));
+        }
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $request = Request::create('GET', '/une-autre-page');
+        $cache->store($request, Response::html('page en cache'));
+        self::assertNotNull($cache->lookup($request));
+        // The core cache subscriber purges whole pages on ordinary settings changes.
+        $settings->set('site.name', 'Identité mise à jour');
+        self::assertSame(null, $cache->lookup($request));
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($header);
+        self::assertStringContainsString('alt="Identité mise à jour"', $header);
+        self::assertStringContainsString('>Identité mise à jour</a></p>', $header);
+        $cache->store($request, Response::html('page en cache'));
+        self::assertNotNull($cache->lookup($request));
+        // Model a changed path, then use the real UploadService metadata event.
+        $media = $repository->update($media->id, ['disk_path' => 'brand-new.png']);
+        self::assertNotNull($media);
+        $uploader = $app->get(\Prime\Media\UploadService::class);
+        $updated = $uploader->updateMetadata($media, ['title' => 'Média modifié']);
+        self::assertSame('Média modifié', $updated->title);
+        self::assertSame(null, $cache->lookup($request));
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($header);
+        self::assertStringContainsString('src="/uploads/brand-new.png"', $header);
+        $cache->store($request, Response::html('page en cache'));
+        self::assertNotNull($cache->lookup($request));
+        $uploader->delete($updated);
+        self::assertSame(null, $cache->lookup($request));
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($header);
+        self::assertStringContainsString('pb-site-logo__fallback">Identité mise à jour</span>', $header);
+        self::assertStringNotContainsString('brand-new.png', $header);
+    }
+
     public function testShareButtonsPersistPublicLinksAndLoadOnlyTheirAssets(): void
     {
         $app = $this->activated('admin');

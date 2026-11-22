@@ -145,12 +145,12 @@
       const widgets = result?.data?.widgets;
       if (!widgets || typeof widgets !== 'object') return;
       for (const node of layout.querySelectorAll('[data-pb-id]')) {
-        if (!node.classList.contains('pb-posts') && !node.classList.contains('pb-current_content') && !node.classList.contains('pb-theme_zone') && !node.classList.contains('pb-search_form') && !node.classList.contains('pb-navigation') && !node.classList.contains('pb-breadcrumbs')) continue;
+        if (!node.classList.contains('pb-posts') && !node.classList.contains('pb-current_content') && !node.classList.contains('pb-theme_zone') && !node.classList.contains('pb-search_form') && !node.classList.contains('pb-navigation') && !node.classList.contains('pb-breadcrumbs') && !node.classList.contains('pb-site_title') && !node.classList.contains('pb-site_logo')) continue;
         const html = widgets[node.dataset.pbId];
         if (typeof html !== 'string') continue;
         if (node.classList.contains('pb-theme_zone')) node.replaceChildren(zoneFragment(html, node.dataset.pbId));
         else if (node.classList.contains('pb-navigation')) replaceWhenUnfocused(node, () => { node.innerHTML = html; enhanceNavigation(node); });
-        else if (node.classList.contains('pb-breadcrumbs')) replaceWhenUnfocused(node, () => { node.innerHTML = html; });
+        else if (node.classList.contains('pb-breadcrumbs') || node.classList.contains('pb-site_title') || node.classList.contains('pb-site_logo')) replaceWhenUnfocused(node, () => { node.innerHTML = html; });
         else if (node.classList.contains('pb-search_form')) {
           // Update only the configured search path: do not erase text or move focus if
           // the visitor started typing while this asynchronous request was in flight.

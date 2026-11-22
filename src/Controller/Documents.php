@@ -75,6 +75,8 @@ final class Documents
             'search_form' => ['search_label' => t('plugin::prime-builder.ui.search_form_default_label'), 'button_text' => t('plugin::prime-builder.ui.search_form_default_button')],
             'navigation' => ['label' => t('plugin::prime-builder.ui.navigation_default_label')],
             'breadcrumbs' => ['label' => t('plugin::prime-builder.ui.breadcrumb_default_label')],
+            'site_title' => ['tag' => 'p', 'link_home' => 'show'],
+            'site_logo' => ['link_home' => 'show'],
             'toggle' => ['title' => $copy('toggle_title'), 'text' => $copy('accordion_text'), 'initial' => 'closed'],
             'star_rating' => ['value' => 4],
             'counter' => ['title' => $copy('counter')],

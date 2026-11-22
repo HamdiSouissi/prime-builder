@@ -297,38 +297,38 @@ jobs:
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
       # Temporary transport: the sandbox cannot download the artifact host.
-      - name: Report breadcrumbs-screen-editor-desktop capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-editor-desktop 0
-      - name: Report breadcrumbs-screen-editor-desktop capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-editor-desktop 1
-      - name: Report breadcrumbs-screen-editor-desktop capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-editor-desktop 2
-      - name: Report breadcrumbs-screen-editor-desktop capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-editor-desktop 3
-      - name: Report breadcrumbs-screen-editor-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-editor-mobile 0
-      - name: Report breadcrumbs-screen-editor-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-editor-mobile 1
-      - name: Report breadcrumbs-screen-editor-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-editor-mobile 2
-      - name: Report breadcrumbs-screen-editor-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-editor-mobile 3
-      - name: Report breadcrumbs-screen-public-desktop capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-public-desktop 0
-      - name: Report breadcrumbs-screen-public-desktop capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-public-desktop 1
-      - name: Report breadcrumbs-screen-public-desktop capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-public-desktop 2
-      - name: Report breadcrumbs-screen-public-desktop capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-public-desktop 3
-      - name: Report breadcrumbs-screen-public-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-public-mobile 0
-      - name: Report breadcrumbs-screen-public-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-public-mobile 1
-      - name: Report breadcrumbs-screen-public-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-public-mobile 2
-      - name: Report breadcrumbs-screen-public-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh breadcrumbs-screen-public-mobile 3
+      - name: Report identity-screen-editor-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-editor-desktop 0
+      - name: Report identity-screen-editor-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-editor-desktop 1
+      - name: Report identity-screen-editor-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-editor-desktop 2
+      - name: Report identity-screen-editor-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-editor-desktop 3
+      - name: Report identity-screen-editor-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-editor-mobile 0
+      - name: Report identity-screen-editor-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-editor-mobile 1
+      - name: Report identity-screen-editor-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-editor-mobile 2
+      - name: Report identity-screen-editor-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-editor-mobile 3
+      - name: Report identity-screen-public-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-public-desktop 0
+      - name: Report identity-screen-public-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-public-desktop 1
+      - name: Report identity-screen-public-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-public-desktop 2
+      - name: Report identity-screen-public-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-public-desktop 3
+      - name: Report identity-screen-public-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-public-mobile 0
+      - name: Report identity-screen-public-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-public-mobile 1
+      - name: Report identity-screen-public-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-public-mobile 2
+      - name: Report identity-screen-public-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh identity-screen-public-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |

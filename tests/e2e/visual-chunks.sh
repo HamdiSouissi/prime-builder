@@ -3,7 +3,7 @@
 set -euo pipefail
 name=$1
 part=$2
-case "$name" in breadcrumbs-screen-editor-desktop|breadcrumbs-screen-editor-mobile|breadcrumbs-screen-public-desktop|breadcrumbs-screen-public-mobile) ;; *) exit 1 ;; esac
+case "$name" in identity-screen-editor-desktop|identity-screen-editor-mobile|identity-screen-public-desktop|identity-screen-public-mobile) ;; *) exit 1 ;; esac
 case "$part" in 0|1|2|3) ;; *) exit 1 ;; esac
 mapfile -t captures < <(find builder/tests/e2e/test-results -type f -name "${name}.jpg")
 test "${#captures[@]}" -eq 1

@@ -38,6 +38,7 @@ final class Content
         private readonly ?MenuRenderer $menus = null,
         private readonly ?SeoManager $seo = null,
         private readonly ?PermalinkSettings $permalinks = null,
+        private readonly ?SiteIdentity $siteIdentity = null,
     ) {
     }
 
@@ -296,6 +297,18 @@ final class Content
             $id = $page->parentId;
         }
         return $id === 0;
+    }
+
+    /** @param array<string, mixed> $settings */
+    public function siteTitle(array $settings): string
+    {
+        return $this->siteIdentity?->title($settings) ?? '';
+    }
+
+    /** @param array<string, mixed> $settings */
+    public function siteLogo(array $settings): string
+    {
+        return $this->siteIdentity?->logo($settings) ?? '';
     }
 
     /** @param array<string, mixed> $settings */

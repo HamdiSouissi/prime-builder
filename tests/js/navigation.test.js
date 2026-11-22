@@ -218,6 +218,36 @@ test('breadcrumb refresh waits for focus to leave its saved fallback', async () 
   assert.equal(node.listeners.focusout.length, 0);
 });
 
+test('site identity refresh waits for each focused home link', async () => {
+  for (const type of ['site_title', 'site_logo']) {
+    const document = {
+      activeElement: null,
+      querySelectorAll(selector) { assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },
+    };
+    const layout = new Element(document); layout.dataset.pbLive = '/api/prime-builder/v1/documents/8/live';
+    const node = new Element(document, 'div', [`pb-${type}`]); node.dataset.pbId = type;
+    const fallback = new Element(document, 'a'); fallback.textContent = 'Old site name'; node.append(fallback); layout.append(node);
+    let replaced = null;
+    Object.defineProperty(node, 'innerHTML', { set(value) { replaced = value; this.children = []; } });
+    let release;
+    const response = new Promise(resolve => { release = resolve; });
+    runInNewContext(script, {
+      document, window: { location: { search: '' } }, URLSearchParams, queueMicrotask,
+      fetch() { return response; },
+    });
+    fallback.focus();
+    release({ ok: true, json: () => Promise.resolve({ data: { widgets: { [type]: '<a href="/">New site name</a>' } } }) });
+    await flush();
+    assert.equal(replaced, null);
+    assert.equal(document.activeElement, fallback);
+    document.activeElement = null;
+    node.dispatch('focusout');
+    await flush();
+    assert.equal(replaced, '<a href="/">New site name</a>');
+    assert.equal(node.listeners.focusout.length, 0);
+  }
+});
+
 test('live refresh never removes a focused fallback and failed requests leave it intact', async () => {
   const first = setup(['one']);
   const fallback = first.nodes[0].navParts.link;

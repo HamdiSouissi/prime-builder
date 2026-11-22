@@ -57,6 +57,7 @@ use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
+use PrimeBuilder\Widgets\SiteIdentity;
 
 final class Plugin extends AbstractPlugin
 {
@@ -101,6 +102,7 @@ final class Plugin extends AbstractPlugin
         $originals = OriginalContent::fromAppKey($context->app()->config()->get('app.key'));
         $htmlContent = HtmlContent::fromAppKey($context->app()->config()->get('app.key'));
         $partials = new Partials($context);
+        $identity = new SiteIdentity($context->app());
         $content = new Content(
             $context->app()->get(EntryQuery::class),
             $context->app()->get(ContentTypeRegistry::class),
@@ -113,8 +115,24 @@ final class Plugin extends AbstractPlugin
             $context->app()->get(\Prime\Site\Menu\MenuRenderer::class),
             $context->app()->get(\Prime\Site\Seo\SeoManager::class),
             $context->app()->get(\Prime\Site\PermalinkSettings::class),
+            $identity,
         );
         $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
+        foreach (['settings.updated', 'theme.activated'] as $event) {
+            $context->hooks()->on($event, static function () use ($identity): void {
+                $identity->invalidate();
+            });
+        }
+        foreach (['media.updated', 'media.deleted'] as $event) {
+            $context->hooks()->on($event, static function () use ($identity, $partials, $context): void {
+                $identity->invalidate();
+                // Core settings and theme changes purge pages, but media changes do
+                // not. A logo in a theme snapshot can appear on every cached page.
+                if ($partials->usesWidget('site_logo')) {
+                    $context->app()->get(\Prime\Cache\PageCache::class)->purgeAll();
+                }
+            });
+        }
         foreach (['content.saved', 'content.updated', 'content.published', 'content.deleted', 'content.trashed', 'content.restored', 'content.status_changed'] as $event) {
             $context->hooks()->on($event, static function () use ($content): void {
                 $content->invalidate();

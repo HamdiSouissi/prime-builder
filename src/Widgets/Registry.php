@@ -102,6 +102,13 @@ final class Registry
             'breadcrumbs' => [
                 'label' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.breadcrumb_label'],
             ],
+            'site_title' => [
+                'tag' => ['type' => 'enum', 'values' => ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'], 'label' => 'plugin::prime-builder.ui.site_title_tag', 'option_labels' => ['p' => 'plugin::prime-builder.ui.site_title_paragraph']],
+                'link_home' => ['type' => 'enum', 'values' => ['show', 'hide'], 'label' => 'plugin::prime-builder.ui.site_identity_link'],
+            ],
+            'site_logo' => [
+                'link_home' => ['type' => 'enum', 'values' => ['show', 'hide'], 'label' => 'plugin::prime-builder.ui.site_identity_link'],
+            ],
             'share_buttons' => [
                 'label' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.share_label'],
                 'message' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.share_message'],
@@ -162,7 +169,7 @@ final class Registry
         foreach ($fields as $type => $schema) {
             $definitions[$type] = [
                 'label' => 'plugin::prime-builder.widgets.' . $type,
-                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation', 'breadcrumbs', 'share_buttons', 'table_of_contents'], true) ? 'pro' : 'base'),
+                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation', 'breadcrumbs', 'site_title', 'site_logo', 'share_buttons', 'table_of_contents'], true) ? 'pro' : 'base'),
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];
@@ -170,14 +177,14 @@ final class Registry
                 $definitions[$type]['hidden'] = true;
                 $definitions[$type]['read_only'] = true;
             }
-            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation', 'breadcrumbs', 'share_buttons', 'table_of_contents'], true)) {
+            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation', 'breadcrumbs', 'site_title', 'site_logo', 'share_buttons', 'table_of_contents'], true)) {
                 $definitions[$type]['style'] = '/assets/plugins/prime-builder/css/widgets/' . $type . '.css';
             }
             if ($type === 'tabs') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
             } elseif (in_array($type, ['countdown', 'flip_box', 'portfolio', 'share_buttons'], true)) {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/' . $type . '.js';
-            } elseif (in_array($type, ['posts', 'current_content', 'theme_zone', 'search_form', 'navigation', 'breadcrumbs'], true)) {
+            } elseif (in_array($type, ['posts', 'current_content', 'theme_zone', 'search_form', 'navigation', 'breadcrumbs', 'site_title', 'site_logo'], true)) {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/content.js';
             } elseif ($type === 'map') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/map.js';

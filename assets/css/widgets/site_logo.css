@@ -1,0 +1,13 @@
+.pb-site_logo .pb-site-logo__link,
+.pb-site_logo .pb-site-logo__unlinked {
+  display: inline-block;
+  max-width: 100%;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.pb-site_logo .pb-site-logo__image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}

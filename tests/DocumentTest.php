@@ -27,6 +27,7 @@ use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 use PrimeBuilder\Widgets\ShareButtons;
+use PrimeBuilder\Widgets\SiteIdentity;
 
 require_once dirname(__DIR__) . '/src/Widgets/Assets.php';
 require_once dirname(__DIR__) . '/src/Widgets/Breadcrumbs.php';
@@ -41,6 +42,7 @@ require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
 require_once dirname(__DIR__) . '/src/Widgets/ShareButtons.php';
+require_once dirname(__DIR__) . '/src/Widgets/SiteIdentity.php';
 require_once dirname(__DIR__) . '/src/Widgets/TableOfContents.php';
 require_once dirname(__DIR__) . '/src/Widgets/Portfolio.php';
 require_once dirname(__DIR__) . '/src/Widgets/Slideshow.php';
@@ -946,6 +948,41 @@ final class DocumentTest extends TestCase
         self::assertSame('/assets/plugins/prime-builder/css/widgets/breadcrumbs.css', $definition['style']);
         self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/breadcrumbs.css');
+    }
+
+    public function testSiteTitleEscapesTheNameAndValidatesItsTagAndHomeLink(): void
+    {
+        $node = $this->element('site_title', 'brand-title');
+        $node['settings'] = ['tag' => 'h3', 'link_home' => 'show'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame('<h3 class="pb-site-title__text"><a href="/">Studio &amp; &lt;Co&gt;</a></h3>', SiteIdentity::titleMarkup($result['data']['elements'][0]['settings'], 'Studio & <Co>'));
+        self::assertSame('<p class="pb-site-title__text">Studio</p>', SiteIdentity::titleMarkup(['tag' => 'script', 'link_home' => 'hide'], 'Studio'));
+        $node['settings']['tag'] = 'script';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['site_title'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/site_title.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/site_title.css');
+    }
+
+    public function testSiteLogoHasAnAccessibleFallbackAndValidatesItsHomeLink(): void
+    {
+        $node = $this->element('site_logo', 'brand-logo');
+        $node['settings'] = ['link_home' => 'show'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame('<a class="pb-site-logo__link" href="/"><span class="pb-site-logo__fallback">Studio &amp; &lt;Co&gt;</span></a>', SiteIdentity::logoMarkup($result['data']['elements'][0]['settings'], 'Studio & <Co>', ''));
+        $coreImage = '<img src="/uploads/logo.png" alt="Studio" width="120" height="40" loading="lazy">';
+        self::assertSame('<span class="pb-site-logo__unlinked">' . $coreImage . '</span>', SiteIdentity::logoMarkup(['link_home' => 'hide'], 'Studio', $coreImage));
+        $node['settings']['link_home'] = 'javascript:alert(1)';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['site_logo'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/site_logo.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/site_logo.css');
     }
 
     public function testShareButtonsEncodePublicUrlsAndRejectUnsafeValues(): void

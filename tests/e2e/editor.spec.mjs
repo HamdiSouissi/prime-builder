@@ -1623,7 +1623,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
     return { status: result.status, count: elements.length };
   }, id);
   expect(status).toBe(200);
-  expect(count).toBe(52);
+  expect(count).toBe(54);
   await page.goto('/test-prime-builder');
   await expect(page.locator('.pb-element')).toHaveCount(count);
   await expectAccessible(page);
@@ -2474,6 +2474,213 @@ test('breadcrumbs use the core trail and preserve focus while refreshing', async
     await fallback.keyboard.press('Enter');
     await expect(fallback).toHaveURL(/\/$/);
   } finally { await noJs.close(); }
+});
+
+test('site title and logo use core identity and refresh without losing focus', async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+  const original = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings', { headers: { Accept: 'application/json' } });
+    const settings = (await response.json()).data;
+    return { name: settings['site.name'], logo: settings['site.logo_id'] };
+  });
+  let mediaId = null, templateId = null, previousTheme = null, releaseLive = null;
+  const livePattern = `**/api/prime-builder/v1/documents/${id}/live`;
+  const setIdentity = (name, logo) => page.evaluate(async ({ name, logo, csrf }) => {
+    const response = await fetch('/api/v1/settings', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: JSON.stringify({ 'site.name': name, 'site.logo_id': logo }),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { name, logo, csrf });
+  try {
+    // Draw a fictional logo inside the browser; upload it through the real CMS media API.
+    const upload = await page.evaluate(async csrf => {
+      const canvas = document.createElement('canvas'); canvas.width = 480; canvas.height = 144;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#193c3b'; ctx.fillRect(0, 0, 480, 144);
+      ctx.fillStyle = '#f4c975'; ctx.beginPath(); ctx.arc(76, 72, 38, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#193c3b'; ctx.fillRect(73, 42, 6, 60); ctx.fillRect(46, 69, 60, 6);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 40px sans-serif'; ctx.fillText('ATELIER', 140, 86);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const form = new FormData(); form.append('file', blob, 'atelier-logo.png');
+      const response = await fetch('/api/v1/media', { method: 'POST', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' }, body: form });
+      return { status: response.status, body: await response.text() };
+    }, csrf);
+    expect(upload.status, upload.body).toBe(201);
+    mediaId = JSON.parse(upload.body).data.id;
+    expect(mediaId).toBeGreaterThan(0);
+    let setting = await setIdentity('Atelier Boréal', mediaId);
+    expect(setting.status, setting.body).toBe(200);
+    const reset = await page.evaluate(async ({ entryId, csrf }) => {
+      const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+        body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] }, status: 'published', published_at: '' }),
+      });
+      return response.status;
+    }, { entryId: id, csrf });
+    expect(reset).toBe(200);
+    await page.reload();
+    await page.getByRole('button', { name: 'Ajouter Logo du site', exact: true }).click();
+    const frame = page.frameLocator('[data-pb-frame]');
+    const logo = frame.locator('.pb-site_logo');
+    await expect(logo.getByRole('img', { name: 'Atelier Boréal' })).toBeVisible();
+    await expect(logo.getByRole('link', { name: 'Atelier Boréal' })).toHaveAttribute('href', '/');
+    await page.getByRole('combobox', { name: 'Lien vers l’accueil', exact: true }).selectOption('hide');
+    await expect(logo.locator('a')).toHaveCount(0);
+    await page.getByRole('combobox', { name: 'Lien vers l’accueil', exact: true }).selectOption('show');
+    await page.getByRole('button', { name: 'Style', exact: true }).click();
+    await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+    await page.locator('[data-pb-panel="widgets"]').click();
+    await page.getByRole('button', { name: 'Ajouter Titre du site', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Balise du titre du site', exact: true }).selectOption('h3');
+    await expect(frame.locator('.pb-site_title h3')).toHaveText('Atelier Boréal');
+    await expect(frame.locator('link[href*="/css/widgets/site_title.css"]')).toHaveCount(1);
+    await expect(frame.locator('link[href*="/css/widgets/site_logo.css"]')).toHaveCount(1);
+    await page.getByRole('button', { name: 'Style', exact: true }).click();
+    await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('identity-screen-editor-desktop.jpg'), fullPage: true, quality: 20 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await showMobilePreview(page, frame, '.pb-site_title');
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('identity-screen-editor-mobile.jpg'), fullPage: true, quality: 20 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator('[data-pb-save]').click();
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    setting = await setIdentity('Atelier actualisé', mediaId);
+    expect(setting.status, setting.body).toBe(200);
+
+    const gate = new Promise(resolve => { releaseLive = resolve; });
+    let intercepted = false;
+    await page.route(livePattern, async route => { intercepted = true; await gate; await route.continue(); });
+    await page.goto('/test-prime-builder');
+    await expect.poll(() => intercepted).toBe(true);
+    const title = page.locator('.pb-site_title a');
+    await expect(title).toHaveText('Atelier Boréal');
+    await title.focus();
+    const response = page.waitForResponse(result => result.url().endsWith(`/api/prime-builder/v1/documents/${id}/live`));
+    releaseLive(); releaseLive = null;
+    const live = await response;
+    expect(live.ok()).toBeTruthy();
+    await live.finished();
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await expect(title).toBeFocused();
+    await expect(title).toHaveText('Atelier Boréal');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.pb-site_title a')).toHaveText('Atelier actualisé');
+    await expect(page.locator('.pb-site_logo img')).toHaveAttribute('alt', 'Atelier actualisé');
+    await expect(page.locator('script[src*="/js/content.js"]')).toHaveCount(1);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('identity-screen-public-desktop.jpg'), fullPage: true, quality: 20 });
+    await page.unroute(livePattern);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/test-prime-builder');
+    await expect(page.locator('.pb-site_title a')).toHaveText('Atelier actualisé');
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    const longTextWidth = await page.locator('.pb-site_title a').evaluate(node => {
+      const original = node.textContent; node.textContent = 'W'.repeat(160);
+      const width = document.documentElement.scrollWidth; node.textContent = original; return width;
+    });
+    expect(longTextWidth).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('identity-screen-public-mobile.jpg'), fullPage: true, quality: 20 });
+
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const fallback = await noJs.newPage();
+      await fallback.goto('/test-prime-builder');
+      // Entry HTML is saved by the core: its no-JS identity may be stale.
+      await expect(fallback.locator('.pb-site_title a')).toHaveText('Atelier Boréal');
+      const fallbackLogo = fallback.locator('.pb-site_logo a');
+      await expect(fallbackLogo.getByRole('img', { name: 'Atelier Boréal' })).toBeVisible();
+      await fallbackLogo.focus(); await fallback.keyboard.press('Enter');
+      await expect(fallback).toHaveURL(/\/$/);
+
+      // The same widgets also work server-side in a theme header on pages with no entry.
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto(`/admin/prime-builder/edit/${id}`);
+      const created = await page.evaluate(async csrf => {
+        const elements = [
+          { id: 'brand-logo', type: 'site_logo', settings: {}, styles: {}, children: [] },
+          { id: 'brand-title', type: 'site_title', settings: {}, styles: {}, children: [] },
+        ];
+        const response = await fetch('/api/prime-builder/v1/templates', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+          body: JSON.stringify({ name: 'Identité du site', kind: 'section', data: { version: 1, elements } }),
+        });
+        return { status: response.status, body: await response.text() };
+      }, csrf);
+      expect(created.status, created.body).toBe(201);
+      templateId = JSON.parse(created.body).data.id;
+      await page.goto('/admin/prime-builder/theme');
+      previousTheme = {
+        header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
+        footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
+        exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
+      };
+      await page.getByLabel('En-tête', { exact: true }).selectOption(templateId);
+      await page.getByLabel('Contenus exclus', { exact: true }).fill('');
+      await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+      await expect(page.getByLabel('En-tête', { exact: true })).toHaveValue(templateId);
+      await fallback.goto('/blog?identity-test=1');
+      const header = fallback.locator('header.pb-theme-header');
+      await expect(header.locator('.pb-site_logo img')).toHaveAttribute('alt', 'Atelier actualisé');
+      await expect(header.locator('.pb-site_title a')).toHaveText('Atelier actualisé');
+      await expect(header.locator('[data-pb-live]')).toHaveCount(0);
+      const edited = await page.evaluate(async ({ mediaId, csrf }) => {
+        const response = await fetch(`/api/v1/media/${mediaId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+          body: JSON.stringify({ title: 'Logo modifié' }),
+        });
+        return { status: response.status, body: await response.text() };
+      }, { mediaId, csrf });
+      expect(edited.status, edited.body).toBe(200);
+      const deleted = await page.evaluate(async ({ mediaId, csrf }) => {
+        const response = await fetch(`/api/v1/media/${mediaId}?force=1`, { method: 'DELETE', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' } });
+        return { status: response.status, body: await response.text() };
+      }, { mediaId, csrf });
+      expect(deleted.status, deleted.body).toBe(204);
+      mediaId = null;
+      await fallback.goto('/blog?identity-test=1');
+      await expect(header.locator('.pb-site_logo a')).toHaveText('Atelier actualisé');
+      await expect(header.locator('.pb-site_logo img')).toHaveCount(0);
+      setting = await setIdentity('Atelier sans logo', 0);
+      expect(setting.status, setting.body).toBe(200);
+      await fallback.goto('/blog?identity-test=2');
+      await expect(header.locator('.pb-site_logo a')).toHaveText('Atelier sans logo');
+      await expect(header.locator('.pb-site_logo img')).toHaveCount(0);
+      await expect(header.locator('.pb-site_title a')).toHaveText('Atelier sans logo');
+    } finally { await noJs.close(); }
+  } finally {
+    if (releaseLive) releaseLive();
+    await page.unroute(livePattern);
+    if (previousTheme) {
+      await page.goto('/admin/prime-builder/theme');
+      await page.getByLabel('En-tête', { exact: true }).selectOption(previousTheme.header);
+      await page.getByLabel('Pied de page', { exact: true }).selectOption(previousTheme.footer);
+      await page.getByLabel('Contenus exclus', { exact: true }).fill(previousTheme.exclude);
+      await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    }
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    const restored = await setIdentity(original.name, original.logo || 0);
+    expect(restored.status, restored.body).toBe(200);
+    if (mediaId) {
+      const removed = await page.evaluate(async ({ mediaId, csrf }) => (await fetch(`/api/v1/media/${mediaId}`, { method: 'DELETE', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' } })).status, { mediaId, csrf });
+      expect(removed).toBe(204);
+    }
+    if (templateId) {
+      const removed = await page.evaluate(async ({ templateId, csrf }) => (await fetch(`/api/prime-builder/v1/templates/${templateId}`, { method: 'DELETE', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' } })).status, { templateId, csrf });
+      expect(removed).toBe(200);
+    }
+  }
 });
 
 test('share buttons use ordinary private-by-default links on desktop and mobile', async ({ page, browser }) => {

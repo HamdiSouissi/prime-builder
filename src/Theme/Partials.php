@@ -122,6 +122,33 @@ final class Partials
         return false;
     }
 
+    /** Whether either stored theme snapshot uses a widget, including nested ones. */
+    public function usesWidget(string $type): bool
+    {
+        $contains = static function (array $elements) use (&$contains, $type): bool {
+            foreach ($elements as $element) {
+                if (!is_array($element)) {
+                    continue;
+                }
+                if (($element['type'] ?? null) === $type) {
+                    return true;
+                }
+                if (is_array($element['children'] ?? null) && $contains($element['children'])) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        $stored = $this->stored();
+        foreach (['header', 'footer'] as $slot) {
+            $elements = $stored[$slot]['elements'] ?? [];
+            if (is_array($elements) && $contains($elements)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Widget IDs must not collide with the page or the other theme slot. Built-in
      * anchors and links to them are also namespaced within the chosen template.
