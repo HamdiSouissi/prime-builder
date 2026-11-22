@@ -519,3 +519,7 @@ La révision `a0fae2a001c2251b6d12858fc5c4d62ef8b2a677`, [run 45048321515](https
 ### Rapport des avis et de la boîte retournable
 
 La révision `3a64aaaa05fb9be1611dae6ed5eb5e021fac2364`, qui consigne les résultats de l’étape précédente, est `completed` / `success` sur [45048675511](https://github.com/HamdiSouissi/prime-builder/actions/runs/45048675511), avec huit jobs verts. Ce run ne comprend pas les widgets titre animé et code développés ensuite.
+
+### Titre animé et code — première CI rouge
+
+La révision `4119c972f3c92bc29d053edd682c858a29d2bd02` a échoué sur [45049953250](https://github.com/HamdiSouissi/prime-builder/actions/runs/45049953250) : sept jobs sont verts, dont les deux PHPUnit/MySQL `OK (93 tests, 1606 assertions)` et Node `# tests 19` / `# pass 19` / `# fail 0`. Playwright indique `13 failed`, `34 passed (2.4m)` : les anciens sélecteurs non exacts « Ajouter Titre » correspondent aussi au nouveau « Ajouter Titre animé » ; le sélecteur de favoris est également ambigu. La correction rend les sélecteurs de l’ancien titre exacts, sans supprimer de test. Nouvelle CI nécessaire.

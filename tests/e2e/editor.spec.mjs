@@ -49,7 +49,7 @@ test('compose and publish a page using the CMS theme', async ({ page }) => {
   await page.goto(`/admin/prime-builder/edit/${id}`);
   await page.getByRole('button', { name: 'Ajouter Conteneur' }).click();
   await page.getByRole('button', { name: 'Éléments', exact: true }).last().click();
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Une page composée dans Prime Builder');
   await expect(page.frameLocator('[data-pb-frame]').locator('.pb-heading h2')).toHaveText('Une page composée dans Prime Builder');
   await page.locator('[data-pb-status]').selectOption('published');
@@ -66,10 +66,10 @@ test('compose and publish a page using the CMS theme', async ({ page }) => {
 test('partial previews preserve siblings, ignore stale responses, and recover a missing node', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Voisin conservé');
   await page.locator('[data-pb-panel="widgets"]').click();
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   const field = page.getByLabel('Texte', { exact: true });
   await field.fill('Élément modifié');
   const frame = page.frameLocator('[data-pb-frame]');
@@ -134,7 +134,7 @@ test('build and publish four widgets with the mouse', async ({ page }) => {
   expect(mouseId).toMatch(/^[1-9][0-9]*$/);
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${mouseId}`);
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Une page à la souris');
   await page.locator('[data-pb-panel="widgets"]').click();
   await page.getByRole('button', { name: 'Ajouter Texte' }).click();
@@ -218,11 +218,11 @@ test('library templates are available and the editor fits a mobile viewport', as
 test('keyboard reparenting, favorites, commands and scheduling', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  await page.getByRole('button', { name: 'Ajouter aux favoris : Titre' }).click();
-  await expect(page.getByRole('button', { name: 'Retirer des favoris : Titre' }).first()).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Ajouter aux favoris : Titre', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retirer des favoris : Titre', exact: true }).first()).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Ajouter Conteneur' }).click();
   await page.getByRole('button', { name: 'Éléments', exact: true }).last().click();
-  await page.getByRole('button', { name: 'Ajouter Titre' }).first().click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).first().click();
   await page.getByLabel('Texte', { exact: true }).fill('Déplacé sans souris');
   const destination = page.getByLabel('Déplacer vers');
   await destination.selectOption('');
@@ -261,7 +261,7 @@ test('template library supports insertion and JSON export/import', async ({ page
 test('context menu saves a reusable template with keyboard, reload and deletion', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Témoin du modèle enregistré');
   const opener = page.locator('[data-pb-context-open]');
   const menu = page.getByRole('menu', { name: 'Actions de l’élément' });
@@ -1269,7 +1269,7 @@ test('navigator renames, folds and hides elements with persisted accessible cont
   await page.goto(`/admin/prime-builder/edit/${id}`);
   await page.getByRole('button', { name: 'Ajouter Conteneur' }).click();
   await page.locator('[data-pb-panel="widgets"]').click();
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Titre à masquer');
   await expect(page.frameLocator('[data-pb-frame]').getByRole('heading', { name: 'Titre à masquer' })).toBeVisible();
   await page.getByRole('button', { name: 'Structure', exact: true }).click();
@@ -1307,7 +1307,7 @@ test('navigator renames, folds and hides elements with persisted accessible cont
 test('history lists actions and can jump backward and forward with focus restored', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Étape de l’historique');
   const frame = page.frameLocator('[data-pb-frame]');
   const heading = frame.locator('.pb-heading').filter({ hasText: 'Étape de l’historique' });
@@ -1340,7 +1340,7 @@ test('history lists actions and can jump backward and forward with focus restore
 test('context menu copies elements and styles with keyboard and restores focus', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Source de copie');
   await page.getByRole('button', { name: 'Style', exact: true }).click();
   await page.getByLabel('Couleur du texte', { exact: true }).fill('#123456');
@@ -1353,7 +1353,7 @@ test('context menu copies elements and styles with keyboard and restores focus',
   await page.keyboard.press('Enter');
   await expect(page.locator('[data-pb-live]')).toHaveText('Élément copié dans le constructeur.');
   await page.locator('[data-pb-panel="widgets"]').click();
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Cible de copie');
   await opener.click();
   await page.keyboard.press('ArrowDown');
@@ -1492,7 +1492,7 @@ test('existing canvas elements can be dragged into a container', async ({ page }
   await page.getByRole('button', { name: 'Avancé', exact: true }).click();
   await page.getByLabel('Marge intérieure', { exact: true }).fill('40');
   await page.locator('[data-pb-panel="widgets"]').click();
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Déplacé dans le canevas');
   await page.getByLabel('Déplacer vers').selectOption('');
   const frame = page.frameLocator('[data-pb-frame]');
@@ -1510,7 +1510,7 @@ test('drag ordering, nesting and keyboard alternatives persist in canvas and nav
   await page.goto(`/admin/prime-builder/edit/${dragId}`);
   async function addHeading(name, first = false) {
     if (!first) await page.locator('[data-pb-panel="widgets"]').click();
-    await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+    await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
     await page.getByLabel('Texte', { exact: true }).fill(name);
   }
   await addHeading('Premier', true);
@@ -1624,7 +1624,7 @@ test('drag ordering, nesting and keyboard alternatives persist in canvas and nav
 test('responsive controls show inherited values and their source', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Héritage responsive');
   await page.getByRole('button', { name: 'Style', exact: true }).click();
   const font = page.getByLabel('Taille du texte', { exact: true });
@@ -1655,7 +1655,7 @@ test('responsive controls show inherited values and their source', async ({ page
 test('color picker uses kit references and spacing has numeric units', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Styles référencés');
   await page.getByRole('button', { name: 'Style', exact: true }).click();
   await expect(page.getByLabel('Sélecteur : texte')).toHaveAttribute('type', 'color');
@@ -1902,7 +1902,7 @@ test('departure dialog traps and restores focus and closes on Escape', async ({ 
   page.on('dialog', dialog => { nativeDialogs += 1; dialog.dismiss(); });
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  await page.getByRole('button', { name: 'Ajouter Titre' }).click();
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
   await expect(page.locator('[data-pb-save-state]')).toHaveText('Non enregistré');
   const back = page.getByRole('link', { name: 'Retour au contenu' });
   await back.click();
