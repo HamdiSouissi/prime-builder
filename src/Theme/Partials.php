@@ -49,8 +49,9 @@ final class Partials
     }
 
     /**
-     * Revalidate even stored data. Dynamic widgets need a separate public live endpoint
-     * for theme layouts and are deliberately not accepted in this first slice.
+     * Revalidate even stored data. Entry- and route-dependent widgets need a separate
+     * public live endpoint for theme layouts and are not accepted in this first slice.
+     * Site identity is resolved server-side and is permitted.
      *
      * @param array<mixed> $elements
      * @return array<string, mixed>|null
