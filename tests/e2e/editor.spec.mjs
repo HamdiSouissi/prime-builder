@@ -901,7 +901,7 @@ test('posts grid configures public filters and offers keyboard pagination with a
   await page.getByLabel('Trier par').selectOption('title');
   await page.getByLabel('Ordre de tri').selectOption('asc');
   await page.getByLabel('Nombre d’articles').fill('1');
-  await page.getByLabel('Pagination', { exact: true }).selectOption('show');
+  await page.getByRole('combobox', { name: 'Pagination', exact: true }).selectOption('show');
   await page.getByLabel('Présentation').selectOption('list');
   const frame = page.frameLocator('[data-pb-frame]');
   await expect(frame.locator('.pb-posts .pb-post-list').last()).toBeVisible();
