@@ -33,7 +33,7 @@ La carte OpenStreetMap est dans `6ddec35519c8434f0e909cd834441588710c2309`, [run
 
 La première étape de la zone du thème est dans `b22f761017e5738ecd551aac8d004fdc9fca73c4`, [run 45006872816](https://github.com/HamdiSouissi/prime-builder/actions/runs/45006872816), huit jobs `success` : syntaxe `No syntax errors detected in content/plugins/prime-builder/views/admin/builder.php`, PHPStan `[OK] No errors`, PHP-CS-Fixer `Found 0 of 46 files that can be fixed in 1.512 seconds, 88.00 MB memory used`, chacun des PHPUnit/MySQL `OK (73 tests, 1175 assertions)`, Node `# tests 14` / `# pass 14` / `# fail 0`, i18n `Catalogue de traduction cohérent.`, smoke `Smoke: all routes, public content and document CSS passed.`, Playwright `41 passed (2.1m)`, désactivation et désinstallation réussies. Le scénario navigateur vérifie actualisation du contenu, unicité et références d’ID, axe et repli sans JS. Cette étape ne couvre pas les widgets Builder imbriqués ni les zones dans les partials, et ne clôt pas B. Le run précédent était rouge à cause d’une variable manquante dans l’assertion navigateur ; détail dans l’historique.
 
-Un appel à l’action, une table de prix et une liste de prix statiques sont ajoutés ; leurs tests de rendu, d’assets conditionnels et un parcours navigateur sont à vérifier par la CI de leur révision. Localement, les harnais PHP-WASM donnent 17/17 et PHP-WASM/SQLite 9/9 ; ils ne remplacent pas PHPUnit/MySQL. Une fixture navigateur isolée à 1440 et 375 px utilise le HTML du moteur, vérifie le focus et ne signale aucune violation axe sérieuse ou critique ; elle ne remplace pas le parcours CMS en CI. Les prix sont des textes d’affichage, sans calcul ni paiement ; la liste accepte 30 lignes au format `nom | prix | description facultative`.
+L’appel à l’action, la table de prix et la liste de prix statiques sont dans `da1def996362acaa335cdb15665d567db3da37c3`, [run 45042052075](https://github.com/HamdiSouissi/prime-builder/actions/runs/45042052075), huit jobs `success` : syntaxe `No syntax errors detected in content/plugins/prime-builder/.php-cs-fixer.dist.php`, PHPStan `[OK] No errors`, PHP-CS-Fixer `Found 0 of 46 files that can be fixed in 1.492 seconds, 90.00 MB memory used`, chacun des PHPUnit/MySQL `OK (78 tests, 1239 assertions)`, Node `# tests 14` / `# pass 14` / `# fail 0`, i18n `Catalogue de traduction cohérent.`, smoke `Smoke: all routes, public content and document CSS passed.`, Playwright `42 passed (2.5m)`, désactivation et désinstallation réussies. Le parcours CMS ouvre les trois widgets, leurs onglets, l’aperçu et la page publique, puis vérifie clavier, axe et affichage sans JavaScript. Localement, une fixture isolée du HTML du moteur a aussi été examinée à 1440 et 375 px ; elle ne remplace pas le parcours CMS. Les prix sont des textes d’affichage, sans calcul ni paiement ; la liste accepte 30 lignes au format `nom | prix | description facultative`.
 
 ## Prochaines étapes et vérifications
 
@@ -148,10 +148,10 @@ Le statut concerne le **périmètre indiqué dans la ligne**, pas une parité co
 | Avis | **Non fait**. | — |
 | Formulaire | **Non fait — partiel** : formulaire fixe, protections, boîte et purge ; tests locaux `testContactForm…`, `testSubmissionInboxRequiresItsOwnCapabilityAndCsrf` et E2E. Pas de constructeur de champs ni e-mail/fichiers. | Oui, `forms.js` |
 | Menu de navigation | **Non fait**. | — |
-| Appel à l’action | **Non fait — en cours de vérification** : widget statique avec image, titre, texte et lien facultatifs ; `DT::testCallToActionRendersSafeImageHeadingTextAndLink` et E2E ajoutés, CI à observer. | Non |
+| Appel à l’action | **Fait et testé** pour la version statique : image, titre, texte et lien facultatifs ; `DT::testCallToActionRendersSafeImageHeadingTextAndLink`, IT assets et E2E dans `45042052075`. | Non |
 | Boîte retournable | **Non fait**. | — |
-| Table de prix | **Non fait — en cours de vérification** : prix et période en texte, avantages et lien facultatif ; `DT::testPriceTableRendersEscapedPriceBenefitsAndOptionalLink` et E2E ajoutés, CI à observer. | Non |
-| Liste de prix | **Non fait — en cours de vérification** : 30 lignes maximum, nom/prix/description en texte ; `DT::testPriceListValidatesAndRendersTextOnlyRows` et E2E ajoutés, CI à observer. | Non |
+| Table de prix | **Fait et testé** pour la version statique : prix et période en texte, avantages et lien facultatif ; `DT::testPriceTableRendersEscapedPriceBenefitsAndOptionalLink`, IT assets et E2E dans `45042052075`. | Non |
+| Liste de prix | **Fait et testé** pour la version statique : 30 lignes maximum, nom/prix/description en texte ; `DT::testPriceListValidatesAndRendersTextOnlyRows`, IT assets et E2E dans `45042052075`. | Non |
 | Compte à rebours | **Non fait**. | — |
 | Titre animé | **Non fait**. | — |
 | Citation | **Fait et testé** pour une citation simple : texte filtré et auteur ; D, P. | Non |
@@ -159,7 +159,7 @@ Le statut concerne le **périmètre indiqué dans la ligne**, pas une parité co
 | Sommaire automatique | **Non fait**. | — |
 | Code avec coloration | **Non fait** — partiel : le pont `prime_block` accepte un bloc code statique, sans coloration dédiée ; `IT::testPrimeBlockPersistsCoreHtmlWithoutAllowingPrivilegedBlocks` teste le pont paragraphe. | Non |
 | Fil d’Ariane | **Non fait** comme widget ; celui d’Aurora appartient au thème. | — |
-| Formulaire de recherche | **Non fait** comme widget. | — |
+| Formulaire de recherche | **Non fait — en cours de vérification** : formulaire GET, libellé, texte indicatif et bouton personnalisables ; utilisation de l’URL du CMS et actualisation côté client. PHPUnit, assets et E2E ajoutés ; CI à observer. Repli sans JS susceptible de devenir périmé après modification de l’adresse ; widget exclu des partials. | Oui, `content.js` si recherche |
 | Logo du site | **Non fait** comme widget. | — |
 | Titre du site | **Non fait** comme widget. | — |
 | Contenu courant : titre | **Non fait** — partiel : option `title` du widget générique ; E2E `recent posts and current content refresh safely with a no-JS fallback`. | Oui, `content.js` |

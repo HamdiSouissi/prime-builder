@@ -43,11 +43,19 @@
       const widgets = result?.data?.widgets;
       if (!widgets || typeof widgets !== 'object') return;
       for (const node of layout.querySelectorAll('[data-pb-id]')) {
-        if (!node.classList.contains('pb-posts') && !node.classList.contains('pb-current_content') && !node.classList.contains('pb-theme_zone')) continue;
+        if (!node.classList.contains('pb-posts') && !node.classList.contains('pb-current_content') && !node.classList.contains('pb-theme_zone') && !node.classList.contains('pb-search_form')) continue;
         const html = widgets[node.dataset.pbId];
         if (typeof html !== 'string') continue;
         if (node.classList.contains('pb-theme_zone')) node.replaceChildren(zoneFragment(html, node.dataset.pbId));
-        else node.innerHTML = html;
+        else if (node.classList.contains('pb-search_form')) {
+          // Update only the configured search path: do not erase text or move focus if
+          // the visitor started typing while this asynchronous request was in flight.
+          const template = document.createElement('template');
+          template.innerHTML = html;
+          const action = template.content.querySelector('form[data-pb-search-form]')?.getAttribute('action');
+          const form = node.querySelector('form[data-pb-search-form]');
+          if (form && /^\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(action || '')) form.setAttribute('action', action);
+        } else node.innerHTML = html;
       }
     });
   }

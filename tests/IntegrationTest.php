@@ -288,6 +288,50 @@ final class IntegrationTest extends TestCase
         }
     }
 
+    public function testSearchFormPersistsUsableHtmlAndRefreshesTheCoreSearchPath(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Formulaire de recherche', $config['widgets']['search_form']['label']);
+        self::assertSame('Libellé du champ de recherche', $config['widgets']['search_form']['fields']['search_label']['label']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'search1', 'type' => 'search_form', 'settings' => ['search_label' => 'Votre recherche', 'placeholder' => 'Sujet', 'button_text' => 'Trouver'], 'styles' => [], 'children' => []],
+            ['id' => 'search2', 'type' => 'search_form', 'settings' => [], 'styles' => [], 'children' => []],
+        ];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertSame(2, substr_count($entry->contentHtml, 'action="/recherche"'));
+        self::assertStringContainsString('<label for="pb-search-search1">Votre recherche</label>', $entry->contentHtml);
+        self::assertStringContainsString('id="pb-search-search2" name="q"', $entry->contentHtml);
+        self::assertStringContainsString('>Rechercher sur le site</label>', $entry->contentHtml);
+        self::assertStringContainsString('data-pb-live="/api/prime-builder/v1/documents/1/live"', $entry->contentHtml);
+
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/search_form.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/search_form.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+
+        $app->get(\Prime\Site\PermalinkSettings::class)->setOverride('permalinks.search_base', 'trouver-ici');
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $live->status(), $live->body());
+        self::assertStringContainsString('no-store', (string) $live->header('Cache-Control'));
+        $widgets = json_decode($live->body(), true)['data']['widgets'];
+        self::assertStringContainsString('action="/trouver-ici"', $widgets['search1']);
+        self::assertStringContainsString('action="/trouver-ici"', $widgets['search2']);
+        $persisted = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($persisted);
+        self::assertStringContainsString('action="/recherche"', $persisted->contentHtml);
+    }
+
     public function testThemeZoneUsesDeclaredCoreZonesAndRefreshesWithoutPersistingTheirContents(): void
     {
         $app = $this->activated('admin');

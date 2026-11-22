@@ -5,8 +5,14 @@ declare(strict_types=1);
 namespace PrimeBuilder\Tests;
 
 use PHPUnit\Framework\TestCase;
+use Prime\Content\ContentTypeRegistry;
+use Prime\Content\EntryQuery;
+use Prime\Content\EntryRepository;
+use Prime\Database\Connection;
 use Prime\Hooks\Hooks;
 use Prime\Security\HtmlSanitizer;
+use Prime\Site\PermalinkSettings;
+use Prime\Site\UrlGenerator;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
@@ -14,11 +20,13 @@ use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Widgets\Assets;
+use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
 require_once dirname(__DIR__) . '/src/Widgets/Assets.php';
+require_once dirname(__DIR__) . '/src/Widgets/Content.php';
 require_once dirname(__DIR__) . '/src/Widgets/Map.php';
 require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
@@ -431,6 +439,33 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('<h3 data-pb-tab-heading>Premier</h3><p>Un</p>', $html);
         self::assertStringContainsString('<h3 data-pb-tab-heading>Second</h3><p>Deux</p>', $html);
         self::assertStringNotContainsString('<script>', $html);
+    }
+
+    public function testSearchFormRendersAValidatedAccessibleGetFormUsingTheCoreUrl(): void
+    {
+        $connection = new Connection(); // Lazy: rendering this form needs no database.
+        $urls = new UrlGenerator(new PermalinkSettings(overrides: ['permalinks.search_base' => 'trouver-ici']));
+        $content = new Content(new EntryQuery($connection, new EntryRepository($connection)), new ContentTypeRegistry(), $urls);
+        $node = $this->element('search_form', 'search_one');
+        $node['settings'] = ['search_label' => 'Chercher & découvrir', 'placeholder' => 'Mots "clés"', 'button_text' => 'Lancer'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer(), content: $content))->render($result['data']);
+        self::assertStringContainsString('role="search" aria-label="Chercher &amp; découvrir" method="get" action="/trouver-ici"', $html);
+        self::assertStringContainsString('<label for="pb-search-search_one">Chercher &amp; découvrir</label>', $html);
+        self::assertStringContainsString('type="search" id="pb-search-search_one" name="q" maxlength="200" placeholder="Mots &quot;clés&quot;" required', $html);
+        self::assertStringContainsString('<button type="submit">Lancer</button>', $html);
+
+        $raw = $content->searchForm(['search_label' => '"><img src=x>', 'placeholder' => '" autofocus', 'button_text' => '<script>'], 'second');
+        self::assertStringContainsString('&quot;&gt;&lt;img src=x&gt;', $raw);
+        self::assertStringContainsString('placeholder="&quot; autofocus"', $raw);
+        self::assertStringNotContainsString('<script>', $raw);
+        self::assertSame('', $content->searchForm([], 'bad id'));
+        $node['settings']['search_label'] = str_repeat('a', 201);
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['search_form'];
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/search_form.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
     }
 
     public function testExternalVideoProvidersHaveInertAccessibleFallbacksBeforeActivation(): void

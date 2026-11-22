@@ -43,6 +43,7 @@ final class Registry
             'call_to_action' => ['title' => $text, 'level' => ['type' => 'integer', 'min' => 2, 'max' => 6], 'text' => ['type' => 'rich', 'max' => 10000], 'image_url' => $url, 'alt' => $text, 'width' => $dimension, 'height' => $dimension, 'url' => ['type' => 'href', 'max' => 2048], 'button_text' => $text],
             'price_table' => ['title' => $text, 'level' => ['type' => 'integer', 'min' => 2, 'max' => 6], 'text' => ['type' => 'rich', 'max' => 5000], 'price' => ['type' => 'text', 'max' => 120, 'label' => 'plugin::prime-builder.ui.price'], 'period' => ['type' => 'text', 'max' => 120, 'label' => 'plugin::prime-builder.ui.period'], 'features' => ['type' => 'multiline', 'max' => 5000, 'label' => 'plugin::prime-builder.ui.price_features'], 'url' => ['type' => 'href', 'max' => 2048], 'button_text' => $text],
             'price_list' => ['title' => $text, 'level' => ['type' => 'integer', 'min' => 2, 'max' => 6], 'items' => ['type' => 'price_items', 'max' => 10000, 'label' => 'plugin::prime-builder.ui.price_items']],
+            'search_form' => ['search_label' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.search_form_label'], 'placeholder' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.search_form_placeholder'], 'button_text' => $text],
             'toggle' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000], 'initial' => ['type' => 'enum', 'values' => ['closed', 'open']]],
             'social' => ['label' => $text, 'facebook' => ['type' => 'href', 'max' => 2048], 'instagram' => ['type' => 'href', 'max' => 2048], 'linkedin' => ['type' => 'href', 'max' => 2048], 'youtube' => ['type' => 'href', 'max' => 2048], 'mastodon' => ['type' => 'href', 'max' => 2048]],
             'theme_zone' => ['zone' => ['type' => 'zone_slug', 'max' => 80, 'label' => 'plugin::prime-builder.ui.theme_zone_select']],
@@ -75,7 +76,7 @@ final class Registry
         foreach ($fields as $type => $schema) {
             $definitions[$type] = [
                 'label' => 'plugin::prime-builder.widgets.' . $type,
-                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list'], true) ? 'pro' : 'base'),
+                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list', 'search_form'], true) ? 'pro' : 'base'),
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];
@@ -83,12 +84,12 @@ final class Registry
                 $definitions[$type]['hidden'] = true;
                 $definitions[$type]['read_only'] = true;
             }
-            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list'], true)) {
+            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list', 'search_form'], true)) {
                 $definitions[$type]['style'] = '/assets/plugins/prime-builder/css/widgets/' . $type . '.css';
             }
             if ($type === 'tabs') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
-            } elseif (in_array($type, ['posts', 'current_content', 'theme_zone'], true)) {
+            } elseif (in_array($type, ['posts', 'current_content', 'theme_zone', 'search_form'], true)) {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/content.js';
             } elseif ($type === 'map') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/map.js';

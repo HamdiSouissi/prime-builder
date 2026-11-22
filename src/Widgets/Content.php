@@ -75,6 +75,24 @@ final class Content
     }
 
     /** @param array<string, mixed> $settings */
+    public function searchForm(array $settings, string $id): string
+    {
+        if (preg_match('/^[a-zA-Z0-9_-]{1,64}$/D', $id) !== 1) {
+            return '';
+        }
+        $label = is_string($settings['search_label'] ?? null) ? trim($settings['search_label']) : '';
+        $placeholder = is_string($settings['placeholder'] ?? null) ? trim($settings['placeholder']) : '';
+        $button = is_string($settings['button_text'] ?? null) ? trim($settings['button_text']) : '';
+        $label = $label !== '' ? $label : t('plugin::prime-builder.ui.search_form_default_label');
+        $button = $button !== '' ? $button : t('plugin::prime-builder.ui.search_form_default_button');
+        $input = 'pb-search-' . $id;
+        return '<form class="pb-search-form" role="search" aria-label="' . Renderer::escape($label) . '" method="get" action="' . Renderer::escape($this->urls->searchUrl()) . '" data-pb-search-form>'
+            . '<label for="' . Renderer::escape($input) . '">' . Renderer::escape($label) . '</label>'
+            . '<div><input type="search" id="' . Renderer::escape($input) . '" name="q" maxlength="200"' . ($placeholder !== '' ? ' placeholder="' . Renderer::escape($placeholder) . '"' : '') . ' required>'
+            . '<button type="submit">' . Renderer::escape($button) . '</button></div></form>';
+    }
+
+    /** @param array<string, mixed> $settings */
     public function themeZone(array $settings, bool $live): string
     {
         $slug = is_string($settings['zone'] ?? null) ? $settings['zone'] : '';

@@ -408,6 +408,96 @@ test('call to action and pricing widgets can be edited and remain usable without
   } finally { await noJs.close(); }
 });
 
+test('search form uses the CMS search and refreshes its URL without disturbing typing', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] }, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  await page.getByRole('button', { name: 'Ajouter Formulaire de recherche', exact: true }).click();
+  await page.getByLabel('Libellé du champ de recherche').fill('Chercher une actualité');
+  await page.getByLabel('Texte indicatif (facultatif)').fill('Mots clés');
+  await page.getByLabel('Texte du bouton', { exact: true }).fill('Trouver');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.locator('link[href*="/css/widgets/search_form.css"]')).toHaveCount(1);
+  await expect(frame.getByRole('searchbox', { name: 'Chercher une actualité' })).toBeVisible();
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  const csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+  const original = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings', { headers: { Accept: 'application/json' } });
+    return (await response.json()).data['permalinks.search_base'];
+  });
+  expect(original).toBe('recherche');
+
+  // The persisted GET form works even when JS is disabled, before a setting changes.
+  const noJs = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const form = fallback.locator('.pb-search_form');
+    await expect(form.locator('form')).toHaveAttribute('action', '/recherche');
+    const input = form.getByRole('searchbox', { name: 'Chercher une actualité' });
+    await input.fill('Actualité');
+    await input.press('Enter');
+    await fallback.waitForURL(url => url.pathname === '/recherche' && url.searchParams.get('q') === 'Actualité');
+    await expect(fallback.getByText('Actualité publique', { exact: true }).first()).toBeVisible();
+  } finally { await noJs.close(); }
+
+  const setBase = value => page.evaluate(async ({ value, token }) => {
+    const response = await fetch('/api/v1/settings', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': token },
+      body: JSON.stringify({ 'permalinks.search_base': value }),
+    });
+    return response.status;
+  }, { value, token: csrf });
+  const pattern = `**/api/prime-builder/v1/documents/${id}/live`;
+  let releaseLive;
+  let notifyLive;
+  const gate = new Promise(resolve => { releaseLive = resolve; });
+  const requested = new Promise(resolve => { notifyLive = resolve; });
+  try {
+    expect(await setBase('trouver-exemple')).toBe(200);
+    await page.route(pattern, async route => { notifyLive(); await gate; await route.continue(); });
+    await page.goto('/test-prime-builder', { waitUntil: 'domcontentloaded' });
+    await requested;
+    const widget = page.locator('.pb-search_form');
+    const form = widget.locator('form');
+    const input = widget.getByRole('searchbox', { name: 'Chercher une actualité' });
+    await expect(form).toHaveAttribute('action', '/recherche');
+    await expect(page.locator('link[href*="/css/widgets/search_form.css"]')).toHaveCount(1);
+    await input.fill('Actualité');
+    await input.focus();
+    releaseLive();
+    await expect(form).toHaveAttribute('action', '/trouver-exemple');
+    await expect(input).toHaveValue('Actualité');
+    await expect(input).toBeFocused();
+    await expectAccessible(page);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.unroute(pattern);
+    await input.press('Enter');
+    await page.waitForURL(url => url.pathname === '/trouver-exemple' && url.searchParams.get('q') === 'Actualité');
+    await expect(page.getByText('Actualité publique', { exact: true }).first()).toBeVisible();
+  } finally {
+    releaseLive();
+    await page.unroute(pattern);
+    expect(await setBase(original)).toBe(200);
+  }
+});
+
 test('toggle works with keyboard on the public page, including without JavaScript', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
@@ -850,7 +940,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(38);
+  await expect(page.locator('.pb-element')).toHaveCount(39);
   await expectAccessible(page);
 });
 
