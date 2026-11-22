@@ -293,19 +293,39 @@ jobs:
         run: npm test 2>&1 | tee /tmp/prime-builder-e2e.log
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
-      # Temporary transport for visual inspection where the artifact host is unavailable.
-      - name: Report testimonial screen captures
-        run: |
-          mapfile -t captures < <(find builder/tests/e2e/test-results -type f -name 'testimonial-screen-*.jpg' | sort)
-          test "${#captures[@]}" -eq 4
-          for capture in "${captures[@]}"; do
-            name=$(basename "$capture" .jpg)
-            part=0
-            while IFS= read -r chunk || [[ -n "$chunk" ]]; do
-              printf '::notice title=PBSCREEN-%s-%03d::%s\n' "$name" "$part" "$chunk"
-              part=$((part+1))
-            done < <(base64 -w0 "$capture" | fold -w 12000)
-          done
+      # Temporary transport: the sandbox cannot download the artifact host.
+      - name: Report editor-desktop screen capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh editor-desktop 0
+      - name: Report editor-desktop screen capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh editor-desktop 1
+      - name: Report editor-desktop screen capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh editor-desktop 2
+      - name: Report editor-desktop screen capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh editor-desktop 3
+      - name: Report editor-mobile screen capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh editor-mobile 0
+      - name: Report editor-mobile screen capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh editor-mobile 1
+      - name: Report editor-mobile screen capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh editor-mobile 2
+      - name: Report editor-mobile screen capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh editor-mobile 3
+      - name: Report public-desktop screen capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh public-desktop 0
+      - name: Report public-desktop screen capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh public-desktop 1
+      - name: Report public-desktop screen capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh public-desktop 2
+      - name: Report public-desktop screen capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh public-desktop 3
+      - name: Report public-mobile screen capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh public-mobile 0
+      - name: Report public-mobile screen capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh public-mobile 1
+      - name: Report public-mobile screen capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh public-mobile 2
+      - name: Report public-mobile screen capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh public-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Temporary CI transport for test-only screenshots when the artifact host is unreachable.
+set -euo pipefail
+name=$1
+part=$2
+case "$name" in editor-desktop|editor-mobile|public-desktop|public-mobile) ;; *) exit 1 ;; esac
+case "$part" in 0|1|2|3) ;; *) exit 1 ;; esac
+mapfile -t captures < <(find builder/tests/e2e/test-results -type f -name "testimonial-screen-${name}.jpg")
+test "${#captures[@]}" -eq 1
+mapfile -t chunks < <(base64 -w0 "${captures[0]}" | fold -w 3500)
+# Four steps per capture, at most ten notices per step and under 4096 bytes per notice.
+test "${#chunks[@]}" -le 40
+for (( i = part * 10; i < (part + 1) * 10 && i < ${#chunks[@]}; i++ )); do
+    printf '::notice title=PBSCREEN-testimonial-screen-%s-%03d::%s\n' "$name" "$i" "${chunks[i]}"
+done
