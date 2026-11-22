@@ -530,7 +530,7 @@ test('theme zone follows the core zone and leaves a safe no-JavaScript fallback'
   expect(searchId).toMatch(/^pb-zone-/);
   await expect(zone.getByRole('search').locator('label')).toHaveAttribute('for', searchId);
   expect(await page.locator('[id]').evaluateAll(nodes => nodes.map(node => node.id))).toEqual(expect.arrayContaining([searchId]));
-  expect(await page.locator('[id]').evaluateAll(nodes => nodes.filter(node => node.id === searchId).length)).toBe(1);
+  expect(await page.locator('[id]').evaluateAll((nodes, id) => nodes.filter(node => node.id === id).length, searchId)).toBe(1);
   await expectAccessible(page);
   expect((await saveZone('Contenu de zone actualisé')).status()).toBe(200);
   await page.reload();
