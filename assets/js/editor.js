@@ -518,11 +518,14 @@ function makeField(name, schema, current, onChange) {
     if (schema.max != null) input.maxLength = schema.max;
   } else {
     input = document.createElement('input');
-    input.type = schema.type === 'integer' ? 'number' : 'text';
+    input.type = schema.type === 'integer' ? 'number' : schema.type === 'datetime_utc' ? 'datetime-local' : 'text';
+    if (schema.type === 'datetime_utc') {
+      input.step = '60'; input.min = '0001-01-01T00:00'; input.max = '9999-12-31T23:59';
+    }
     if (schema.type === 'latitude' || schema.type === 'longitude') input.inputMode = 'decimal';
     if (schema.min != null) input.min = schema.min;
     if (schema.max != null && schema.type === 'integer') input.max = schema.max;
-    if (schema.max != null && schema.type !== 'integer') input.maxLength = schema.max;
+    if (schema.max != null && schema.type !== 'integer' && schema.type !== 'datetime_utc') input.maxLength = schema.max;
   }
   input.value = current ?? '';
   input.addEventListener(schema.type === 'enum' ? 'change' : 'input', () => {

@@ -295,6 +295,43 @@ final class IntegrationTest extends TestCase
         }
     }
 
+    public function testCountdownPersistsUtcDatesAndLoadsDeduplicatedAssetsOnlyWhereNeeded(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Compte à rebours', $config['widgets']['countdown']['label']);
+        self::assertSame('Échéance (UTC)', $config['widgets']['countdown']['fields']['deadline']['label']);
+        self::assertSame('datetime_utc', $config['widgets']['countdown']['fields']['deadline']['type']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                ['id' => 'first', 'type' => 'countdown', 'settings' => ['title' => 'Prochain événement', 'deadline' => '2028-02-29T13:05', 'finished_text' => 'Ouvert'], 'styles' => [], 'children' => []],
+            ]],
+            ['id' => 'second', 'type' => 'countdown', 'settings' => ['deadline' => '2000-01-01T00:00'], 'styles' => [], 'children' => []],
+        ];
+        $invalid = $document;
+        $invalid['blocks'][0]['data']['elements'][0]['children'][0]['settings']['deadline'] = '2027-02-29T13:05';
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $invalid], $token)->status());
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('<time datetime="2028-02-29T13:05:00Z">2028-02-29 13:05 UTC</time>', $entry->contentHtml);
+        self::assertStringContainsString('data-pb-finished="Ouvert"', $entry->contentHtml);
+        self::assertSame(2, substr_count($entry->contentHtml, 'data-pb-countdown '));
+        self::assertStringNotContainsString('data-pb-live=', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/countdown.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/countdown.js'));
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/countdown.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/countdown.js', $assets->renderScripts());
+    }
+
     public function testSearchFormPersistsUsableHtmlAndRefreshesTheCoreSearchPath(): void
     {
         $app = $this->activated('admin');
@@ -1226,6 +1263,7 @@ final class IntegrationTest extends TestCase
             ['id' => 'title', 'type' => 'heading', 'settings' => ['text' => 'En-tête du constructeur', 'level' => 2], 'styles' => ['desktop' => ['color' => '#123456']], 'children' => []],
             ['id' => 'tabs', 'type' => 'tabs', 'settings' => ['title_1' => 'Un', 'text_1' => 'Contenu', 'title_2' => 'Deux', 'text_2' => 'Suite'], 'styles' => [], 'children' => []],
             ['id' => 'map', 'type' => 'map', 'settings' => ['latitude' => '48.79', 'longitude' => '2.45'], 'styles' => [], 'children' => []],
+            ['id' => 'countdown', 'type' => 'countdown', 'settings' => ['deadline' => '2028-02-29T13:05'], 'styles' => [], 'children' => []],
             ['id' => 'anchor', 'type' => 'anchor', 'settings' => ['anchor' => 'section'], 'styles' => [], 'children' => []],
             ['id' => 'link', 'type' => 'button', 'settings' => ['text' => 'Lien', 'url' => '#section'], 'styles' => [], 'children' => []],
         ]];
@@ -1274,6 +1312,7 @@ final class IntegrationTest extends TestCase
         $header = $hooks->apply('site.partial', null, 'header', $page, []);
         self::assertIsString($header);
         self::assertStringContainsString('En-tête du constructeur', $header);
+        self::assertStringContainsString('datetime="2028-02-29T13:05:00Z"', $header);
         self::assertStringContainsString('class="pb-theme-header"', $header);
         self::assertStringContainsString('href="#pbt-header-', $header);
         self::assertStringContainsString('id="pbt-header-', $header);
@@ -1286,6 +1325,8 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('/assets/plugins/prime-builder/js/tabs.js', $assets->renderScripts());
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/tabs.css'));
         self::assertStringContainsString('/assets/plugins/prime-builder/js/map.js', $assets->renderScripts());
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/countdown.js'));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/countdown.css'));
         self::assertStringContainsString('https://www.openstreetmap.org', (new \Prime\Themes\PublicCsp($hooks))->headerValue());
         self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\.css)~', $assets->renderStyles(), $matches));
         $css = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
@@ -1297,6 +1338,8 @@ final class IntegrationTest extends TestCase
         $hooks->emit('site.assets', $assets, $excludedPage);
         self::assertStringNotContainsString('/prime-builder/theme/', $assets->renderStyles());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/tabs.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/countdown.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/countdown.js', $assets->renderScripts());
         self::assertStringNotContainsString('https://www.openstreetmap.org', (new \Prime\Themes\PublicCsp($hooks))->headerValue());
         $fields['footer'] = $id;
         self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
@@ -1308,6 +1351,8 @@ final class IntegrationTest extends TestCase
         $hooks->emit('site.assets', $assets, $page);
         self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/tabs.js'));
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/tabs.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/countdown.js'));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/countdown.css'));
         // A library manager deleting a source cannot silently change the selected theme snapshot.
         self::assertSame(200, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/' . $id, token: $admin)->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));

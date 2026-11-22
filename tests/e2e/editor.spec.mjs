@@ -408,6 +408,72 @@ test('call to action and pricing widgets can be edited and remain usable without
   } finally { await noJs.close(); }
 });
 
+test('countdown uses a UTC deadline, announces expiry and keeps its date without JavaScript', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] }, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  await page.getByRole('button', { name: 'Ajouter Compte à rebours', exact: true }).click();
+  await page.getByLabel('Titre', { exact: true }).fill('Ouverture des inscriptions');
+  const deadline = page.getByLabel('Échéance (UTC)', { exact: true });
+  await expect(deadline).toHaveAttribute('type', 'datetime-local');
+  await deadline.fill('2035-01-02T00:00');
+  await page.getByLabel('Message à l’échéance', { exact: true }).fill('Les inscriptions sont ouvertes.');
+  const preview = page.frameLocator('[data-pb-frame]');
+  await expect(preview.locator('link[href*="/css/widgets/countdown.css"]')).toHaveCount(1);
+  await expect(preview.locator('.pb-countdown time')).toHaveAttribute('datetime', '2035-01-02T00:00:00Z');
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+
+  const visitor = await browser.newContext({ locale: 'fr-FR', timezoneId: 'Pacific/Honolulu' });
+  try {
+    const publicPage = await visitor.newPage();
+    await publicPage.clock.install({ time: new Date('2035-01-01T23:59:55Z') });
+    await publicPage.clock.pauseAt(new Date('2035-01-01T23:59:56Z'));
+    await publicPage.goto('/test-prime-builder');
+    const widget = publicPage.locator('.pb-countdown');
+    const values = widget.getByRole('group', { name: 'Temps restant : Ouverture des inscriptions' });
+    const seconds = values.locator('[data-pb-countdown-value="second"]');
+    await expect(values).toBeVisible();
+    await expect(seconds).toHaveText('4');
+    await expect(widget.locator('time')).toHaveText('2035-01-02 00:00 UTC');
+    await expect(publicPage.locator('link[href*="/css/widgets/countdown.css"]')).toHaveCount(1);
+    await expect(publicPage.locator('script[src*="/js/countdown.js"]')).toHaveCount(1);
+    await publicPage.clock.runFor(1000);
+    await expect(seconds).toHaveText('3');
+    await publicPage.clock.fastForward(3000);
+    await expect(values).toBeHidden();
+    await expect(widget.getByRole('status')).toHaveText('Les inscriptions sont ouvertes.');
+    await publicPage.clock.resume();
+    await expectAccessible(publicPage);
+    await publicPage.setViewportSize({ width: 375, height: 812 });
+    await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(publicPage);
+  } finally { await visitor.close(); }
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false, timezoneId: 'Pacific/Honolulu' });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const widget = fallback.locator('.pb-countdown');
+    await expect(widget.locator('time')).toHaveText('2035-01-02 00:00 UTC');
+    await expect(widget.locator('[data-pb-countdown-values]')).toBeHidden();
+    await expect(widget.locator('[data-pb-countdown-status]')).toBeEmpty();
+  } finally { await noJs.close(); }
+});
+
 test('search form uses the CMS search and refreshes its URL without disturbing typing', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
@@ -1019,7 +1085,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(39);
+  await expect(page.locator('.pb-element')).toHaveCount(40);
   await expectAccessible(page);
 });
 

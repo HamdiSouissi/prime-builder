@@ -21,12 +21,14 @@ use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Widgets\Assets;
 use PrimeBuilder\Widgets\Content;
+use PrimeBuilder\Widgets\Countdown;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
 require_once dirname(__DIR__) . '/src/Widgets/Assets.php';
 require_once dirname(__DIR__) . '/src/Widgets/Content.php';
+require_once dirname(__DIR__) . '/src/Widgets/Countdown.php';
 require_once dirname(__DIR__) . '/src/Widgets/Map.php';
 require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
@@ -381,6 +383,50 @@ final class DocumentTest extends TestCase
         self::assertStringNotContainsString('<img', $safe);
         self::assertStringNotContainsString('<script', $safe);
         self::assertStringNotContainsString('onerror=', $safe);
+    }
+
+    public function testCountdownValidatesUtcDeadlinesAndRendersAnAccessibleStaticFallback(): void
+    {
+        $html = $this->renderBasicWidget('countdown', [
+            'title' => 'Offre & suite', 'level' => 3, 'deadline' => '2028-02-29T13:05',
+            'finished_text' => '<img src=x onerror=alert(1)>Terminé & disponible',
+        ]);
+        self::assertStringContainsString('<h3>Offre &amp; suite</h3>', $html);
+        self::assertStringContainsString('<time datetime="2028-02-29T13:05:00Z">2028-02-29 13:05 UTC</time>', $html);
+        self::assertStringContainsString('data-pb-deadline="2028-02-29T13:05:00Z"', $html);
+        self::assertStringContainsString('data-pb-finished="Terminé &amp; disponible"', $html);
+        self::assertStringContainsString('data-pb-countdown-values role="group"', $html);
+        self::assertStringContainsString('" hidden>', $html);
+        self::assertStringContainsString('role="status" data-pb-countdown-status', $html);
+        self::assertStringNotContainsString('aria-live="assertive"', $html);
+        self::assertStringNotContainsString('<img', $html);
+        self::assertStringNotContainsString('onerror=', $html);
+        self::assertSame('0001-01-01T00:00:00Z', Countdown::canonical('0001-01-01T00:00'));
+        self::assertSame('9999-12-31T23:59:00Z', Countdown::canonical('9999-12-31T23:59'));
+        self::assertSame('2000-02-29T23:59:00Z', Countdown::canonical('2000-02-29T23:59'));
+        foreach (['0000-01-01T00:00', '10000-01-01T00:00', '1900-02-29T00:00', '2027-02-29T00:00', '2028-02-30T00:00', '2028-01-01T24:00', '2028-01-01T12:60', '2028-01-01T12:00Z', '2028-01-01T12:00:00', '2028-01-01 12:00', ' 2028-01-01T12:00', 'not a date'] as $bad) {
+            $node = $this->element('countdown');
+            $node['settings'] = ['deadline' => $bad];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors'], $bad);
+            self::assertSame(null, Countdown::canonical($bad), $bad);
+        }
+        $node = $this->element('countdown');
+        $node['settings'] = ['level' => 1];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        self::assertStringNotContainsString('data-pb-countdown ', $this->renderBasicWidget('countdown', ['deadline' => '']));
+        $node['settings'] = ['deadline' => '2028-02-30T00:00'];
+        self::assertStringNotContainsString('<time', (new Renderer(new Registry(), new HtmlSanitizer()))->render(['elements' => [$node]]));
+    }
+
+    public function testCountdownDeclaresItsOwnConditionalAssets(): void
+    {
+        $definition = (new Registry())->all()['countdown'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('datetime_utc', $definition['fields']['deadline']['type']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/countdown.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/countdown.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/countdown.css');
+        self::assertFileExists(dirname(__DIR__) . '/assets/js/countdown.js');
     }
 
     public function testProPricingWidgetsHaveIndividualStylesAndNoPublicScript(): void

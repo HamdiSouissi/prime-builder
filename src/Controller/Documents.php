@@ -63,6 +63,7 @@ final class Documents
             'call_to_action' => ['title' => $copy('cta_title'), 'level' => 2, 'text' => $copy('cta_text'), 'button_text' => $copy('button')],
             'price_table' => ['title' => $copy('price_table_title'), 'level' => 2, 'price' => $copy('price_table_price'), 'period' => $copy('price_table_period'), 'features' => $copy('price_table_features'), 'button_text' => $copy('button')],
             'price_list' => ['title' => $copy('price_list_title'), 'level' => 2, 'items' => $copy('price_list_items')],
+            'countdown' => ['title' => t('plugin::prime-builder.widgets.countdown'), 'level' => 2, 'finished_text' => t('plugin::prime-builder.ui.countdown_finished')],
             'search_form' => ['search_label' => t('plugin::prime-builder.ui.search_form_default_label'), 'button_text' => t('plugin::prime-builder.ui.search_form_default_button')],
             'toggle' => ['title' => $copy('toggle_title'), 'text' => $copy('accordion_text'), 'initial' => 'closed'],
             'star_rating' => ['value' => 4],

@@ -7,6 +7,7 @@ namespace PrimeBuilder\Document;
 use Prime\Editor\BlockRegistry;
 use Prime\Security\HtmlSanitizer;
 use PrimeBuilder\Styles\Values;
+use PrimeBuilder\Widgets\Countdown;
 use PrimeBuilder\Widgets\Map;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\PrimeBlock;
@@ -179,6 +180,7 @@ final class Validator
         }
         return match ($type) {
             'text', 'multiline' => trim(strip_tags($value)),
+            'datetime_utc' => $value === '' || Countdown::canonical($value) !== null ? $value : null,
             'latitude', 'longitude' => $value === '' || Map::coordinate($value, $type === 'latitude') !== null ? trim($value) : null,
             'json_object' => is_object(json_decode($value)) ? $value : null,
             'media_list' => $this->mediaList($value),

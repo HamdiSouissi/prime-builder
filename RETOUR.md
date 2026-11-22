@@ -37,7 +37,11 @@ L’appel à l’action, la table de prix et la liste de prix statiques sont dan
 
 Le formulaire de recherche est dans `e34dc8a9c2fed3cc1190e68f359c9073c1d2b061`, [run 45043366114](https://github.com/HamdiSouissi/prime-builder/actions/runs/45043366114), `completed` / `success` avec huit jobs verts : PHPStan `[OK] No errors`, PHP-CS-Fixer `Found 0 of 46 files that can be fixed in 1.446 seconds, 90.00 MB memory used`, chacun des PHPUnit/MySQL `OK (80 tests, 1280 assertions)`, Node `# tests 14` / `# pass 14` / `# fail 0`, i18n `Catalogue de traduction cohérent.`, smoke `Smoke: all routes, public content and document CSS passed.`, Playwright `43 passed (2.3m)`, désactivation et désinstallation réussies. Le parcours CMS configure et soumet la recherche au clavier, sans JS puis après changement réel du préfixe par l’API du noyau ; il vérifie la conservation de la saisie et du focus pendant l’actualisation, ainsi qu’axe et le mobile. Sans JS ou si l’API échoue, l’adresse enregistrée peut devenir périmée ; le widget est exclu des partials.
 
+La révision de rapport `07dd91f8a07601422834d0fd2b8eb0250d61757a` a également une CI `completed` / `success` avec huit jobs : [run 45046152527](https://github.com/HamdiSouissi/prime-builder/actions/runs/45046152527).
+
 La grille configurable est dans `c2e2f38360f31c179b7d5938f374955ffba08901` ; sa première CI était rouge sur un sélecteur de test. La correction `6b0c37eef31460ee3dddf899fcd93c1359d8641f`, [run 45045723884](https://github.com/HamdiSouissi/prime-builder/actions/runs/45045723884), est `completed` / `success` avec huit jobs verts : syntaxe `No syntax errors detected in content/plugins/prime-builder/views/admin/builder.php`, PHPStan `[OK] No errors`, PHP-CS-Fixer `Found 0 of 47 files that can be fixed in 1.585 seconds, 90.00 MB memory used`, chacun des PHPUnit/MySQL `OK (84 tests, 1360 assertions)`, Node `# tests 14` / `# pass 14` / `# fail 0`, i18n `Catalogue de traduction cohérent.`, smoke `Smoke: all routes, public content and document CSS passed.`, Playwright `44 passed (2.0m)`, désactivation et désinstallation réussies. Les tests comptent, dans le fournisseur avec générateur d’URL neuf et permaliens en mémoire, 2 requêtes pour 1 ou 12 articles paginés et 4 pour 1 ou 12 pages ayant parents et grands-parents distincts ; ces chiffres excluent HTTP, authentification et réglages. Le parcours CMS utilise filtres, tri, pagination au clavier, liste/cartes, axe, mobile et repli sans JS. Les limites sont documentées dans le tableau.
+
+Le compte à rebours UTC est en cours de validation : tests locaux Node 17/17, harnais PHP-WASM 2/2 et PHP-WASM/SQLite 2/2 (ce ne sont pas PHPUnit/MySQL), PHPStan ciblé et fixture Chromium isolée avec axe, sans JS et à 1440/375 px. Son parcours complet et la matrice CMS restent à vérifier en CI. La date sans JavaScript reste visible après l’échéance ; le décompte dépend de l’horloge du visiteur et ne contrôle aucun accès.
 
 ## Prochaines étapes et vérifications
 
@@ -156,7 +160,7 @@ Le statut concerne le **périmètre indiqué dans la ligne**, pas une parité co
 | Boîte retournable | **Non fait**. | — |
 | Table de prix | **Fait et testé** pour la version statique : prix et période en texte, avantages et lien facultatif ; `DT::testPriceTableRendersEscapedPriceBenefitsAndOptionalLink`, IT assets et E2E dans `45042052075`. | Non |
 | Liste de prix | **Fait et testé** pour la version statique : 30 lignes maximum, nom/prix/description en texte ; `DT::testPriceListValidatesAndRendersTextOnlyRows`, IT assets et E2E dans `45042052075`. | Non |
-| Compte à rebours | **Non fait**. | — |
+| Compte à rebours | **Non fait — implémentation en cours de validation CI** : échéance UTC, titre/niveau et message de fin ; date de repli sans JS et horloge du visiteur. | Oui, `countdown.js` si widget |
 | Titre animé | **Non fait**. | — |
 | Citation | **Fait et testé** pour une citation simple : texte filtré et auteur ; D, P. | Non |
 | Boutons de partage | **Non fait**. | — |

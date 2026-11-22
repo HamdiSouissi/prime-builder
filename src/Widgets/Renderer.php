@@ -177,6 +177,7 @@ final class Renderer
             'call_to_action' => $this->renderCallToAction($settings),
             'price_table' => $this->renderPriceTable($settings),
             'price_list' => $this->renderPriceList($settings),
+            'countdown' => $this->renderCountdown($settings),
             'toggle' => '<details' . (($settings['initial'] ?? 'closed') === 'open' ? ' open' : '') . '><summary>' . self::escape($this->fieldText($settings, 'title', t('plugin::prime-builder.widgets.toggle'))) . '</summary><div>' . $rich . '</div></details>',
             'social' => $this->renderSocial($settings),
             'map' => $this->renderMap($settings),
@@ -246,6 +247,30 @@ final class Renderer
     private function fieldText(array $settings, string $key, string $fallback = ''): string
     {
         return is_string($settings[$key] ?? null) && trim($settings[$key]) !== '' ? $settings[$key] : $fallback;
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderCountdown(array $settings): string
+    {
+        $deadline = $this->fieldText($settings, 'deadline');
+        $canonical = Countdown::canonical($deadline);
+        if ($canonical === null) {
+            return '<p>' . self::escape(t('plugin::prime-builder.ui.countdown_choose')) . '</p>';
+        }
+        $title = $this->fieldText($settings, 'title', t('plugin::prime-builder.widgets.countdown'));
+        $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
+        $finished = $this->fieldText($settings, 'finished_text', t('plugin::prime-builder.ui.countdown_finished'));
+        $html = '<div class="pb-countdown-widget" data-pb-countdown data-pb-deadline="' . self::escape($canonical) . '" data-pb-finished="' . self::escape($finished) . '">'
+            . '<h' . $level . '>' . self::escape($title) . '</h' . $level . '><p class="pb-countdown-date">' . self::escape(t('plugin::prime-builder.ui.countdown_date_label'))
+            . ' <time datetime="' . self::escape($canonical) . '">' . self::escape(str_replace('T', ' ', $deadline) . ' UTC') . '</time></p>'
+            . '<div class="pb-countdown-values" data-pb-countdown-values role="group" aria-label="' . self::escape(t('plugin::prime-builder.ui.countdown_remaining') . ' : ' . $title) . '" hidden>';
+        foreach (['day', 'hour', 'minute', 'second'] as $unit) {
+            $one = t('plugin::prime-builder.ui.countdown_' . $unit . '_one');
+            $many = t('plugin::prime-builder.ui.countdown_' . $unit . '_many');
+            $html .= '<span class="pb-countdown-unit"><strong data-pb-countdown-value="' . $unit . '">0</strong>'
+                . '<span data-pb-countdown-label="' . $unit . '" data-pb-one="' . self::escape($one) . '" data-pb-many="' . self::escape($many) . '">' . self::escape($many) . '</span></span>';
+        }
+        return $html . '</div><p class="pb-countdown-status" role="status" data-pb-countdown-status></p></div>';
     }
 
     /** @param array<string, mixed> $settings */
