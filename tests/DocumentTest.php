@@ -368,6 +368,27 @@ final class DocumentTest extends TestCase
         self::assertStringNotContainsString('<script>', $html);
     }
 
+    public function testExternalVideoProvidersHaveInertAccessibleFallbacksBeforeActivation(): void
+    {
+        $youtube = $this->renderBasicWidget('video', ['url' => 'https://www.youtube.com/watch?v=M7lc1UVf-VE', 'video_title' => 'Présentation', 'transcript' => '<p>Transcription</p>']);
+        self::assertStringContainsString('data-pb-provider="youtube" data-pb-video-id="M7lc1UVf-VE"', $youtube);
+        self::assertStringContainsString('hidden data-pb-video-load data-pb-video-title="Présentation"', $youtube);
+        self::assertStringContainsString('href="https://www.youtube.com/watch?v=M7lc1UVf-VE"', $youtube);
+        self::assertStringContainsString('<p>Transcription</p>', $youtube);
+        self::assertStringNotContainsString('<iframe', $youtube);
+        self::assertStringNotContainsString('<source', $youtube);
+        self::assertStringNotContainsString('<img', $youtube);
+
+        $vimeo = $this->renderBasicWidget('video', ['url' => 'https://vimeo.com/12345678']);
+        self::assertStringContainsString('data-pb-provider="vimeo" data-pb-video-id="12345678"', $vimeo);
+        self::assertStringNotContainsString('<iframe', $vimeo);
+        self::assertStringNotContainsString('<source', $vimeo);
+        $invalid = $this->renderBasicWidget('video', ['url' => 'https://www.youtube.com/playlist?list=PL123']);
+        self::assertStringContainsString('<a href="https://www.youtube.com/playlist?list=PL123"', $invalid);
+        self::assertStringNotContainsString('<source', $invalid);
+        self::assertStringNotContainsString('data-pb-embed-video', $invalid);
+    }
+
     public function testMediaUrlsAndGalleryAreValidated(): void
     {
         $gallery = $this->element('gallery', 'gallery');

@@ -17,7 +17,7 @@
 
 Le relecteur indique séparément, sur CMS 1.0.2 et MySQL, `OK (52 tests, 903 assertions)` et l’ouverture des écrans Theme Builder et Envois sans erreur console. Ce résultat est attribué au relecteur, distinct de la CI ci-dessus.
 
-**Reste :** B catalogue complet, puis C widgets globaux/dynamique, D Theme Builder, E formulaires complets, F popups et G finitions. B est en cours : sept widgets de base et leurs tests ont été poussés et vérifiés par la CI ci-dessous. La vidéo distante, la lightbox, le carrousel, la carte et la zone de thème restent à faire. Le découpage conditionnel des CSS est en cours de vérification. Le formulaire, le widget HTML et le Theme Builder actuels ne sont que des premiers sous-ensembles. Le plugin reste partiel et n’est pas prêt pour la production.
+**Reste :** B catalogue complet, puis C widgets globaux/dynamique, D Theme Builder, E formulaires complets, F popups et G finitions. B est en cours : sept widgets de base et leurs tests ont été poussés et vérifiés par la CI ci-dessous. Les lecteurs YouTube/Vimeo à activation explicite sont ajoutés, mais leur CI n’a pas encore été observée. La lightbox, le carrousel, la carte et la zone de thème restent à faire. Les feuilles propres aux widgets ont été séparées et leur chargement conditionnel vérifié par la CI ci-dessous. Le formulaire, le widget HTML et le Theme Builder actuels ne sont que des premiers sous-ensembles. Le plugin reste partiel et n’est pas prêt pour la production.
 
 ## Jalon A — corrections : terminé
 
@@ -35,7 +35,7 @@ La révision `57eea116b5a74c50e3d30ee85877fffbbd016880`, [run 45003137277](https
 - Node : `# tests 14`, `# pass 14`, `# fail 0` ; i18n : `Catalogue de traduction cohérent.`
 - Smoke : `Smoke: all routes, public content and document CSS passed.` ; E2E : `36 passed (1.8m)` et désactivation/désinstallation réussies. Les E2E ouvrent les sept widgets et leurs trois onglets, et exercent la bascule au clavier avec et sans JavaScript.
 
-Le socle CSS commun était encore chargé pour tous les widgets dans ce run. Le découpage des feuilles par widget, leur chargement conditionnel et l’aperçu sont en cours ; leurs tests ajoutés ne doivent pas être considérés comme passés avant la CI de leur révision. Les feuilles communes de structure et de kit restent partagées.
+Le découpage conditionnel des CSS a ensuite été poussé à `adedba0b0ea79b627521d80eab14f29609c363bd` et vérifié par le [run 45003718933](https://github.com/HamdiSouissi/prime-builder/actions/runs/45003718933), huit jobs verts : syntaxe `No syntax errors detected in content/plugins/prime-builder/.php-cs-fixer.dist.php`, PHPStan `[OK] No errors`, PHP-CS-Fixer `Found 0 of 45 files that can be fixed in 1.006 seconds, 84.00 MB memory used`, PHPUnit/MySQL `OK (63 tests, 1029 assertions)` sur chacune des deux versions CMS, Node `# tests 14` / `# pass 14` / `# fail 0`, i18n `Catalogue de traduction cohérent.`, smoke `Smoke: all routes, public content and document CSS passed.`, Playwright `36 passed (1.8m)`, désactivation et désinstallation réussies. Les tests couvrent les widgets imbriqués, la déduplication, les parties de thème et la feuille injectée dans l’aperçu. Les feuilles communes de structure et de kit restent partagées.
 
 ## Prochaines étapes et vérifications
 
@@ -119,7 +119,7 @@ Le statut concerne le **périmètre indiqué dans la ligne**, pas une parité co
 | Titre | **Fait et testé** : texte, niveau 1–6 ; D, E2E `compose and publish a page using the CMS theme`. | Non |
 | Texte riche | **Fait et testé** : HTML filtré ; D, `DT::testRichTextIsSanitized`. | Non |
 | Image | **Fait et testé** : URL, alternatif, largeur, hauteur ; D, E2E `image selection uses the Prime media picker`. | Non |
-| Vidéo fichier/YouTube/Vimeo sans suivi | **Non fait** — partiel : fichier, sous-titres WebVTT et transcription ; ni YouTube ni Vimeo. `DT::testMediaUrlsAndGalleryAreValidated`, D. | Non |
+| Vidéo fichier/YouTube/Vimeo sans suivi | **Non fait — en cours** : fichier, sous-titres et transcription déjà testés ; lecteur distant à activation explicite et ses tests ajoutés, CI à observer. Un clic contacte le service externe. | Oui, `video.js` si vidéo |
 | Bouton | **Fait et testé** : texte, lien ; D, E2E `build and publish four widgets with the mouse`. | Non |
 | Séparateur | **Fait et testé** : élément simple, styles communs ; D, E2E quatre widgets. | Non |
 | Espaceur | **Fait et testé** : styles communs, sans réglage spécifique ; D, P. | Non |

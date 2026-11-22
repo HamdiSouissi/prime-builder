@@ -412,6 +412,19 @@ final class Renderer
         if ($url === null) {
             return $transcript;
         }
+        if ($type === 'video') {
+            $embed = BlockRegistry::parseEmbedUrl($url);
+            if ($embed !== null) {
+                return $this->renderEmbeddedVideo($settings, $url, $embed)
+                    . ($transcript !== '' ? '<div class="pb-media-transcript">' . $transcript . '</div>' : '');
+            }
+            // Never try to fetch an unsupported YouTube/Vimeo URL as a media file.
+            $host = parse_url($url, PHP_URL_HOST);
+            if (is_string($host) && in_array(strtolower($host), ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtube-nocookie.com', 'www.youtube-nocookie.com', 'youtu.be', 'www.youtu.be', 'vimeo.com', 'www.vimeo.com', 'player.vimeo.com'], true)) {
+                return '<p><a href="' . self::escape($url) . '" rel="noopener noreferrer">' . self::escape(t('plugin::prime-builder.ui.video_invalid')) . '</a></p>'
+                    . ($transcript !== '' ? '<div class="pb-media-transcript">' . $transcript . '</div>' : '');
+            }
+        }
         $html = '<' . $type . ' controls preload="metadata"><source src="' . self::escape($url) . '">';
         if ($type === 'video') {
             $captions = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'captions'));
@@ -422,6 +435,24 @@ final class Renderer
         }
         $html .= '<a href="' . self::escape($url) . '">' . self::escape(t('plugin::prime-builder.ui.download_media')) . '</a></' . $type . '>';
         return $html . ($transcript !== '' ? '<div class="pb-media-transcript">' . $transcript . '</div>' : '');
+    }
+
+    /**
+     * A neutral placeholder avoids contacting video platforms before the visitor
+     * explicitly requests the player. The regular link is also a no-JS fallback.
+     *
+     * @param array<string, mixed> $settings
+     * @param array{provider: 'youtube'|'vimeo', id: string, embedUrl: string, defaultTitle: string} $embed
+     */
+    private function renderEmbeddedVideo(array $settings, string $url, array $embed): string
+    {
+        $provider = $embed['provider'] === 'youtube' ? 'YouTube' : 'Vimeo';
+        $args = ['provider' => $provider];
+        $title = $this->fieldText($settings, 'video_title', t('plugin::prime-builder.ui.video_default_title', $args));
+        return '<div class="pb-video-embed" data-pb-embed-video data-pb-provider="' . self::escape($embed['provider']) . '" data-pb-video-id="' . self::escape($embed['id']) . '">'
+            . '<p>' . self::escape(t('plugin::prime-builder.ui.video_privacy')) . '</p>'
+            . '<button type="button" hidden data-pb-video-load data-pb-video-title="' . self::escape($title) . '">' . self::escape(t('plugin::prime-builder.ui.video_load', $args)) . '</button>'
+            . '<p><a href="' . self::escape($url) . '" rel="noopener noreferrer">' . self::escape(t('plugin::prime-builder.ui.video_open', $args)) . '</a></p></div>';
     }
 
     public static function escape(string $value): string

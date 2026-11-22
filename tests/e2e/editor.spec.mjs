@@ -373,6 +373,63 @@ test('toggle works with keyboard on the public page, including without JavaScrip
   } finally { await noJs.close(); }
 });
 
+test('external videos contact their providers only after keyboard activation', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const status = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const elements = [
+      { id: 'youtube_demo', type: 'video', settings: { url: 'https://www.youtube.com/watch?v=M7lc1UVf-VE', video_title: 'Présentation vidéo' }, styles: {}, children: [] },
+      { id: 'vimeo_demo', type: 'video', settings: { url: 'https://vimeo.com/12345678', video_title: 'Entretien vidéo' }, styles: {}, children: [] },
+    ];
+    const result = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements } }] }, status: 'published', published_at: '' }),
+    });
+    return result.status;
+  }, id);
+  expect(status).toBe(200);
+
+  const providerRequests = [];
+  page.on('request', request => {
+    if (/youtube|youtu\.be|ytimg|googlevideo|vimeo|vimeocdn|doubleclick/i.test(new URL(request.url()).hostname)) providerRequests.push(request.url());
+  });
+  const response = '<!doctype html><html lang="fr"><head><title>Lecteur de test</title></head><body>Lecteur</body></html>';
+  await page.route('https://www.youtube-nocookie.com/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: response }));
+  await page.route('https://player.vimeo.com/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: response }));
+  await page.goto('/test-prime-builder');
+  const youtube = page.locator('[data-pb-id="youtube_demo"]');
+  const vimeo = page.locator('[data-pb-id="vimeo_demo"]');
+  const ytButton = youtube.getByRole('button', { name: 'Charger la vidéo YouTube' });
+  const vimeoButton = vimeo.getByRole('button', { name: 'Charger la vidéo Vimeo' });
+  await expect(ytButton).toBeVisible();
+  await expect(vimeoButton).toBeVisible();
+  await expect(page.locator('.pb-video iframe')).toHaveCount(0);
+  await expectAccessible(page);
+  expect(providerRequests).toEqual([]);
+  await ytButton.focus();
+  await page.keyboard.press('Enter');
+  const ytFrame = youtube.locator('iframe');
+  await expect(ytFrame).toHaveAttribute('title', 'Présentation vidéo');
+  await expect(ytFrame).toHaveAttribute('src', 'https://www.youtube-nocookie.com/embed/M7lc1UVf-VE?autoplay=1');
+  await expect.poll(() => providerRequests.length).toBe(1);
+  await vimeoButton.focus();
+  await page.keyboard.press('Space');
+  await expect(vimeo.locator('iframe')).toHaveAttribute('src', 'https://player.vimeo.com/video/12345678?dnt=1&autoplay=1');
+  await expect.poll(() => providerRequests.length).toBe(2);
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    await expect(fallback.locator('.pb-video iframe')).toHaveCount(0);
+    await expect(fallback.getByRole('link', { name: 'Ouvrir la vidéo sur YouTube' })).toHaveAttribute('href', 'https://www.youtube.com/watch?v=M7lc1UVf-VE');
+    await expect(fallback.getByRole('link', { name: 'Ouvrir la vidéo sur Vimeo' })).toHaveAttribute('href', 'https://vimeo.com/12345678');
+    await expect(fallback.locator('[data-pb-video-load]')).toHaveCount(2);
+    await expect(fallback.locator('[data-pb-video-load]').first()).toBeHidden();
+  } finally { await noJs.close(); }
+});
+
 test('tabs work with keyboard and remain readable without JavaScript', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
