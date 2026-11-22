@@ -28,6 +28,7 @@ use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
+use PrimeBuilder\Widgets\Assets;
 use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
@@ -129,6 +130,7 @@ final class Documents
             $definitions[$name] = [
                 'label' => t(is_string($definition['label'] ?? null) ? $definition['label'] : $name),
                 'category' => is_string($definition['category'] ?? null) ? $definition['category'] : 'base',
+                'style' => Assets::safeUrl($definition['style'] ?? null, 'css'),
                 'fields' => $fields,
                 'container' => ($definition['container'] ?? false) === true,
                 'hidden' => ($definition['hidden'] ?? false) === true || ($name === 'html' && !$user?->can('prime_builder.unfiltered_html')),

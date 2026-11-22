@@ -13,10 +13,12 @@ use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
+use PrimeBuilder\Widgets\Assets;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
 
+require_once dirname(__DIR__) . '/src/Widgets/Assets.php';
 require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
@@ -259,6 +261,15 @@ final class DocumentTest extends TestCase
         $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
         self::assertSame([], $result['errors']);
         return (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+    }
+
+    public function testWidgetAssetUrlsRejectExternalAndTraversalPaths(): void
+    {
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/toggle.css', Assets::safeUrl('/assets/plugins/prime-builder/css/widgets/toggle.css', 'css'));
+        self::assertSame(null, Assets::safeUrl('https://example.test/style.css', 'css'));
+        self::assertSame(null, Assets::safeUrl('/assets/plugins/prime-builder/../evil.css', 'css'));
+        self::assertSame(null, Assets::safeUrl('/assets/plugins/prime-builder/js/tabs.js', 'css'));
+        self::assertSame(null, Assets::safeUrl('//evil.test/widget.css', 'css'));
     }
 
     public function testBasicWidgetsAreCategorizedAndNeedNoPublicScript(): void

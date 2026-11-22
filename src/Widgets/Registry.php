@@ -77,6 +77,9 @@ final class Registry
                 $definitions[$type]['hidden'] = true;
                 $definitions[$type]['read_only'] = true;
             }
+            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'video', 'audio', 'posts', 'form'], true)) {
+                $definitions[$type]['style'] = '/assets/plugins/prime-builder/css/widgets/' . $type . '.css';
+            }
             if ($type === 'tabs') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
             } elseif (in_array($type, ['posts', 'current_content'], true)) {

@@ -198,12 +198,45 @@ final class IntegrationTest extends TestCase
         $assets = new ThemeAssetRegistry();
         $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
         self::assertStringContainsString('/assets/plugins/prime-builder/js/tabs.js', $assets->renderScripts());
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/tabs.css'));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/form.css', $assets->renderStyles());
 
         $assets = new ThemeAssetRegistry();
         $other = $app->get(EntryRepository::class)->find(2);
         self::assertNotNull($other);
         $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/tabs.js', $assets->renderScripts());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/tabs.css', $assets->renderStyles());
+    }
+
+    public function testWidgetStylesAreConditionalDeduplicatedAndCollectedFromNestedElements(): void
+    {
+        $app = $this->activated(null);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $children = [];
+        foreach (['icon', 'icon_list', 'image_box', 'testimonial', 'toggle', 'social', 'star_rating'] as $type) {
+            $children[] = ['id' => $type, 'type' => $type, 'settings' => [], 'styles' => [], 'children' => []];
+        }
+        $children[] = ['id' => 'second_box', 'type' => 'image_box', 'settings' => [], 'styles' => [], 'children' => []];
+        $document['blocks'][0]['data']['elements'] = [['id' => 'wrap', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => $children]];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        $styles = $assets->renderStyles();
+        self::assertSame(1, substr_count($styles, '/assets/plugins/prime-builder/css/widgets/container.css'));
+        self::assertSame(1, substr_count($styles, '/assets/plugins/prime-builder/css/widgets/image_box.css'));
+        self::assertSame(1, substr_count($styles, '/assets/plugins/prime-builder/css/widgets/toggle.css'));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/tabs.css', $styles);
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/form.css', $styles);
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
+        $documentPosition = strpos($styles, 'href="/prime-builder/css/');
+        $widgetPosition = strpos($styles, '/assets/plugins/prime-builder/css/widgets/image_box.css');
+        self::assertNotFalse($documentPosition);
+        self::assertNotFalse($widgetPosition);
+        self::assertLessThan($documentPosition, $widgetPosition);
     }
 
     public function testLiveContentHasSafeFallbackAndNeverListsDraftPosts(): void
@@ -840,6 +873,7 @@ final class IntegrationTest extends TestCase
         $assets = new ThemeAssetRegistry();
         $hooks->emit('site.assets', $assets, $page);
         self::assertStringContainsString('/assets/plugins/prime-builder/js/tabs.js', $assets->renderScripts());
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/tabs.css'));
         self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\.css)~', $assets->renderStyles(), $matches));
         $css = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
         self::assertSame(200, $css->status());
@@ -849,6 +883,7 @@ final class IntegrationTest extends TestCase
         $assets = new ThemeAssetRegistry();
         $hooks->emit('site.assets', $assets, $excludedPage);
         self::assertStringNotContainsString('/prime-builder/theme/', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/tabs.css', $assets->renderStyles());
         $fields['footer'] = $id;
         self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
         $footer = $hooks->apply('site.partial', null, 'footer', $page, ['after_save' => true]);
@@ -858,6 +893,7 @@ final class IntegrationTest extends TestCase
         $assets = new ThemeAssetRegistry();
         $hooks->emit('site.assets', $assets, $page);
         self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/tabs.js'));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/tabs.css'));
         // A library manager deleting a source cannot silently change the selected theme snapshot.
         self::assertSame(200, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/' . $id, token: $admin)->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));

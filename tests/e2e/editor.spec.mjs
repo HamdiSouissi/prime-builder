@@ -319,6 +319,12 @@ test('new basic widgets each expose content, style and advanced controls', async
     await page.locator('[data-pb-panel="widgets"]').click();
     await page.getByRole('button', { name: `Ajouter ${name}`, exact: true }).click();
     await expect(page.locator('[data-pb-fields] input, [data-pb-fields] select, [data-pb-fields] textarea').first()).toBeVisible();
+    if (name === 'Boîte image') {
+      await page.getByLabel('Adresse URL', { exact: true }).fill('/suite');
+      const frame = page.frameLocator('[data-pb-frame]');
+      await expect(frame.locator('link[href*="/css/widgets/image_box.css"]')).toHaveCount(1);
+      await expect(frame.locator('.pb-image_box .pb-button-link').last()).toHaveCSS('background-color', 'rgb(201, 68, 31)');
+    }
     await page.getByRole('button', { name: 'Style', exact: true }).click();
     await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Avancé', exact: true }).click();

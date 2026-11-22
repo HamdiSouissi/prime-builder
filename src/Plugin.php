@@ -47,6 +47,7 @@ use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Theme\Partials;
+use PrimeBuilder\Widgets\Assets;
 use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
@@ -256,7 +257,6 @@ final class Plugin extends AbstractPlugin
             if (!$page->isPreview && $type !== null && $type->public && \Prime\Site\UrlResolver::isPubliclyVisible($page->entry)) {
                 $snapshots->remember($file, $css);
             }
-            $assets->style('prime-builder-document', '/prime-builder/css/' . $file, ['prime-builder-kit']);
             $types = [];
             $collect = static function (array $elements) use (&$collect, &$types): void {
                 foreach ($elements as $element) {
@@ -272,15 +272,8 @@ final class Plugin extends AbstractPlugin
                 }
             };
             $collect(is_array($data['elements'] ?? null) ? $data['elements'] : []);
-            $definitions = (new Registry($context->app()->get(Hooks::class)))->all();
-            $registeredScripts = [];
-            foreach (array_keys($types) as $type) {
-                $script = $definitions[$type]['script'] ?? null;
-                if (is_string($script) && !isset($registeredScripts[$script]) && !str_contains($script, '..') && preg_match('#^/assets/plugins/[a-z0-9-]+/[a-zA-Z0-9_./-]+\.js(?:\?[a-zA-Z0-9_=&.-]+)?$#', $script) === 1) {
-                    $assets->script('prime-builder-widget-' . $type, $script);
-                    $registeredScripts[$script] = true;
-                }
-            }
+            Assets::register($assets, $types, (new Registry($context->app()->get(Hooks::class)))->all());
+            $assets->style('prime-builder-document', '/prime-builder/css/' . $file, ['prime-builder-kit']);
         });
         $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, $partials, $registry): void {
             if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
@@ -311,18 +304,7 @@ final class Plugin extends AbstractPlugin
                 $assets->style('prime-builder-theme-' . $slot, '/prime-builder/theme/' . $file, ['prime-builder-kit']);
                 $collect(is_array($layout['elements'] ?? null) ? $layout['elements'] : []);
             }
-            $registered = [];
-            foreach ($assets->resolvedScripts() as $script) {
-                $registered[explode('?', $script['url'], 2)[0]] = true;
-            }
-            $definitions = $registry->all();
-            foreach (array_keys($types) as $type) {
-                $script = $definitions[$type]['script'] ?? null;
-                if (is_string($script) && !isset($registered[explode('?', $script, 2)[0]]) && !str_contains($script, '..') && preg_match('#^/assets/plugins/[a-z0-9-]+/[a-zA-Z0-9_./-]+\.js(?:\?[a-zA-Z0-9_=&.-]+)?$#', $script) === 1) {
-                    $assets->script('prime-builder-widget-' . $type, $script);
-                    $registered[explode('?', $script, 2)[0]] = true;
-                }
-            }
+            Assets::register($assets, $types, $registry->all());
         });
         $context->hooks()->on('settings.updated', static function (mixed $name) use ($context): void {
             if (is_string($name) && str_starts_with($name, 'plugin.prime-builder.')) {

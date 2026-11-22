@@ -1,0 +1,1 @@
+.pb-gallery-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:1rem}.pb-gallery-grid img{width:100%;height:auto;display:block}

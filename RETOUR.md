@@ -17,13 +17,25 @@
 
 Le relecteur indique séparément, sur CMS 1.0.2 et MySQL, `OK (52 tests, 903 assertions)` et l’ouverture des écrans Theme Builder et Envois sans erreur console. Ce résultat est attribué au relecteur, distinct de la CI ci-dessus.
 
-**Reste :** B catalogue complet, puis C widgets globaux/dynamique, D Theme Builder, E formulaires complets, F popups et G finitions. B est en cours : sept widgets de base et leurs tests viennent d’être ajoutés ; leur exécution en CI reste à observer. La vidéo distante, la lightbox, le carrousel, la carte et la zone de thème restent à faire, ainsi que le chargement CSS conditionnel. Le formulaire, le widget HTML et le Theme Builder actuels ne sont que des premiers sous-ensembles. Le plugin reste partiel et n’est pas prêt pour la production.
+**Reste :** B catalogue complet, puis C widgets globaux/dynamique, D Theme Builder, E formulaires complets, F popups et G finitions. B est en cours : sept widgets de base et leurs tests ont été poussés et vérifiés par la CI ci-dessous. La vidéo distante, la lightbox, le carrousel, la carte et la zone de thème restent à faire. Le découpage conditionnel des CSS est en cours de vérification. Le formulaire, le widget HTML et le Theme Builder actuels ne sont que des premiers sous-ensembles. Le plugin reste partiel et n’est pas prêt pour la production.
 
 ## Jalon A — corrections : terminé
 
 Révision et run : `2a02837e7062d18cd9933363c11a75c1a6e94c90`, [44965923577](https://github.com/HamdiSouissi/prime-builder/actions/runs/44965923577) ; les huit jobs et leurs lignes finales sont donnés ci-dessus. Les tests vérifient conversion et repli convenu, 403/succès des capacités, dialogue, styles et parcours complet du menu au clavier. Les captures du formulaire public et de sa boîte ont été examinées à 1440 et 375 px sur une fixture locale SQLite ; la CI teste aussi MySQL. Les audits automatisés et captures ne constituent pas un audit manuel complet WCAG ou sécurité.
 
 La limite API générale est augmentée uniquement dans la fixture E2E jetable ; les limites propres au formulaire sont testées séparément. Sous Prime CMS 1.0.1, l’adaptateur HTTP est actif seulement tant que le plugin est chargé et que l’alias n’est pas remplacé ; 1.0.2 est recommandé. Si les frontières des anciens blocs sont indéductibles, leur HTML est conservé dans un seul élément en lecture seule : réglages originaux perdus et rendu dynamique figé.
+
+## Jalon B — en cours, sept widgets de base
+
+La révision `57eea116b5a74c50e3d30ee85877fffbbd016880`, [run 45003137277](https://github.com/HamdiSouissi/prime-builder/actions/runs/45003137277), ajoute icône, liste d’icônes, boîte image, témoignage, bascule, réseaux sociaux et note par étoiles. Les huit jobs sont verts ; cela **ne clôt pas B**.
+
+- Syntaxe : `No syntax errors detected in content/plugins/prime-builder/views/admin/builder.php` ; PHPStan : `[OK] No errors`.
+- PHP-CS-Fixer : `Found 0 of 44 files that can be fixed in 1.022 seconds, 86.00 MB memory used`.
+- PHPUnit/MySQL sur CMS main et 1.0.1 : `OK (61 tests, 1004 assertions)` pour chaque version.
+- Node : `# tests 14`, `# pass 14`, `# fail 0` ; i18n : `Catalogue de traduction cohérent.`
+- Smoke : `Smoke: all routes, public content and document CSS passed.` ; E2E : `36 passed (1.8m)` et désactivation/désinstallation réussies. Les E2E ouvrent les sept widgets et leurs trois onglets, et exercent la bascule au clavier avec et sans JavaScript.
+
+Le socle CSS commun était encore chargé pour tous les widgets dans ce run. Le découpage des feuilles par widget, leur chargement conditionnel et l’aperçu sont en cours ; leurs tests ajoutés ne doivent pas être considérés comme passés avant la CI de leur révision. Les feuilles communes de structure et de kit restent partagées.
 
 ## Prochaines étapes et vérifications
 
@@ -111,20 +123,20 @@ Le statut concerne le **périmètre indiqué dans la ligne**, pas une parité co
 | Bouton | **Fait et testé** : texte, lien ; D, E2E `build and publish four widgets with the mouse`. | Non |
 | Séparateur | **Fait et testé** : élément simple, styles communs ; D, E2E quatre widgets. | Non |
 | Espaceur | **Fait et testé** : styles communs, sans réglage spécifique ; D, P. | Non |
-| Icône | **Non fait — en cours** : icône seule, description accessible ; `DT::testIconRendersAnAccessibleOrDecorativeSymbol` ajouté, CI à observer. | Non |
+| Icône | **Fait et testé** pour la version simple : icône seule et description accessible ; `DT::testIconRendersAnAccessibleOrDecorativeSymbol` dans `45003137277`. | Non |
 | Boîte icône | **Fait et testé** pour la version simple : quatre symboles, titre, texte ; D, P. | Non |
-| Boîte image | **Non fait — en cours** : image, dimensions, titre, texte et lien ; `DT::testImageBoxRendersSafeImageDimensionsContentAndLink` ajouté, CI à observer. | Non |
-| Liste d’icônes | **Non fait — en cours** : symboles décoratifs et lignes textuelles ; `DT::testIconListRendersEscapedItemsWithDecorativeIcons` ajouté, CI à observer. | Non |
+| Boîte image | **Fait et testé** pour la version simple : image, dimensions, titre, texte et lien ; `DT::testImageBoxRendersSafeImageDimensionsContentAndLink` dans `45003137277`. | Non |
+| Liste d’icônes | **Fait et testé** pour la version simple : symboles décoratifs et lignes textuelles ; `DT::testIconListRendersEscapedItemsWithDecorativeIcons` dans `45003137277`. | Non |
 | Compteur | **Fait et testé** pour une valeur statique : valeur, préfixe, suffixe, titre ; D, P. Pas d’animation. | Non |
 | Barre de progression | **Fait et testé** : libellé, valeur 0–100, `<progress>` ; D, P. | Non |
-| Témoignage | **Non fait — en cours** : citation, auteur, fonction et portrait ; `DT::testTestimonialRendersQuotationAttributionAndOptionalPortrait` ajouté, CI à observer. | Non |
+| Témoignage | **Fait et testé** pour la version simple : citation, auteur, fonction et portrait ; `DT::testTestimonialRendersQuotationAttributionAndOptionalPortrait` dans `45003137277`. | Non |
 | Onglets | **Fait et testé** pour 2–3 panneaux : titres et textes ; E2E `tabs work with keyboard and remain readable without JavaScript`, `DT::testNewWidgetsProduceSafeReadableFallbacks`. | Oui, `tabs.js` |
 | Accordéon | **Fait et testé** pour un `<details>` : titre, texte ; `DT::testNewWidgetsProduceSafeReadableFallbacks`, P. | Non |
-| Bascule | **Non fait — en cours** : `<details>` natif, ouvert/fermé ; `DT::testToggleUsesNativeDetailsWithAnOptionalOpenInitialState` et E2E clavier ajoutés, CI à observer. | Non |
+| Bascule | **Fait et testé** pour la version simple : `<details>` natif, ouvert/fermé ; `DT::testToggleUsesNativeDetailsWithAnOptionalOpenInitialState` et E2E clavier dans `45003137277`. | Non |
 | Alerte | **Fait et testé** pour texte filtré simple ; D, P. | Non |
-| Réseaux sociaux | **Non fait — en cours** : navigation nommée et cinq liens ; `DT::testSocialLinksUseNamedNavigationAndRejectUnsafeUrls` ajouté, CI à observer. | Non |
+| Réseaux sociaux | **Fait et testé** pour la version simple : navigation nommée et cinq liens ; `DT::testSocialLinksUseNamedNavigationAndRejectUnsafeUrls` dans `45003137277`. | Non |
 | Carte OpenStreetMap | **Non fait** : le widget `card` est une carte éditoriale, pas une carte géographique. | — |
-| Note par étoiles | **Non fait — en cours** : 0–5 étoiles et libellé accessible ; `DT::testStarRatingRendersOneAccessibleLabelAndFiveVisualStars` et test de localisation ajoutés, CI à observer. | Non |
+| Note par étoiles | **Fait et testé** pour la version simple : 0–5 étoiles et libellé accessible ; `DT::testStarRatingRendersOneAccessibleLabelAndFiveVisualStars` et test de localisation dans `45003137277`. | Non |
 | Galerie et lightbox | **Non fait** — partiel : liste de 20 URL/alternatifs, pas de lightbox ; `DT::testMediaUrlsAndGalleryAreValidated`. | Non |
 | Carrousel d’images | **Non fait**. | — |
 | Ancre de menu | **Fait et testé** pour une ancre simple : identifiant validé ; D, P. | Non |

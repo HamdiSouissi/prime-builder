@@ -809,6 +809,31 @@ function applyVisualStyles(doc) {
   }
   walk(history.present);
 }
+function syncPreviewWidgetStyles(doc) {
+  const wanted = new Set();
+  const collect = nodes => {
+    for (const node of nodes) {
+      const style = config.widgets[node.type]?.style;
+      if (style) wanted.add(style);
+      collect(node.children || []);
+    }
+  };
+  collect(history.present);
+  doc.querySelectorAll('link[data-pb-widget-style]').forEach(link => {
+    if (!wanted.has(link.dataset.pbWidgetStyle)) link.remove();
+    else wanted.delete(link.dataset.pbWidgetStyle);
+  });
+  const existing = new Set([...doc.querySelectorAll('link[rel="stylesheet"]')].map(link => {
+    const url = new URL(link.href, doc.baseURI);
+    return url.origin === location.origin ? url.pathname : '';
+  }));
+  wanted.forEach(style => {
+    if (existing.has(new URL(style, location.origin).pathname)) return;
+    const link = doc.createElement('link');
+    link.rel = 'stylesheet'; link.href = style; link.dataset.pbWidgetStyle = style;
+    doc.head.append(link);
+  });
+}
 async function renderPreview(sequence) {
   if (foreign || !frame.contentDocument) return;
   // Keep the complete tree in the request for server-side validation, but render
@@ -859,6 +884,7 @@ async function renderPreview(sequence) {
     }
     previewNeedsFull = false;
     previewTargets.clear();
+    syncPreviewWidgetStyles(doc);
     applyVisualStyles(doc);
     positionToolbar();
   } catch { if (sequence === requestNumber) $('[data-pb-save-state]').textContent = ui.connection_error; }
