@@ -37,6 +37,9 @@ async function showMobilePreview(page, frame, selector) {
     const top = node.getBoundingClientRect().top;
     return top >= 70 && top < node.ownerDocument.defaultView.innerHeight - 40;
   })).toBe(true);
+  // The editor's sticky footer otherwise covers the middle of the iframe in a
+  // full-page capture. A real user can scroll the outer page to reach its end.
+  await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
 }
 
 test('dashboard exposes the current features and system status', async ({ page }) => {
@@ -797,6 +800,92 @@ test('toggle works with keyboard on the public page, including without JavaScrip
   } finally { await noJs.close(); }
 });
 
+test('portfolio filters projects with the keyboard and shows all without JavaScript', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] }, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  await page.getByRole('button', { name: 'Ajouter Portfolio', exact: true }).click();
+  await page.getByLabel('Une ligne : URL image | texte alternatif | titre | catégorie', { exact: false }).fill('/assets/plugins/prime-builder/images/landscape.svg | Paysage abstrait | Identité vivante | Identité | Une marque qui prend forme. | /projet-identite\n/assets/plugins/prime-builder/images/landscape.svg | Paysage stylisé | Site accessible | Sites web | Une expérience pour tous. | /projet-site\n/assets/plugins/prime-builder/images/landscape.svg | Paysage abstrait | Nouveau regard | Identité | Un projet collectif.');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.locator('.pb-portfolio [data-pb-portfolio-item]')).toHaveCount(3);
+  await expect(frame.locator('.pb-portfolio')).toContainText('Nouveau regard');
+  await expect(frame.locator('link[href*="/css/widgets/portfolio.css"]')).toHaveCount(1);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('portfolio-screen-editor-desktop.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await showMobilePreview(page, frame, '.pb-portfolio');
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expect.poll(() => frame.locator('html').evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('portfolio-screen-editor-mobile.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+
+  await page.goto('/test-prime-builder');
+  const portfolio = page.locator('.pb-portfolio');
+  const items = portfolio.locator('[data-pb-portfolio-item]');
+  const filters = portfolio.getByRole('group', { name: 'Filtrer les projets' });
+  const all = filters.getByRole('button', { name: 'Tous les projets' });
+  const identity = filters.getByRole('button', { name: 'Catégorie : Identité' });
+  const web = filters.getByRole('button', { name: 'Catégorie : Sites web' });
+  await expect(items).toHaveCount(3);
+  await expect(all).toHaveAttribute('aria-pressed', 'true');
+  await expect(portfolio.getByRole('status')).toHaveText('3 projets affichés');
+  await expect(portfolio.getByRole('link', { name: 'Identité vivante' })).toHaveAttribute('href', '/projet-identite');
+  await expect(page.locator('link[href*="/css/widgets/portfolio.css"]')).toHaveCount(1);
+  await expect(page.locator('script[src*="/js/portfolio.js"]')).toHaveCount(1);
+  await identity.focus();
+  await page.keyboard.press('Enter');
+  await expect(identity).toHaveAttribute('aria-pressed', 'true');
+  await expect(items.nth(0)).toBeVisible();
+  await expect(items.nth(1)).toBeHidden();
+  await expect(items.nth(2)).toBeVisible();
+  await expect(portfolio.getByRole('status')).toHaveText('2 projets affichés');
+  await page.keyboard.press('Tab');
+  await expect(web).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(items.nth(0)).toBeHidden();
+  await expect(items.nth(1)).toBeVisible();
+  await expect(portfolio.getByRole('status')).toHaveText('1 projet affiché');
+  await all.focus();
+  await page.keyboard.press('Enter');
+  await expect(all).toHaveAttribute('aria-pressed', 'true');
+  await expect(items.nth(0)).toBeVisible();
+  await expect(items.nth(1)).toBeVisible();
+  await expect(items.nth(2)).toBeVisible();
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('portfolio-screen-public-desktop.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('portfolio-screen-public-mobile.jpg'), fullPage: true, quality: 20 });
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const visible = fallback.locator('.pb-portfolio [data-pb-portfolio-item]');
+    await expect(visible).toHaveCount(3);
+    for (let index = 0; index < 3; index++) await expect(visible.nth(index)).toBeVisible();
+    await expect(fallback.locator('.pb-portfolio-filters')).toHaveCount(0);
+    await expect(fallback.getByRole('link', { name: 'Identité vivante' })).toHaveAttribute('href', '/projet-identite');
+  } finally { await noJs.close(); }
+});
+
 test('slideshow exposes safe slides and keyboard navigation with a no-script fallback', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
@@ -1535,7 +1624,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(47);
+  await expect(page.locator('.pb-element')).toHaveCount(48);
   await expectAccessible(page);
 });
 

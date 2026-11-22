@@ -36,6 +36,7 @@ require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
+require_once dirname(__DIR__) . '/src/Widgets/Portfolio.php';
 require_once dirname(__DIR__) . '/src/Widgets/Slideshow.php';
 require_once dirname(__DIR__) . '/src/Widgets/TermIds.php';
 require_once dirname(__DIR__) . '/src/Widgets/Testimonials.php';
@@ -416,6 +417,57 @@ final class DocumentTest extends TestCase
         self::assertSame('/assets/plugins/prime-builder/css/widgets/media_carousel.css', $definition['style']);
         self::assertSame('/assets/plugins/prime-builder/js/image_carousel.js', $definition['script']);
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/media_carousel.css');
+    }
+
+    public function testPortfolioValidatesCardsAndRendersEveryProjectWithoutScript(): void
+    {
+        $node = $this->element('portfolio');
+        $node['settings'] = [
+            'columns' => 2, 'level' => 3,
+            'items' => "/uploads/a.jpg | Paysage & ciel | <b>Projet A</b> | Identité & création | Texte <em>riche</em> | /suite?x=1&y=2\n/uploads/b.jpg | | Projet B | Sites web",
+        ];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame("/uploads/a.jpg | Paysage & ciel | Projet A | Identité & création | Texte riche | /suite?x=1&y=2\n/uploads/b.jpg |  | Projet B | Sites web", $result['data']['elements'][0]['settings']['items']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertSame(2, substr_count($html, 'data-pb-portfolio-item'));
+        self::assertStringContainsString('pb-portfolio-columns-2', $html);
+        self::assertStringContainsString('data-pb-category="Identité &amp; création"', $html);
+        self::assertStringContainsString('src="/uploads/a.jpg" alt="Paysage &amp; ciel" width="800" height="600" loading="lazy"', $html);
+        self::assertStringContainsString('<h3><a href="/suite?x=1&amp;y=2">Projet A</a></h3>', $html);
+        self::assertStringContainsString('<h3>Projet B</h3>', $html);
+        self::assertStringContainsString('<p>Texte riche</p>', $html);
+        self::assertStringNotContainsString('<em>', $html);
+        self::assertStringNotContainsString(' hidden', $html);
+        self::assertStringNotContainsString('<button', $html);
+        self::assertStringContainsString(Renderer::escape(t('plugin::prime-builder.ui.portfolio_empty')), $this->renderBasicWidget('portfolio', []));
+        $compact = implode("\n", array_fill(0, 20, '/i|' . str_repeat('a', 300) . '|' . str_repeat('t', 300) . '|Catégorie|' . str_repeat('d', 126)));
+        $node['settings'] = ['items' => $compact];
+        $nearLimit = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $nearLimit['errors']);
+        self::assertSame($compact, $nearLimit['data']['elements'][0]['settings']['items']);
+        self::assertSame([], $this->validator()->validate($nearLimit['data'])['errors']);
+        $manyCategories = [];
+        for ($i = 0; $i < 13; $i++) {
+            $manyCategories[] = '/a.jpg | alt | Titre | catégorie ' . $i;
+        }
+        foreach ([
+            'javascript:alert(1) | alt | Titre | Catégorie', '//evil.test/a.jpg | alt | Titre | Catégorie',
+            '/a.jpg | alt | | Catégorie', '/a.jpg | alt | Titre |', '/a.jpg | alt | Titre | Catégorie | description | javascript:alert(1)',
+            '/a.jpg | alt | Titre | Catégorie | description | /suite | surplus',
+            implode("\n", array_fill(0, 25, '/a.jpg | alt | Titre | Catégorie')),
+            implode("\n", $manyCategories),
+        ] as $bad) {
+            $node['settings'] = ['items' => $bad];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+        $node['settings'] = ['columns' => 5, 'level' => 1];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['portfolio'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/portfolio.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/portfolio.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/portfolio.css');
     }
 
     public function testSlideshowValidatesSlidesAndRendersSafeContentWithoutScript(): void

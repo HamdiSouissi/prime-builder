@@ -54,6 +54,11 @@ final class Registry
                 'items' => ['type' => 'slideshow_items', 'max' => 15000, 'label' => 'plugin::prime-builder.ui.slideshow_items'],
                 'level' => ['type' => 'integer', 'min' => 2, 'max' => 6],
             ],
+            'portfolio' => [
+                'items' => ['type' => 'portfolio_items', 'max' => 15000, 'label' => 'plugin::prime-builder.ui.portfolio_items'],
+                'columns' => ['type' => 'integer', 'min' => 1, 'max' => 4],
+                'level' => ['type' => 'integer', 'min' => 2, 'max' => 6],
+            ],
             'review' => [
                 'title' => $text, 'level' => ['type' => 'integer', 'min' => 2, 'max' => 6],
                 'rating' => ['type' => 'integer', 'min' => 0, 'max' => 5, 'label' => 'plugin::prime-builder.ui.review_rating'],
@@ -137,7 +142,7 @@ final class Registry
         foreach ($fields as $type => $schema) {
             $definitions[$type] = [
                 'label' => 'plugin::prime-builder.widgets.' . $type,
-                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'search_form'], true) ? 'pro' : 'base'),
+                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form'], true) ? 'pro' : 'base'),
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];
@@ -145,12 +150,12 @@ final class Registry
                 $definitions[$type]['hidden'] = true;
                 $definitions[$type]['read_only'] = true;
             }
-            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'search_form'], true)) {
+            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form'], true)) {
                 $definitions[$type]['style'] = '/assets/plugins/prime-builder/css/widgets/' . $type . '.css';
             }
             if ($type === 'tabs') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
-            } elseif (in_array($type, ['countdown', 'flip_box'], true)) {
+            } elseif (in_array($type, ['countdown', 'flip_box', 'portfolio'], true)) {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/' . $type . '.js';
             } elseif (in_array($type, ['posts', 'current_content', 'theme_zone', 'search_form'], true)) {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/content.js';

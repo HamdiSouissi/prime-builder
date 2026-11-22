@@ -177,6 +177,7 @@ final class Renderer
             'testimonial_carousel' => $this->renderTestimonialCarousel($settings),
             'media_carousel' => $this->renderMediaCarousel($settings),
             'slideshow' => $this->renderSlideshow($settings),
+            'portfolio' => $this->renderPortfolio($settings),
             'review' => $this->renderReview($settings),
             'flip_box' => $this->renderFlipBox($settings),
             'animated_heading' => $this->renderAnimatedHeading($settings),
@@ -533,6 +534,35 @@ final class Renderer
             $html .= '</article>';
         }
         return $html . '</div></div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderPortfolio(array $settings): string
+    {
+        $items = Portfolio::parse(is_string($settings['items'] ?? null) ? $settings['items'] : '', $this->sanitizer);
+        if ($items === null || $items === []) {
+            return '<p>' . self::escape(t('plugin::prime-builder.ui.portfolio_empty')) . '</p>';
+        }
+        $columns = max(1, min(4, (int) ($settings['columns'] ?? 3)));
+        $level = max(2, min(6, (int) ($settings['level'] ?? 3)));
+        $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.' . $key));
+        $html = '<div data-pb-portfolio data-pb-portfolio-filter-label="' . $copy('portfolio_filter_label') . '"'
+            . ' data-pb-portfolio-all="' . $copy('portfolio_all') . '" data-pb-portfolio-category="' . $copy('portfolio_category') . '"'
+            . ' data-pb-portfolio-single="' . $copy('portfolio_single') . '" data-pb-portfolio-plural="' . $copy('portfolio_plural') . '">'
+            . '<ul class="pb-portfolio-list pb-portfolio-columns-' . $columns . '">';
+        foreach ($items as $item) {
+            $title = self::escape($item['title']);
+            $html .= '<li class="pb-portfolio-item" data-pb-portfolio-item data-pb-category="' . self::escape($item['category']) . '"><article>'
+                . '<img src="' . self::escape($item['image']) . '" alt="' . self::escape($item['alt']) . '" width="800" height="600" loading="lazy" decoding="async">'
+                . '<div class="pb-portfolio-copy"><p class="pb-portfolio-category">' . self::escape($item['category']) . '</p><h' . $level . '>'
+                . ($item['link'] !== '' ? '<a href="' . self::escape($item['link']) . '">' . $title . '</a>' : $title)
+                . '</h' . $level . '>';
+            if ($item['description'] !== '') {
+                $html .= '<p>' . self::escape($item['description']) . '</p>';
+            }
+            $html .= '</div></article></li>';
+        }
+        return $html . '</ul></div>';
     }
 
     /** @param array<string, mixed> $settings */

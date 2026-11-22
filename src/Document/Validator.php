@@ -11,6 +11,7 @@ use PrimeBuilder\Widgets\Countdown;
 use PrimeBuilder\Widgets\Map;
 use PrimeBuilder\Widgets\MediaCarousel;
 use PrimeBuilder\Widgets\OriginalContent;
+use PrimeBuilder\Widgets\Portfolio;
 use PrimeBuilder\Widgets\PrimeBlock;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Slideshow;
@@ -192,6 +193,7 @@ final class Validator
             'price_items' => $this->priceItems($value),
             'media_carousel_items' => ($media = MediaCarousel::parse($value, $this->sanitizer)) === null ? null : MediaCarousel::serialize($media),
             'slideshow_items' => ($slides = Slideshow::parse($value, $this->sanitizer)) === null ? null : Slideshow::serialize($slides),
+            'portfolio_items' => ($projects = Portfolio::parse($value, $this->sanitizer)) === null ? null : Portfolio::serialize($projects),
             'testimonial_items' => ($rows = Testimonials::parse($value, $this->sanitizer)) === null ? null : Testimonials::serialize($rows),
             'term_ids' => ($ids = TermIds::parse($value)) === null ? null : implode(',', $ids),
             'rich' => $this->sanitizer->sanitizeBasic($value),
