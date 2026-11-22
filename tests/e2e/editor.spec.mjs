@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { readFileSync } from 'node:fs';
 
 const id = process.env.E2E_ENTRY_ID || '1';
 const mouseId = process.env.E2E_MOUSE_ENTRY_ID || '';
@@ -778,6 +779,110 @@ test('toggle works with keyboard on the public page, including without JavaScrip
   } finally { await noJs.close(); }
 });
 
+test('media carousel keeps native video controls and stops hidden playback', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] }, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  await page.getByRole('button', { name: 'Ajouter Carrousel de médias', exact: true }).click();
+  await page.getByLabel('Nom du carrousel', { exact: true }).fill('Notre travail');
+  await page.getByLabel('Une ligne : image', { exact: false }).fill('image | /assets/plugins/prime-builder/images/landscape.svg | Paysage abstrait | Première image\nvideo | /media-demo.webm | Vidéo de démonstration | /captions.vtt | Transcription de la vidéo');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.locator('.pb-media_carousel [data-pb-slide]')).toHaveCount(2);
+  await expect(frame.locator('.pb-media_carousel')).toContainText('Transcription de la vidéo');
+  await expect(frame.locator('link[href*="/css/widgets/media_carousel.css"]')).toHaveCount(1);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('media-screen-editor-desktop.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.locator('[data-pb-device="mobile"]').click();
+  await frame.locator('.pb-media_carousel').evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expect.poll(() => frame.locator('html').evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('media-screen-editor-mobile.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+
+  let mediaRequests = 0;
+  const demoVideo = readFileSync(new URL('./fixtures/media-demo.webm', import.meta.url));
+  await page.route('**/media-demo.webm', route => {
+    mediaRequests++;
+    return route.fulfill({ status: 200, contentType: 'video/webm', body: demoVideo });
+  });
+  await page.route('**/captions.vtt', route => route.fulfill({
+    status: 200, contentType: 'text/vtt', body: 'WEBVTT\n\n00:00:00.000 --> 00:00:06.000\nUne démonstration.\n',
+  }));
+  await page.goto('/test-prime-builder');
+  const carousel = page.getByRole('region', { name: 'Notre travail' });
+  const slides = carousel.locator('[data-pb-slide]');
+  await expect(slides).toHaveCount(2);
+  await expect(slides.nth(0)).toBeVisible();
+  await expect(slides.nth(1)).toBeHidden();
+  await expect(carousel.getByRole('img', { name: 'Icône Prime Builder' })).toBeVisible();
+  await expect(page.locator('link[href*="/css/widgets/media_carousel.css"]')).toHaveCount(1);
+  await expect(page.locator('script[src*="/js/image_carousel.js"]')).toHaveCount(1);
+  expect(mediaRequests).toBe(0);
+  const next = carousel.getByRole('button', { name: 'Média suivant' });
+  await next.focus();
+  await page.keyboard.press('Enter');
+  await expect(slides.nth(1)).toBeVisible();
+  await expect(carousel.getByRole('status')).toHaveText('Média 2 sur 2');
+  const video = carousel.locator('video[aria-label="Vidéo de démonstration"]');
+  await expect(video).toHaveAttribute('preload', 'none');
+  await expect(video.locator('track[kind="captions"]')).toHaveAttribute('src', '/captions.vtt');
+  await expect(carousel).toContainText('Transcription de la vidéo');
+  await video.evaluate(node => { node.textTracks[0].mode = 'hidden'; });
+  await expect.poll(() => video.locator('track').evaluate(node => node.readyState)).toBe(2);
+  await expect.poll(() => video.evaluate(node => node.textTracks[0].cues.length)).toBe(1);
+  await video.evaluate(node => { node.muted = true; return node.play(); });
+  await expect.poll(() => video.evaluate(node => node.paused)).toBe(false);
+  expect(mediaRequests).toBeGreaterThan(0);
+  await video.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(slides.nth(1)).toBeVisible();
+  await expect.poll(() => video.evaluate(node => node.paused)).toBe(false);
+  const previous = carousel.getByRole('button', { name: 'Média précédent' });
+  await previous.focus();
+  await page.keyboard.press('Enter');
+  await expect(slides.nth(0)).toBeVisible();
+  await expect.poll(() => video.evaluate(node => node.paused)).toBe(true);
+  await expect(previous).toBeFocused();
+  await next.click();
+  await expect(slides.nth(1)).toBeVisible();
+  await expect.poll(() => video.evaluate(node => node.paused)).toBe(true);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('media-screen-public-desktop.jpg'), fullPage: true, quality: 20 });
+  await previous.click();
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('media-screen-public-mobile.jpg'), fullPage: true, quality: 20 });
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const media = fallback.locator('.pb-media_carousel [data-pb-slide]');
+    await expect(media).toHaveCount(2);
+    await expect(media.nth(0)).toBeVisible();
+    await expect(media.nth(1)).toBeVisible();
+    await expect(fallback.locator('.pb-media_carousel .pb-carousel-controls')).toHaveCount(0);
+  } finally { await noJs.close(); }
+});
+
 test('testimonial carousel works with keyboard and keeps every quote without JavaScript', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
@@ -801,9 +906,12 @@ test('testimonial carousel works with keyboard and keeps every quote without Jav
   await expectAccessible(page);
   await page.screenshot({ path: test.info().outputPath('testimonial-screen-editor-desktop.jpg'), fullPage: true, quality: 45 });
   await page.setViewportSize({ width: 375, height: 812 });
+  await page.locator('[data-pb-device="mobile"]').click();
+  await frame.locator('.pb-testimonial_carousel').evaluate(node => node.scrollIntoView({ block: 'start' }));
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expect.poll(() => frame.locator('html').evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0);
   await expectAccessible(page);
-  await page.screenshot({ path: test.info().outputPath('testimonial-screen-editor-mobile.jpg'), fullPage: true, quality: 45 });
+  await page.screenshot({ path: test.info().outputPath('testimonial-screen-editor-mobile.jpg'), fullPage: true, quality: 20 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole('button', { name: 'Style', exact: true }).click();
   await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
@@ -1332,7 +1440,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(45);
+  await expect(page.locator('.pb-element')).toHaveCount(46);
   await expectAccessible(page);
 });
 

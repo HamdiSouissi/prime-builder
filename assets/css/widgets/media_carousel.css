@@ -1,0 +1,10 @@
+.pb-media_carousel [hidden]{display:none!important}
+.pb-media-carousel-slides{min-width:0}
+.pb-media-carousel figure{margin:0;min-width:0;overflow-wrap:anywhere}
+.pb-media-carousel img,.pb-media-carousel video{display:block;width:100%;max-width:100%;height:auto}
+.pb-media-carousel video{aspect-ratio:16/9;object-fit:contain;background:#171922}
+.pb-media-carousel figcaption{margin-top:.5rem}
+.pb-media-carousel figcaption p{margin:.5rem 0 0}
+.pb-media_carousel .pb-carousel-controls{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.75rem}
+.pb-media_carousel .pb-carousel-controls button{font:inherit;font-weight:600;padding:.65rem .8rem;border:1px solid #555;border-radius:6px;background:#fff;color:#1a1d29;cursor:pointer}
+.pb-media_carousel .pb-carousel-controls button:focus-visible{outline:3px solid #ed6647;outline-offset:2px}

@@ -61,6 +61,7 @@ final class Documents
             'image_box' => ['title' => $copy('card_title'), 'text' => $copy('card_text')],
             'testimonial' => ['text' => $copy('testimonial_text'), 'author' => $copy('testimonial_author')],
             'testimonial_carousel' => ['label' => t('plugin::prime-builder.widgets.testimonial_carousel'), 'items' => $copy('testimonials_items')],
+            'media_carousel' => ['label' => t('plugin::prime-builder.widgets.media_carousel'), 'items' => $copy('media_carousel_items'), 'caption_language' => str_starts_with(strtolower(current_locale()), 'en') ? 'en' : 'fr'],
             'review' => ['title' => t('plugin::prime-builder.widgets.review'), 'level' => 2, 'rating' => 5, 'text' => $copy('testimonial_text'), 'author' => $copy('testimonial_author')],
             'flip_box' => ['front_title' => t('plugin::prime-builder.ui.flip_front_default'), 'front_text' => $copy('card_text'), 'back_title' => t('plugin::prime-builder.ui.flip_back_default'), 'back_text' => $copy('card_text'), 'level' => 2],
             'animated_heading' => ['before' => t('plugin::prime-builder.ui.animated_default_before'), 'highlight' => t('plugin::prime-builder.ui.animated_default_highlight'), 'level' => 2, 'effect' => 'underline'],

@@ -175,6 +175,7 @@ final class Renderer
             'image_box' => $this->renderImageBox($settings),
             'testimonial' => $this->renderTestimonial($settings),
             'testimonial_carousel' => $this->renderTestimonialCarousel($settings),
+            'media_carousel' => $this->renderMediaCarousel($settings),
             'review' => $this->renderReview($settings),
             'flip_box' => $this->renderFlipBox($settings),
             'animated_heading' => $this->renderAnimatedHeading($settings),
@@ -457,6 +458,41 @@ final class Renderer
                         . ($row['job'] !== '' ? '<span>' . self::escape($row['job']) . '</span>' : '') . '</span>';
                 }
                 $html .= '</figcaption>';
+            }
+            $html .= '</figure></div>';
+        }
+        return $html . '</div></div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderMediaCarousel(array $settings): string
+    {
+        $rows = MediaCarousel::parse(is_string($settings['items'] ?? null) ? $settings['items'] : '', $this->sanitizer);
+        if ($rows === null || $rows === []) {
+            return '<p>' . self::escape(t('plugin::prime-builder.ui.media_carousel_empty')) . '</p>';
+        }
+        $label = $this->fieldText($settings, 'label', t('plugin::prime-builder.widgets.media_carousel'));
+        $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.' . $key));
+        $language = ($settings['caption_language'] ?? 'fr') === 'en' ? 'en' : 'fr';
+        $html = '<div class="pb-media-carousel" data-pb-carousel data-pb-carousel-label="' . self::escape($label) . '"'
+            . ' data-pb-carousel-role="' . $copy('carousel_role') . '" data-pb-carousel-slide-role="' . $copy('carousel_slide_role') . '"'
+            . ' data-pb-carousel-previous="' . $copy('media_carousel_previous') . '" data-pb-carousel-next="' . $copy('media_carousel_next') . '"'
+            . ' data-pb-carousel-position="' . $copy('media_carousel_position') . '"><div class="pb-media-carousel-slides">';
+        foreach ($rows as $row) {
+            $html .= '<div data-pb-slide><figure>';
+            if ($row['type'] === 'image') {
+                $html .= '<img src="' . self::escape($row['url']) . '" alt="' . self::escape($row['description']) . '" loading="lazy" decoding="async">';
+                if ($row['caption'] !== '') {
+                    $html .= '<figcaption>' . self::escape($row['caption']) . '</figcaption>';
+                }
+            } else {
+                $html .= '<video controls preload="none" aria-label="' . self::escape($row['description']) . '"><source src="' . self::escape($row['url']) . '">';
+                if ($row['captions'] !== '') {
+                    $html .= '<track kind="captions" src="' . self::escape($row['captions']) . '" srclang="' . $language . '" label="' . $copy('caption_label') . '">';
+                }
+                $html .= '<a href="' . self::escape($row['url']) . '">' . $copy('download_media') . '</a></video>';
+                $html .= '<figcaption>' . self::escape($row['description'])
+                    . ($row['transcript'] !== '' ? '<p>' . self::escape($row['transcript']) . '</p>' : '') . '</figcaption>';
             }
             $html .= '</figure></div>';
         }

@@ -9,6 +9,7 @@ use Prime\Security\HtmlSanitizer;
 use PrimeBuilder\Styles\Values;
 use PrimeBuilder\Widgets\Countdown;
 use PrimeBuilder\Widgets\Map;
+use PrimeBuilder\Widgets\MediaCarousel;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\PrimeBlock;
 use PrimeBuilder\Widgets\Registry;
@@ -188,6 +189,7 @@ final class Validator
             'json_object' => is_object(json_decode($value)) ? $value : null,
             'media_list' => $this->mediaList($value),
             'price_items' => $this->priceItems($value),
+            'media_carousel_items' => ($media = MediaCarousel::parse($value, $this->sanitizer)) === null ? null : MediaCarousel::serialize($media),
             'testimonial_items' => ($rows = Testimonials::parse($value, $this->sanitizer)) === null ? null : Testimonials::serialize($rows),
             'term_ids' => ($ids = TermIds::parse($value)) === null ? null : implode(',', $ids),
             'rich' => $this->sanitizer->sanitizeBasic($value),

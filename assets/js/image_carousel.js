@@ -1,4 +1,4 @@
-/* No automatic rotation: without JS all images remain visible. */
+/* No automatic rotation: without JS all slides remain visible. */
 (() => {
   for (const carousel of document.querySelectorAll('[data-pb-carousel]')) {
     const slides = [...carousel.querySelectorAll('[data-pb-slide]')];
@@ -28,12 +28,22 @@
     let index = 0;
     const show = target => {
       index = (target + slides.length) % slides.length;
-      slides.forEach((slide, position) => { slide.hidden = position !== index; });
+      slides.forEach((slide, position) => {
+        slide.hidden = position !== index;
+        if (slide.hidden) {
+          for (const media of slide.querySelectorAll('video, audio')) {
+            if (!media.paused) media.pause();
+          }
+        }
+      });
       status.textContent = positionText(index);
     };
     previous.addEventListener('click', () => show(index - 1));
     next.addEventListener('click', () => show(index + 1));
     carousel.addEventListener('keydown', event => {
+      // Leave native controls, links and editable fields in charge of their own keys.
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+          event.target?.closest?.('a, video, audio, input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
       if (event.key === 'ArrowLeft') { event.preventDefault(); show(index - 1); }
       else if (event.key === 'ArrowRight') { event.preventDefault(); show(index + 1); }
     });

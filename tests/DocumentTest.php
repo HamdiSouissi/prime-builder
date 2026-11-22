@@ -31,6 +31,7 @@ require_once dirname(__DIR__) . '/src/Widgets/Content.php';
 require_once dirname(__DIR__) . '/src/Widgets/CodeHighlighter.php';
 require_once dirname(__DIR__) . '/src/Widgets/Countdown.php';
 require_once dirname(__DIR__) . '/src/Widgets/Map.php';
+require_once dirname(__DIR__) . '/src/Widgets/MediaCarousel.php';
 require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
@@ -372,6 +373,48 @@ final class DocumentTest extends TestCase
         self::assertSame('/assets/plugins/prime-builder/css/widgets/testimonial_carousel.css', $definition['style']);
         self::assertSame('/assets/plugins/prime-builder/js/image_carousel.js', $definition['script']);
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/testimonial_carousel.css');
+    }
+
+    public function testMediaCarouselValidatesAndRendersImagesAndNativeVideo(): void
+    {
+        $node = $this->element('media_carousel');
+        $node['settings'] = [
+            'label' => 'Images & vidéos', 'caption_language' => 'en',
+            'items' => "image | /uploads/view.jpg | Paysage & ciel | <b>Vue</b>\nvideo | /uploads/demo.webm | Démo & exemple | /uploads/demo.vtt | Texte <em>complet</em>",
+        ];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame("image | /uploads/view.jpg | Paysage & ciel | Vue\nvideo | /uploads/demo.webm | Démo & exemple | /uploads/demo.vtt | Texte complet", $result['data']['elements'][0]['settings']['items']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertSame(2, substr_count($html, 'data-pb-slide'));
+        self::assertStringContainsString('data-pb-carousel-label="Images &amp; vidéos"', $html);
+        self::assertStringContainsString('src="/uploads/view.jpg" alt="Paysage &amp; ciel"', $html);
+        self::assertStringContainsString('<figcaption>Vue</figcaption>', $html);
+        self::assertStringContainsString('<video controls preload="none" aria-label="Démo &amp; exemple">', $html);
+        self::assertStringContainsString('<source src="/uploads/demo.webm">', $html);
+        self::assertStringContainsString('<track kind="captions" src="/uploads/demo.vtt" srclang="en"', $html);
+        self::assertStringContainsString('<p>Texte complet</p>', $html);
+        self::assertStringNotContainsString(' hidden', $html);
+        self::assertStringNotContainsString('autoplay', $html);
+        self::assertStringNotContainsString('<em>', $html);
+        self::assertStringContainsString(Renderer::escape(t('plugin::prime-builder.ui.media_carousel_empty')), $this->renderBasicWidget('media_carousel', []));
+        $node['settings'] = ['items' => implode("\n", array_fill(0, 20, 'image|/x|' . str_repeat('d', 300) . '|' . str_repeat('c', 438)))];
+        $nearLimit = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $nearLimit['errors']);
+        self::assertSame([], $this->validator()->validate($nearLimit['data'])['errors']);
+        foreach ([
+            'image | javascript:alert(1) | Danger', 'video | /movie.webm | | /captions.vtt',
+            'video | /movie.webm | Démo | javascript:alert(1)', 'image | /x | alt | caption | surplus',
+            'audio | /x | titre', implode("\n", array_fill(0, 21, 'image | /x | alt')),
+        ] as $bad) {
+            $node['settings'] = ['items' => $bad];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+        $definition = (new Registry())->all()['media_carousel'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/media_carousel.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/image_carousel.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/media_carousel.css');
     }
 
     public function testAnimatedHeadingHasOneReadableHeadingAndValidatedEffects(): void

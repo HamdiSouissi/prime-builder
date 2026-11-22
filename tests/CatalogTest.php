@@ -25,6 +25,10 @@ final class CatalogTest extends TestCase
         self::assertSame($this->keys($fr), $this->keys($en));
         self::assertSame('Titre', $fr['ui']['title']);
         self::assertSame('Éditeur visuel', $fr['ui']['editor_title']);
+        self::assertSame('Carrousel de médias', $fr['widgets']['media_carousel']);
+        self::assertSame('Media carousel', $en['widgets']['media_carousel']);
+        self::assertStringContainsString('landscape.svg', $fr['defaults']['media_carousel_items']);
+        self::assertStringContainsString('landscape.svg', $en['defaults']['media_carousel_items']);
     }
 
     public function testAllShippedTemplatesValidate(): void
