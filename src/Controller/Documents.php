@@ -74,6 +74,7 @@ final class Documents
             'countdown' => ['title' => t('plugin::prime-builder.widgets.countdown'), 'level' => 2, 'finished_text' => t('plugin::prime-builder.ui.countdown_finished')],
             'search_form' => ['search_label' => t('plugin::prime-builder.ui.search_form_default_label'), 'button_text' => t('plugin::prime-builder.ui.search_form_default_button')],
             'navigation' => ['label' => t('plugin::prime-builder.ui.navigation_default_label')],
+            'breadcrumbs' => ['label' => t('plugin::prime-builder.ui.breadcrumb_default_label')],
             'toggle' => ['title' => $copy('toggle_title'), 'text' => $copy('accordion_text'), 'initial' => 'closed'],
             'star_rating' => ['value' => 4],
             'counter' => ['title' => $copy('counter')],

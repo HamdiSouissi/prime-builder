@@ -1623,7 +1623,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
     return { status: result.status, count: elements.length };
   }, id);
   expect(status).toBe(200);
-  expect(count).toBe(51);
+  expect(count).toBe(52);
   await page.goto('/test-prime-builder');
   await expect(page.locator('.pb-element')).toHaveCount(count);
   await expectAccessible(page);
@@ -2385,6 +2385,94 @@ test('table of contents follows document headings and works without JavaScript',
     await fallback.keyboard.press('Enter');
     await expect(fallback).toHaveURL(/#pb-toc-intro-2$/);
     await expect(fallback.locator('#pb-toc-intro-2')).toBeFocused();
+  } finally { await noJs.close(); }
+});
+
+test('breadcrumbs use the core trail and preserve focus while refreshing', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] }, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  await page.getByRole('button', { name: 'Ajouter Fil d’Ariane', exact: true }).click();
+  await page.getByLabel('Nom accessible du fil d’Ariane', { exact: true }).fill('Vous êtes ici');
+  const frame = page.frameLocator('[data-pb-frame]');
+  const preview = frame.getByRole('navigation', { name: 'Vous êtes ici' });
+  await expect(preview.getByRole('link', { name: 'Accueil' })).toHaveAttribute('href', '/');
+  await expect(preview.locator('[aria-current="page"]')).toHaveText('Test Prime Builder');
+  await expect(frame.locator('link[href*="/css/widgets/breadcrumbs.css"]')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('breadcrumbs-screen-editor-desktop.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await showMobilePreview(page, frame, '.pb-breadcrumbs');
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('breadcrumbs-screen-editor-mobile.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+
+  let releaseLive;
+  const gate = new Promise(resolve => { releaseLive = resolve; });
+  let intercepted = false;
+  const livePattern = `**/api/prime-builder/v1/documents/${id}/live`;
+  await page.route(livePattern, async route => { intercepted = true; await gate; await route.continue(); });
+  await page.goto('/test-prime-builder');
+  await expect.poll(() => intercepted).toBe(true);
+  const trail = page.getByRole('navigation', { name: 'Vous êtes ici' });
+  const home = trail.getByRole('link', { name: 'Accueil' });
+  await home.focus();
+  const response = page.waitForResponse(result => result.url().endsWith(`/api/prime-builder/v1/documents/${id}/live`));
+  releaseLive();
+  const live = await response;
+  expect(live.ok()).toBeTruthy();
+  await live.finished();
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  await expect(home).toBeFocused();
+  await expect(trail.locator('[aria-current="page"]')).toHaveCount(0);
+  await page.keyboard.press('Tab');
+  await expect(trail.locator('[aria-current="page"]')).toHaveText('Test Prime Builder');
+  await expect(page.locator('link[href*="/css/widgets/breadcrumbs.css"]')).toHaveCount(1);
+  await expect(page.locator('script[src*="/js/content.js"]')).toHaveCount(1);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('breadcrumbs-screen-public-desktop.jpg'), fullPage: true, quality: 20 });
+  await page.unroute(livePattern);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/test-prime-builder');
+  await expect(trail.locator('[aria-current="page"]')).toHaveText('Test Prime Builder');
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  const longTextWidth = await trail.locator('[aria-current="page"]').evaluate(node => {
+    const original = node.textContent;
+    node.textContent = 'W'.repeat(160);
+    const width = document.documentElement.scrollWidth;
+    node.textContent = original;
+    return width;
+  });
+  expect(longTextWidth).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('breadcrumbs-screen-public-mobile.jpg'), fullPage: true, quality: 20 });
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const nav = fallback.getByRole('navigation', { name: 'Vous êtes ici' });
+    await expect(nav.locator('[aria-current="page"]')).toHaveCount(0);
+    const link = nav.getByRole('link', { name: 'Accueil' });
+    await link.focus();
+    await fallback.keyboard.press('Enter');
+    await expect(fallback).toHaveURL(/\/$/);
   } finally { await noJs.close(); }
 });
 

@@ -20,6 +20,7 @@ use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Widgets\Assets;
+use PrimeBuilder\Widgets\Breadcrumbs;
 use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\Countdown;
 use PrimeBuilder\Widgets\OriginalContent;
@@ -28,6 +29,7 @@ use PrimeBuilder\Widgets\Renderer;
 use PrimeBuilder\Widgets\ShareButtons;
 
 require_once dirname(__DIR__) . '/src/Widgets/Assets.php';
+require_once dirname(__DIR__) . '/src/Widgets/Breadcrumbs.php';
 require_once dirname(__DIR__) . '/src/Widgets/Content.php';
 require_once dirname(__DIR__) . '/src/Widgets/CodeHighlighter.php';
 require_once dirname(__DIR__) . '/src/Widgets/Countdown.php';
@@ -910,6 +912,40 @@ final class DocumentTest extends TestCase
         self::assertSame('/assets/plugins/prime-builder/css/widgets/navigation.css', $definition['style']);
         self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/navigation.css');
+    }
+
+    public function testBreadcrumbsRenderSafeSemanticLinksAndConservativeFallback(): void
+    {
+        $node = $this->element('breadcrumbs', 'trail');
+        $node['settings'] = ['label' => 'Votre <b>parcours</b> & ici'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $settings = $result['data']['elements'][0]['settings'];
+        $html = Breadcrumbs::render($settings, [
+            ['label' => 'Accueil', 'url' => '/'],
+            ['label' => '<script>Malveillant</script>', 'url' => 'javascript:alert(1)'],
+            ['label' => 'Actuel & ici', 'url' => '/actuel'],
+        ], new HtmlSanitizer());
+        self::assertStringContainsString('<nav class="pb-breadcrumb" aria-label="Votre parcours &amp; ici"><ol>', $html);
+        self::assertStringContainsString('<li><a href="/">Accueil</a></li>', $html);
+        self::assertStringContainsString('<li><span>&lt;script&gt;Malveillant&lt;/script&gt;</span></li>', $html);
+        self::assertStringContainsString('<li><span aria-current="page">Actuel &amp; ici</span></li>', $html);
+        self::assertStringNotContainsString('javascript:', $html);
+        self::assertStringNotContainsString('href="/actuel"', $html);
+        self::assertSame('', Breadcrumbs::render([], [], new HtmlSanitizer()));
+        $entry = \Prime\Content\Entry::fromRow(['id' => 1, 'title' => 'Secret', 'slug' => 'secret']);
+        $fallback = (new Renderer(new Registry(), new HtmlSanitizer(), entry: $entry))->render($result['data']);
+        self::assertStringContainsString('data-pb-live="/api/prime-builder/v1/documents/1/live"', $fallback);
+        self::assertStringContainsString('href="/"', $fallback);
+        self::assertStringNotContainsString('Secret', $fallback);
+        self::assertStringNotContainsString('aria-current="page"', $fallback);
+        $node['settings'] = ['label' => str_repeat('a', 201)];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['breadcrumbs'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/breadcrumbs.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/breadcrumbs.css');
     }
 
     public function testShareButtonsEncodePublicUrlsAndRejectUnsafeValues(): void

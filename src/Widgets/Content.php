@@ -9,7 +9,11 @@ use Prime\Content\Entry;
 use Prime\Content\EntryQuery;
 use Prime\Content\EntryRepository;
 use Prime\Content\TaxonomyRegistry;
+use Prime\Security\HtmlSanitizer;
 use Prime\Site\Menu\MenuRenderer;
+use Prime\Site\PageContext;
+use Prime\Site\PermalinkSettings;
+use Prime\Site\Seo\SeoManager;
 use Prime\Site\UrlGenerator;
 use Prime\Site\UrlResolver;
 use Prime\Site\Zone\DynamicBlockRegistry;
@@ -32,6 +36,8 @@ final class Content
         private readonly ?TaxonomyRegistry $taxonomies = null,
         private readonly ?EntryRepository $entries = null,
         private readonly ?MenuRenderer $menus = null,
+        private readonly ?SeoManager $seo = null,
+        private readonly ?PermalinkSettings $permalinks = null,
     ) {
     }
 
@@ -230,6 +236,66 @@ final class Content
     public function navigation(array $settings, ?Entry $entry, bool $live): string
     {
         return Navigation::render($settings, $this->menus, $live, $entry !== null ? $this->urls->entryUrl($entry) : '/');
+    }
+
+    /**
+     * Do not persist breadcrumb labels or URLs: both context and entry visibility can change.
+     * The live endpoint has the current entry, but not its original request context;
+     * derive the ordinary entry/front/blog context from the CMS's generated paths.
+     *
+     * @param array<string, mixed> $settings
+     */
+    public function breadcrumbs(array $settings, ?Entry $entry, bool $live, HtmlSanitizer $sanitizer): string
+    {
+        if (!$live || $this->seo === null || $entry === null) {
+            return Breadcrumbs::fallback($settings);
+        }
+        $path = $this->urls->entryUrl($entry);
+        $type = PageContext::TYPE_ENTRY;
+        if ($path === '/') {
+            $type = PageContext::TYPE_FRONT;
+        } elseif ($entry->type === 'page' && $path === $this->urls->blogUrl()) {
+            $type = PageContext::TYPE_BLOG;
+        }
+        $page = new PageContext(type: $type, path: $path, entry: $entry, contentType: $this->types->get($entry->type));
+        $crumbs = $this->seo->breadcrumbs($page);
+        // Core's blogUrl() does not check whether the configured posts page (or a
+        // parent in its path) is still public. Never expose that path in a live
+        // widget when it is private: /blog is the core's public listing route.
+        if ($page->isEntry() && $page->entry?->type === 'post' && isset($crumbs[1]) && !$this->publicPostsPage()) {
+            $crumbs[1]['url'] = '/blog';
+        }
+        return Breadcrumbs::render($settings, $crumbs, $sanitizer);
+    }
+
+    private function publicPostsPage(): bool
+    {
+        if ($this->permalinks === null) {
+            return false;
+        }
+        if ($this->permalinks->frontMode() !== PermalinkSettings::FRONT_MODE_PAGE) {
+            return true;
+        }
+        $id = $this->permalinks->postsPageId();
+        if ($id === null) {
+            return true;
+        }
+        if ($this->entries === null) {
+            return false;
+        }
+        $seen = [];
+        for ($depth = 0; $id > 0 && $depth < 12; $depth++) {
+            if (isset($seen[$id])) {
+                return false;
+            }
+            $seen[$id] = true;
+            $page = $this->entries->find($id, withRelations: false);
+            if ($page === null || $page->type !== 'page' || !UrlResolver::isPubliclyVisible($page)) {
+                return false;
+            }
+            $id = $page->parentId;
+        }
+        return $id === 0;
     }
 
     /** @param array<string, mixed> $settings */

@@ -640,6 +640,73 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('href="/"', json_decode($live->body(), true)['data']['widgets']['menu']);
     }
 
+    public function testBreadcrumbsRefreshFromCoreContextWithoutPersistingPrivatePaths(): void
+    {
+        $app = $this->activated(null);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'trail', 'type' => 'breadcrumbs', 'settings' => ['label' => 'Vous êtes ici'], 'styles' => [], 'children' => []],
+        ];
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        $previewHtml = json_decode($preview->body(), true)['data']['html'];
+        self::assertStringContainsString('aria-label="Vous êtes ici"', $previewHtml);
+        self::assertStringContainsString('aria-current="page">Article publié</span>', $previewHtml);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('href="/"', $entry->contentHtml);
+        self::assertStringNotContainsString('Article publié', $entry->contentHtml);
+        self::assertStringNotContainsString('aria-current="page"', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/breadcrumbs.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/breadcrumbs.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec("UPDATE pc_entries SET title = 'Titre & actuel' WHERE id = 1");
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $live->status(), $live->body());
+        self::assertStringContainsString('no-store', (string) $live->header('Cache-Control'));
+        $html = json_decode($live->body(), true)['data']['widgets']['trail'];
+        self::assertStringContainsString('aria-current="page">Titre &amp; actuel</span>', $html);
+        self::assertStringNotContainsString('Article publié', $html);
+        // The core URL generator alone would include these unpublished ancestor slugs.
+        $parent = $this->insertGridEntry($pdo, 'page', 'draft', 'Parent privé', 'parent-secret', 1);
+        $postsPage = $this->insertGridEntry($pdo, 'page', 'published', 'Articles', 'blog-secret', 1, $parent);
+        $permalinks = $app->get(PermalinkSettings::class);
+        $permalinks->setOverride('reading.front_mode', 'page');
+        $permalinks->setOverride('reading.posts_page_id', $postsPage);
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        $html = json_decode($live->body(), true)['data']['widgets']['trail'];
+        self::assertStringContainsString('href="/blog">Blog</a>', $html);
+        self::assertStringNotContainsString('parent-secret', $html);
+        self::assertStringNotContainsString('blog-secret', $html);
+        $pdo->exec('UPDATE pc_entries SET status = \'published\' WHERE id = ' . $parent);
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        $html = json_decode($live->body(), true)['data']['widgets']['trail'];
+        self::assertStringContainsString('href="/parent-secret/blog-secret">Blog</a>', $html);
+        $pdo->exec('UPDATE pc_entries SET status = \'draft\' WHERE id = ' . $postsPage);
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        $html = json_decode($live->body(), true)['data']['widgets']['trail'];
+        self::assertStringContainsString('href="/blog">Blog</a>', $html);
+        self::assertStringNotContainsString('blog-secret', $html);
+        $front = $this->insertGridEntry($pdo, 'page', 'published', 'Page d’accueil', 'accueil', 1);
+        $permalinks->setOverride('reading.front_page_id', $front);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/' . $front, ['content' => $document], $token)->status());
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/' . $front . '/live');
+        self::assertSame(200, $live->status(), $live->body());
+        self::assertSame('', json_decode($live->body(), true)['data']['widgets']['trail']);
+        $pdo->exec("UPDATE pc_entries SET status = 'draft' WHERE id = 1");
+        self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live')->status());
+    }
+
     public function testShareButtonsPersistPublicLinksAndLoadOnlyTheirAssets(): void
     {
         $app = $this->activated('admin');
@@ -1768,7 +1835,7 @@ final class IntegrationTest extends TestCase
         $fields['header'] = json_decode($dynamicTemplate->body(), true)['data']['id'];
         self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
-        foreach (['navigation', 'share_buttons'] as $type) {
+        foreach (['navigation', 'share_buttons', 'breadcrumbs'] as $type) {
             $unsupported = ['version' => 1, 'elements' => [['id' => 'dynamic', 'type' => $type, 'settings' => [], 'styles' => [], 'children' => []]]];
             $template = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => $type, 'kind' => 'section', 'data' => $unsupported], $admin);
             self::assertSame(201, $template->status(), $template->body());

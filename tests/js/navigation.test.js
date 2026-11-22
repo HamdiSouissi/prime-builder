@@ -187,6 +187,37 @@ test('mobile disclosure preserves focused links on resize and Escape closes the 
   assert.equal(list.hidden, false);
 });
 
+test('breadcrumb refresh waits for focus to leave its saved fallback', async () => {
+  const document = {
+    activeElement: null,
+    querySelectorAll(selector) { assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },
+  };
+  const layout = new Element(document); layout.dataset.pbLive = '/api/prime-builder/v1/documents/8/live';
+  const node = new Element(document, 'div', ['pb-breadcrumbs']); node.dataset.pbId = 'trail';
+  const fallback = new Element(document, 'a'); fallback.textContent = 'Home'; node.append(fallback); layout.append(node);
+  let replaced = null;
+  Object.defineProperty(node, 'innerHTML', { set(value) { replaced = value; this.children = []; } });
+  let release;
+  const response = new Promise(resolve => { release = resolve; });
+  runInNewContext(script, {
+    document, window: { location: { search: '' } }, URLSearchParams, queueMicrotask,
+    fetch() { return response; },
+  });
+  fallback.focus();
+  release({ ok: true, json: () => Promise.resolve({ data: { widgets: { trail: '<nav>Updated</nav>' } } }) });
+  await flush();
+  assert.equal(replaced, null);
+  assert.equal(document.activeElement, fallback);
+  node.dispatch('focusout');
+  await flush();
+  assert.equal(replaced, null);
+  document.activeElement = null;
+  node.dispatch('focusout');
+  await flush();
+  assert.equal(replaced, '<nav>Updated</nav>');
+  assert.equal(node.listeners.focusout.length, 0);
+});
+
 test('live refresh never removes a focused fallback and failed requests leave it intact', async () => {
   const first = setup(['one']);
   const fallback = first.nodes[0].navParts.link;

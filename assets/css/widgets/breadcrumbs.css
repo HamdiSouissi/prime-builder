@@ -1,0 +1,5 @@
+.pb-breadcrumbs .pb-breadcrumb ol{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem;list-style:none;margin:0;padding:0}
+.pb-breadcrumbs .pb-breadcrumb li{display:inline;min-width:0;overflow-wrap:anywhere}
+.pb-breadcrumbs .pb-breadcrumb li+li::before{content:"/";display:inline-block;margin-inline-end:.35rem;color:#60646c}
+.pb-breadcrumbs .pb-breadcrumb a{color:inherit;text-decoration:underline;text-underline-offset:.15em}
+.pb-breadcrumbs .pb-breadcrumb a:focus-visible{outline:3px solid #ed6647;outline-offset:3px}
