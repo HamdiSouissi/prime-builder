@@ -295,6 +295,45 @@ final class IntegrationTest extends TestCase
         }
     }
 
+    public function testTestimonialCarouselPersistsAndSharesItsScriptWithImageCarousels(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Carrousel de témoignages', $config['widgets']['testimonial_carousel']['label']);
+        self::assertSame('testimonial_items', $config['widgets']['testimonial_carousel']['fields']['items']['type']);
+        self::assertSame('Une ligne : texte | auteur | fonction | URL du portrait (auteur, fonction et portrait facultatifs)', $config['widgets']['testimonial_carousel']['fields']['items']['label']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                ['id' => 'testimonials', 'type' => 'testimonial_carousel', 'settings' => ['label' => 'Retours clients', 'items' => "Excellent | Camille | Designer\nTrès bien | Alex"], 'styles' => [], 'children' => []],
+            ]],
+            ['id' => 'testimonials2', 'type' => 'testimonial_carousel', 'settings' => ['items' => 'Autre témoignage'], 'styles' => [], 'children' => []],
+            ['id' => 'images', 'type' => 'image_carousel', 'settings' => ['images' => '/uploads/a.jpg|Paysage'], 'styles' => [], 'children' => []],
+        ];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('data-pb-carousel-label="Retours clients"', $entry->contentHtml);
+        self::assertStringContainsString('<blockquote><p>Excellent</p></blockquote>', $entry->contentHtml);
+        self::assertStringContainsString('<cite>Camille</cite><span>Designer</span>', $entry->contentHtml);
+        self::assertStringContainsString('<blockquote><p>Très bien</p></blockquote>', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        foreach (['testimonial_carousel', 'image_carousel'] as $type) {
+            self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/' . $type . '.css'));
+        }
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/image_carousel.js'));
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        foreach (['testimonial_carousel', 'image_carousel'] as $type) {
+            self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $assets->renderStyles());
+        }
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/image_carousel.js', $assets->renderScripts());
+    }
+
     public function testAnimatedHeadingAndCodePersistAndLoadOnlyTheirStyles(): void
     {
         $app = $this->activated('admin');
@@ -1353,6 +1392,8 @@ final class IntegrationTest extends TestCase
             ['id' => 'flip', 'type' => 'flip_box', 'settings' => ['front_title' => 'Recto', 'back_title' => 'Verso'], 'styles' => [], 'children' => []],
             ['id' => 'animated', 'type' => 'animated_heading', 'settings' => ['before' => 'Créer', 'highlight' => 'ensemble'], 'styles' => [], 'children' => []],
             ['id' => 'sample', 'type' => 'code', 'settings' => ['language' => 'html', 'source' => '<p>Bonjour</p>'], 'styles' => [], 'children' => []],
+            ['id' => 'testimonials', 'type' => 'testimonial_carousel', 'settings' => ['items' => "Excellent | Camille\nTrès bien | Alex"], 'styles' => [], 'children' => []],
+            ['id' => 'images', 'type' => 'image_carousel', 'settings' => ['images' => '/uploads/a.jpg|Image'], 'styles' => [], 'children' => []],
             ['id' => 'anchor', 'type' => 'anchor', 'settings' => ['anchor' => 'section'], 'styles' => [], 'children' => []],
             ['id' => 'link', 'type' => 'button', 'settings' => ['text' => 'Lien', 'url' => '#section'], 'styles' => [], 'children' => []],
         ]];
@@ -1405,6 +1446,7 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('data-pb-flip-front><h2>Recto</h2>', $header);
         self::assertStringContainsString('pb-animated-highlight--underline">ensemble</span>', $header);
         self::assertStringContainsString('&lt;p&gt;', $header);
+        self::assertStringContainsString('<blockquote><p>Excellent</p></blockquote>', $header);
         self::assertStringContainsString('class="pb-theme-header"', $header);
         self::assertStringContainsString('href="#pbt-header-', $header);
         self::assertStringContainsString('id="pbt-header-', $header);
@@ -1421,9 +1463,10 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/countdown.css'));
         self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/flip_box.js'));
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/flip_box.css'));
-        foreach (['animated_heading', 'code'] as $type) {
+        foreach (['animated_heading', 'code', 'testimonial_carousel', 'image_carousel'] as $type) {
             self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/' . $type . '.css'));
         }
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/image_carousel.js'));
         self::assertStringContainsString('https://www.openstreetmap.org', (new \Prime\Themes\PublicCsp($hooks))->headerValue());
         self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\.css)~', $assets->renderStyles(), $matches));
         $css = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
@@ -1439,9 +1482,10 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/countdown.js', $assets->renderScripts());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/flip_box.css', $assets->renderStyles());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/flip_box.js', $assets->renderScripts());
-        foreach (['animated_heading', 'code'] as $type) {
+        foreach (['animated_heading', 'code', 'testimonial_carousel', 'image_carousel'] as $type) {
             self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $assets->renderStyles());
         }
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/image_carousel.js', $assets->renderScripts());
         self::assertStringNotContainsString('https://www.openstreetmap.org', (new \Prime\Themes\PublicCsp($hooks))->headerValue());
         $fields['footer'] = $id;
         self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
@@ -1457,9 +1501,10 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/countdown.css'));
         self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/flip_box.js'));
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/flip_box.css'));
-        foreach (['animated_heading', 'code'] as $type) {
+        foreach (['animated_heading', 'code', 'testimonial_carousel', 'image_carousel'] as $type) {
             self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/' . $type . '.css'));
         }
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/image_carousel.js'));
         // A library manager deleting a source cannot silently change the selected theme snapshot.
         self::assertSame(200, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/' . $id, token: $admin)->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));

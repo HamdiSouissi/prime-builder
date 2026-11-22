@@ -174,6 +174,7 @@ final class Renderer
             'icon_list' => $this->renderIconList($settings),
             'image_box' => $this->renderImageBox($settings),
             'testimonial' => $this->renderTestimonial($settings),
+            'testimonial_carousel' => $this->renderTestimonialCarousel($settings),
             'review' => $this->renderReview($settings),
             'flip_box' => $this->renderFlipBox($settings),
             'animated_heading' => $this->renderAnimatedHeading($settings),
@@ -429,6 +430,37 @@ final class Renderer
             $html .= '</figcaption>';
         }
         return $html . '</figure>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderTestimonialCarousel(array $settings): string
+    {
+        $rows = Testimonials::parse(is_string($settings['items'] ?? null) ? $settings['items'] : '', $this->sanitizer);
+        if ($rows === null || $rows === []) {
+            return '<p>' . self::escape(t('plugin::prime-builder.ui.testimonials_empty')) . '</p>';
+        }
+        $label = $this->fieldText($settings, 'label', t('plugin::prime-builder.widgets.testimonial_carousel'));
+        $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.' . $key));
+        $html = '<div class="pb-testimonials" data-pb-carousel data-pb-carousel-label="' . self::escape($label) . '"'
+            . ' data-pb-carousel-role="' . $copy('carousel_role') . '" data-pb-carousel-slide-role="' . $copy('carousel_slide_role') . '"'
+            . ' data-pb-carousel-previous="' . $copy('testimonials_previous') . '" data-pb-carousel-next="' . $copy('testimonials_next') . '"'
+            . ' data-pb-carousel-position="' . $copy('testimonials_position') . '"><div class="pb-testimonials-slides">';
+        foreach ($rows as $row) {
+            $html .= '<div data-pb-slide><figure><blockquote><p>' . self::escape($row['text']) . '</p></blockquote>';
+            if ($row['author'] !== '' || $row['job'] !== '' || $row['image'] !== '') {
+                $html .= '<figcaption>';
+                if ($row['image'] !== '') {
+                    $html .= '<img src="' . self::escape($row['image']) . '" alt="" width="96" height="96" loading="lazy" decoding="async">';
+                }
+                if ($row['author'] !== '' || $row['job'] !== '') {
+                    $html .= '<span>' . ($row['author'] !== '' ? '<cite>' . self::escape($row['author']) . '</cite>' : '')
+                        . ($row['job'] !== '' ? '<span>' . self::escape($row['job']) . '</span>' : '') . '</span>';
+                }
+                $html .= '</figcaption>';
+            }
+            $html .= '</figure></div>';
+        }
+        return $html . '</div></div>';
     }
 
     /** @param array<string, mixed> $settings */

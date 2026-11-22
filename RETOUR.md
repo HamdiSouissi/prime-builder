@@ -47,6 +47,8 @@ L’avis éditorial et la boîte retournable sont dans `a0fae2a001c2251b6d12858f
 
 Le titre animé et le code coloré sont dans `4119c972f3c92bc29d053edd682c858a29d2bd02`. Sa première CI était rouge sur des sélecteurs Playwright ambigus ; la correction `0fd5ee62cdf6a87b03d90f5de8b4aee5abda37a7` est `completed` / `success` sur [45050382272](https://github.com/HamdiSouissi/prime-builder/actions/runs/45050382272), huit jobs verts : syntaxe `No syntax errors detected in content/plugins/prime-builder/.php-cs-fixer.dist.php`, PHPStan `[OK] No errors`, PHP-CS-Fixer `Found 0 of 49 files that can be fixed in 0.950 seconds, 94.00 MB memory used`, chacun des PHPUnit/MySQL `OK (93 tests, 1606 assertions)`, Node `# tests 19` / `# pass 19` / `# fail 0`, i18n `Catalogue de traduction cohérent.`, smoke `Smoke: all routes, public content and document CSS passed.`, Playwright `47 passed (2.8m)`, désactivation et désinstallation réussies. Le parcours CMS teste les onglets, l’aperçu, l’échappement, le clavier, axe, le mobile, le mouvement réduit et le repli sans JS ; PHPUnit couvre aussi les ressources dans les partials. Une fixture isolée a été examinée à 1440 et 375 px ; elle ne remplace pas le parcours CMS. La coloration est légère et limitée à 1 000 unités.
 
+Le carrousel de témoignages est en cours de validation : harnais PHP-WASM 2/2 et PHP-WASM/SQLite 3/3, Node 19/19, PHPStan ciblé, et fixture Chromium isolée à 1440/375 px avec axe, clavier, script partagé et repli sans JS. Ces vérifications locales ne remplacent pas les tests PHPUnit/MySQL et CMS de la CI.
+
 ## Prochaines étapes et vérifications
 
 - **B** : terminer base, Pro, puis contenu courant ; un test PHPUnit par widget, interaction clavier/ARIA et ressources conditionnelles. La grille dispose d’un comptage de requêtes ciblé ; voir ses limites.
@@ -156,7 +158,7 @@ Le statut concerne le **périmètre indiqué dans la ligne**, pas une parité co
 | Portfolio filtrable | **Non fait**. | — |
 | Diaporama | **Non fait**. | — |
 | Carrousel de médias | **Non fait**. | — |
-| Carrousel de témoignages | **Non fait**. | — |
+| Carrousel de témoignages | **Non fait — implémentation en cours de validation CI** : jusqu’à 20 lignes texte/auteur/fonction/portrait, sans rotation automatique ; les citations restent visibles sans JS. | Oui, `image_carousel.js` partagé |
 | Avis | **Fait et testé** pour une carte éditoriale : note de 0 à 5, texte, auteur et portrait ; `DT::testReviewRendersAnAccessibleEditorialRatingAndSafeAttribution`, `IT::testReviewAndFlipBoxPersistAndLoadOnlyTheirRequiredAssets` et E2E dans `45048321515`. Authenticité non vérifiée. | Non |
 | Formulaire | **Non fait — partiel** : formulaire fixe, protections, boîte et purge ; tests locaux `testContactForm…`, `testSubmissionInboxRequiresItsOwnCapabilityAndCsrf` et E2E. Pas de constructeur de champs ni e-mail/fichiers. | Oui, `forms.js` |
 | Menu de navigation | **Non fait**. | — |

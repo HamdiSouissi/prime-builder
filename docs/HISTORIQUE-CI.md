@@ -527,3 +527,7 @@ La révision `4119c972f3c92bc29d053edd682c858a29d2bd02` a échoué sur [45049953
 ### Titre animé et code — correction vérifiée
 
 La correction `0fd5ee62cdf6a87b03d90f5de8b4aee5abda37a7`, [run 45050382272](https://github.com/HamdiSouissi/prime-builder/actions/runs/45050382272), est `completed` / `success` avec huit jobs : `lint` — `No syntax errors detected in content/plugins/prime-builder/.php-cs-fixer.dist.php` et `[OK] No errors` ; `cs` — `Found 0 of 49 files that can be fixed in 0.950 seconds, 94.00 MB memory used` ; les deux PHPUnit/MySQL — `OK (93 tests, 1606 assertions)` ; Node — `# tests 19`, `# pass 19`, `# fail 0` ; i18n — `Catalogue de traduction cohérent.` ; smoke — `Smoke: all routes, public content and document CSS passed.` ; Playwright — `47 passed (2.8m)` ; désactivation et désinstallation réussies. La CI teste l’édition, l’aperçu, l’échappement du code, le clavier, axe, le mobile, le mouvement réduit et le repli sans JS. Une fixture isolée a aussi été examinée à 1440 et 375 px. La coloration est bornée et volontairement légère ; elle ne remplace pas un analyseur syntaxique complet.
+
+### Rapport du titre animé et du code
+
+La révision `e4a54aa87ffaba1be12da9f30064663de44670a5`, qui consigne les résultats de l’étape précédente, est `completed` / `success` sur [45050793706](https://github.com/HamdiSouissi/prime-builder/actions/runs/45050793706), avec huit jobs verts. Ce run ne comprend pas le carrousel de témoignages développé ensuite.

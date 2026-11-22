@@ -778,6 +778,71 @@ test('toggle works with keyboard on the public page, including without JavaScrip
   } finally { await noJs.close(); }
 });
 
+test('testimonial carousel works with keyboard and keeps every quote without JavaScript', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] }, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  await page.getByRole('button', { name: 'Ajouter Carrousel de témoignages', exact: true }).click();
+  await page.getByLabel('Nom du carrousel', { exact: true }).fill('Retours de nos clients');
+  await page.getByLabel('Une ligne : texte', { exact: false }).fill('Un accompagnement attentif. | Camille | Designer\nUne collaboration précieuse. | Alex | Entrepreneur');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.locator('.pb-testimonial_carousel [data-pb-slide]')).toHaveCount(2);
+  await expect(frame.locator('.pb-testimonial_carousel')).toContainText('Une collaboration précieuse.');
+  await expect(frame.locator('link[href*="/css/widgets/testimonial_carousel.css"]')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+
+  await page.goto('/test-prime-builder');
+  const carousel = page.getByRole('region', { name: 'Retours de nos clients' });
+  const slides = carousel.locator('[data-pb-slide]');
+  await expect(slides).toHaveCount(2);
+  await expect(slides.nth(0)).toBeVisible();
+  await expect(slides.nth(1)).toBeHidden();
+  await expect(carousel.getByRole('group', { name: 'Témoignage 1 sur 2' })).toContainText('Camille');
+  await expect(page.locator('link[href*="/css/widgets/testimonial_carousel.css"]')).toHaveCount(1);
+  await expect(page.locator('script[src*="/js/image_carousel.js"]')).toHaveCount(1);
+  const next = carousel.getByRole('button', { name: 'Témoignage suivant' });
+  await next.focus();
+  await page.keyboard.press('Enter');
+  await expect(slides.nth(0)).toBeHidden();
+  await expect(slides.nth(1)).toBeVisible();
+  await expect(carousel.getByRole('status')).toHaveText('Témoignage 2 sur 2');
+  await page.keyboard.press('ArrowLeft');
+  await expect(slides.nth(0)).toBeVisible();
+  await expect(carousel.getByRole('status')).toHaveText('Témoignage 1 sur 2');
+  await expect(next).toBeFocused();
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('testimonial-carousel-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('testimonial-carousel-mobile.png'), fullPage: true });
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const quotes = fallback.locator('.pb-testimonial_carousel [data-pb-slide]');
+    await expect(quotes).toHaveCount(2);
+    await expect(quotes.nth(0)).toBeVisible();
+    await expect(quotes.nth(1)).toBeVisible();
+    await expect(fallback.locator('.pb-testimonial_carousel .pb-carousel-controls')).toHaveCount(0);
+  } finally { await noJs.close(); }
+});
+
 test('image carousel works with keyboard and leaves all slides readable without JavaScript', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
@@ -1260,7 +1325,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(44);
+  await expect(page.locator('.pb-element')).toHaveCount(45);
   await expectAccessible(page);
 });
 

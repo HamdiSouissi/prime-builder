@@ -36,6 +36,7 @@ require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
 require_once dirname(__DIR__) . '/src/Widgets/TermIds.php';
+require_once dirname(__DIR__) . '/src/Widgets/Testimonials.php';
 require_once dirname(__DIR__) . '/src/Document/HtmlContent.php';
 require_once dirname(__DIR__) . '/src/Document/Validator.php';
 require_once dirname(__DIR__) . '/src/Document/Layout.php';
@@ -330,6 +331,47 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('<figure><blockquote><p>Très <strong>utile</strong>.</p></blockquote>', $html);
         self::assertStringContainsString('alt="" width="100" height="100" loading="lazy"', $html);
         self::assertStringContainsString('<cite>Camille</cite> <span>Designer</span>', $html);
+    }
+
+    public function testTestimonialCarouselRendersSafeSlidesAndRejectsInvalidRows(): void
+    {
+        $node = $this->element('testimonial_carousel');
+        $node['settings'] = [
+            'label' => 'Retours & expériences',
+            'items' => " Bon <strong>résultat</strong> | Camille & Alex | Designer | /uploads/portrait.jpg\n\nAutre retour | Sam",
+        ];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame("Bon résultat | Camille & Alex | Designer | /uploads/portrait.jpg\nAutre retour | Sam", $result['data']['elements'][0]['settings']['items']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertStringContainsString('data-pb-carousel-label="Retours &amp; expériences"', $html);
+        self::assertStringContainsString('data-pb-carousel-next="' . Renderer::escape(t('plugin::prime-builder.ui.testimonials_next')) . '"', $html);
+        self::assertStringContainsString('data-pb-carousel-position="' . Renderer::escape(t('plugin::prime-builder.ui.testimonials_position')) . '"', $html);
+        self::assertSame(2, substr_count($html, 'data-pb-slide'));
+        self::assertStringContainsString('<blockquote><p>Bon résultat</p></blockquote>', $html);
+        self::assertStringContainsString('src="/uploads/portrait.jpg" alt="" width="96" height="96" loading="lazy"', $html);
+        self::assertStringContainsString('<cite>Camille &amp; Alex</cite><span>Designer</span>', $html);
+        self::assertStringContainsString('<cite>Sam</cite>', $html);
+        self::assertStringNotContainsString(' hidden', $html);
+        self::assertStringNotContainsString('<button', $html);
+        self::assertStringNotContainsString('<strong>', $html);
+        self::assertStringContainsString(Renderer::escape(t('plugin::prime-builder.ui.testimonials_empty')), $this->renderBasicWidget('testimonial_carousel', []));
+        $node['settings'] = ['items' => implode("\n", array_fill(0, 20, str_repeat('x', 495) . '|a|b'))];
+        $nearLimit = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $nearLimit['errors']);
+        self::assertSame([], $this->validator()->validate($nearLimit['data'])['errors']);
+        foreach ([
+            'Texte | Nom | Fonction | javascript:alert(1)', 'Texte | Auteur | Fonction | /image.jpg | surplus',
+            ' | Auteur', str_repeat('a', 1501), implode("\n", array_fill(0, 21, 'Témoignage')),
+        ] as $bad) {
+            $node['settings'] = ['items' => $bad];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+        $definition = (new Registry())->all()['testimonial_carousel'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/testimonial_carousel.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/image_carousel.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/testimonial_carousel.css');
     }
 
     public function testAnimatedHeadingHasOneReadableHeadingAndValidatedEffects(): void
