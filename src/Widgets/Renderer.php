@@ -176,6 +176,7 @@ final class Renderer
             'testimonial' => $this->renderTestimonial($settings),
             'testimonial_carousel' => $this->renderTestimonialCarousel($settings),
             'media_carousel' => $this->renderMediaCarousel($settings),
+            'slideshow' => $this->renderSlideshow($settings),
             'review' => $this->renderReview($settings),
             'flip_box' => $this->renderFlipBox($settings),
             'animated_heading' => $this->renderAnimatedHeading($settings),
@@ -495,6 +496,41 @@ final class Renderer
                     . ($row['transcript'] !== '' ? '<p>' . self::escape($row['transcript']) . '</p>' : '') . '</figcaption>';
             }
             $html .= '</figure></div>';
+        }
+        return $html . '</div></div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderSlideshow(array $settings): string
+    {
+        $slides = Slideshow::parse(is_string($settings['items'] ?? null) ? $settings['items'] : '', $this->sanitizer);
+        if ($slides === null || $slides === []) {
+            return '<p>' . self::escape(t('plugin::prime-builder.ui.slideshow_empty')) . '</p>';
+        }
+        $label = $this->fieldText($settings, 'label', t('plugin::prime-builder.widgets.slideshow'));
+        $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
+        $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.' . $key));
+        $html = '<div class="pb-slide-show" data-pb-carousel data-pb-carousel-label="' . self::escape($label) . '"'
+            . ' data-pb-carousel-role="' . $copy('carousel_role') . '" data-pb-carousel-slide-role="' . $copy('carousel_slide_role') . '"'
+            . ' data-pb-carousel-previous="' . $copy('slideshow_previous') . '" data-pb-carousel-next="' . $copy('slideshow_next') . '"'
+            . ' data-pb-carousel-position="' . $copy('slideshow_position') . '"><div class="pb-slideshow-slides">';
+        foreach ($slides as $slide) {
+            $html .= '<article class="pb-slideshow-slide" data-pb-slide><img src="' . self::escape($slide['image']) . '" alt="'
+                . self::escape($slide['alt']) . '" width="1600" height="900" loading="lazy" decoding="async">';
+            if ($slide['title'] !== '' || $slide['description'] !== '' || $slide['link'] !== '') {
+                $html .= '<div class="pb-slideshow-content">';
+                if ($slide['title'] !== '') {
+                    $html .= '<h' . $level . '>' . self::escape($slide['title']) . '</h' . $level . '>';
+                }
+                if ($slide['description'] !== '') {
+                    $html .= '<p>' . self::escape($slide['description']) . '</p>';
+                }
+                if ($slide['link'] !== '') {
+                    $html .= '<a href="' . self::escape($slide['link']) . '">' . self::escape($slide['link_text']) . '</a>';
+                }
+                $html .= '</div>';
+            }
+            $html .= '</article>';
         }
         return $html . '</div></div>';
     }

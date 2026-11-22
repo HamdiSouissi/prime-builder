@@ -13,6 +13,7 @@ use PrimeBuilder\Widgets\MediaCarousel;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\PrimeBlock;
 use PrimeBuilder\Widgets\Registry;
+use PrimeBuilder\Widgets\Slideshow;
 use PrimeBuilder\Widgets\TermIds;
 use PrimeBuilder\Widgets\Testimonials;
 
@@ -190,6 +191,7 @@ final class Validator
             'media_list' => $this->mediaList($value),
             'price_items' => $this->priceItems($value),
             'media_carousel_items' => ($media = MediaCarousel::parse($value, $this->sanitizer)) === null ? null : MediaCarousel::serialize($media),
+            'slideshow_items' => ($slides = Slideshow::parse($value, $this->sanitizer)) === null ? null : Slideshow::serialize($slides),
             'testimonial_items' => ($rows = Testimonials::parse($value, $this->sanitizer)) === null ? null : Testimonials::serialize($rows),
             'term_ids' => ($ids = TermIds::parse($value)) === null ? null : implode(',', $ids),
             'rich' => $this->sanitizer->sanitizeBasic($value),

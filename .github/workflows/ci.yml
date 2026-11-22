@@ -302,14 +302,6 @@ jobs:
         run: bash builder/tests/e2e/visual-chunks.sh testimonial-screen-editor-mobile 2
       - name: Report testimonial-screen-editor-mobile capture part 3
         run: bash builder/tests/e2e/visual-chunks.sh testimonial-screen-editor-mobile 3
-      - name: Report media-screen-editor-desktop capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh media-screen-editor-desktop 0
-      - name: Report media-screen-editor-desktop capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh media-screen-editor-desktop 1
-      - name: Report media-screen-editor-desktop capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh media-screen-editor-desktop 2
-      - name: Report media-screen-editor-desktop capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh media-screen-editor-desktop 3
       - name: Report media-screen-editor-mobile capture part 0
         run: bash builder/tests/e2e/visual-chunks.sh media-screen-editor-mobile 0
       - name: Report media-screen-editor-mobile capture part 1
@@ -318,6 +310,22 @@ jobs:
         run: bash builder/tests/e2e/visual-chunks.sh media-screen-editor-mobile 2
       - name: Report media-screen-editor-mobile capture part 3
         run: bash builder/tests/e2e/visual-chunks.sh media-screen-editor-mobile 3
+      - name: Report slideshow-screen-public-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh slideshow-screen-public-desktop 0
+      - name: Report slideshow-screen-public-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh slideshow-screen-public-desktop 1
+      - name: Report slideshow-screen-public-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh slideshow-screen-public-desktop 2
+      - name: Report slideshow-screen-public-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh slideshow-screen-public-desktop 3
+      - name: Report slideshow-screen-public-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh slideshow-screen-public-mobile 0
+      - name: Report slideshow-screen-public-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh slideshow-screen-public-mobile 1
+      - name: Report slideshow-screen-public-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh slideshow-screen-public-mobile 2
+      - name: Report slideshow-screen-public-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh slideshow-screen-public-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |

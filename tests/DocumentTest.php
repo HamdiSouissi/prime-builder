@@ -36,6 +36,7 @@ require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
+require_once dirname(__DIR__) . '/src/Widgets/Slideshow.php';
 require_once dirname(__DIR__) . '/src/Widgets/TermIds.php';
 require_once dirname(__DIR__) . '/src/Widgets/Testimonials.php';
 require_once dirname(__DIR__) . '/src/Document/HtmlContent.php';
@@ -415,6 +416,50 @@ final class DocumentTest extends TestCase
         self::assertSame('/assets/plugins/prime-builder/css/widgets/media_carousel.css', $definition['style']);
         self::assertSame('/assets/plugins/prime-builder/js/image_carousel.js', $definition['script']);
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/media_carousel.css');
+    }
+
+    public function testSlideshowValidatesSlidesAndRendersSafeContentWithoutScript(): void
+    {
+        $node = $this->element('slideshow');
+        $node['settings'] = [
+            'label' => 'Nos & projets', 'level' => 3,
+            'items' => "/uploads/a.jpg | Paysage & ciel | <b>Bienvenue</b> | Texte <em>riche</em> | Voir | /suite?x=1&y=2\n/uploads/b.jpg | | Deuxième",
+        ];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame("/uploads/a.jpg | Paysage & ciel | Bienvenue | Texte riche | Voir | /suite?x=1&y=2\n/uploads/b.jpg |  | Deuxième", $result['data']['elements'][0]['settings']['items']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertSame(2, substr_count($html, 'data-pb-slide'));
+        self::assertStringContainsString('data-pb-carousel-label="Nos &amp; projets"', $html);
+        self::assertStringContainsString('src="/uploads/a.jpg" alt="Paysage &amp; ciel"', $html);
+        self::assertStringContainsString('src="/uploads/b.jpg" alt=""', $html);
+        self::assertStringContainsString('width="1600" height="900" loading="lazy"', $html);
+        self::assertStringContainsString('<h3>Bienvenue</h3><p>Texte riche</p>', $html);
+        self::assertStringContainsString('<a href="/suite?x=1&amp;y=2">Voir</a>', $html);
+        self::assertStringNotContainsString('<em>', $html);
+        self::assertStringNotContainsString(' hidden', $html);
+        self::assertStringContainsString(Renderer::escape(t('plugin::prime-builder.ui.slideshow_empty')), $this->renderBasicWidget('slideshow', []));
+        $compact = implode("\n", array_fill(0, 20, '/i|' . str_repeat('a', 300) . '|' . str_repeat('t', 300) . '|' . str_repeat('d', 139)));
+        $node['settings'] = ['items' => $compact];
+        $nearLimit = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $nearLimit['errors']);
+        self::assertSame($compact, $nearLimit['data']['elements'][0]['settings']['items']);
+        self::assertSame([], $this->validator()->validate($nearLimit['data'])['errors']);
+        foreach ([
+            'javascript:alert(1) | alt', '//evil.test/a.jpg | alt', '/a.jpg | alt | title | desc | Lire | javascript:alert(1)',
+            '/a.jpg | alt | title | desc | Lire', '/a.jpg | alt | title | desc | | /suite', '/a.jpg | alt | t | d | l | /x | surplus',
+            implode("\n", array_fill(0, 21, '/a.jpg | alt')),
+        ] as $bad) {
+            $node['settings'] = ['items' => $bad];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+        $node['settings'] = ['level' => 1];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['slideshow'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/slideshow.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/image_carousel.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/slideshow.css');
     }
 
     public function testAnimatedHeadingHasOneReadableHeadingAndValidatedEffects(): void
