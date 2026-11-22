@@ -201,6 +201,8 @@ final class Validator
             'url' => $value === '' ? '' : $this->sanitizer->sanitizeResourceUrl($value),
             'slug' => $value === '' || preg_match('/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/', $value) === 1 ? $value : null,
             'zone_slug' => $value === '' || preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/D', $value) === 1 ? $value : null,
+            // A stale/deleted menu is valid document data; rendering falls back safely.
+            'menu_id' => $value === '' || preg_match('/^[1-9][0-9]{0,8}$/D', $value) === 1 ? $value : null,
             'signature' => preg_match('/^[a-f0-9]{64}$/D', $value) === 1 ? $value : null,
             'enum' => in_array($value, is_array($schema['values'] ?? null) ? $schema['values'] : [], true) ? $value : null,
             default => null,

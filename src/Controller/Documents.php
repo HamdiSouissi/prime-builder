@@ -73,6 +73,7 @@ final class Documents
             'price_list' => ['title' => $copy('price_list_title'), 'level' => 2, 'items' => $copy('price_list_items')],
             'countdown' => ['title' => t('plugin::prime-builder.widgets.countdown'), 'level' => 2, 'finished_text' => t('plugin::prime-builder.ui.countdown_finished')],
             'search_form' => ['search_label' => t('plugin::prime-builder.ui.search_form_default_label'), 'button_text' => t('plugin::prime-builder.ui.search_form_default_button')],
+            'navigation' => ['label' => t('plugin::prime-builder.ui.navigation_default_label')],
             'toggle' => ['title' => $copy('toggle_title'), 'text' => $copy('accordion_text'), 'initial' => 'closed'],
             'star_rating' => ['value' => 4],
             'counter' => ['title' => $copy('counter')],
@@ -162,6 +163,22 @@ final class Documents
                         }
                     } catch (\Throwable) {
                         // A faulty third-party registry must not prevent opening the editor.
+                    }
+                }
+                if ($name === 'navigation' && $fieldName === 'menu_id') {
+                    // The CMS owns menus. A removed menu remains a valid saved reference
+                    // but only currently available menu IDs are offered in the inspector.
+                    $field['type'] = 'enum';
+                    $field['values'] = [];
+                    $field['option_labels'] = [];
+                    try {
+                        foreach ($this->plugin->app()->get(\Prime\Site\Menu\MenuRepository::class)->all() as $menu) {
+                            $menuId = (string) $menu['id'];
+                            $field['values'][] = $menuId;
+                            $field['option_labels'][$menuId] = $menu['name'];
+                        }
+                    } catch (\Throwable) {
+                        // A missing or broken menu repository must not prevent editing.
                     }
                 }
                 if ($name === 'theme_zone' && $fieldName === 'zone') {

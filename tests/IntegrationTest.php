@@ -566,6 +566,78 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/countdown.js', $assets->renderScripts());
     }
 
+    public function testNavigationUsesCoreMenusAndNeverPersistsPrivateTargets(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $pdo->exec('CREATE TABLE pc_menus (id ' . $idColumn . ', name VARCHAR(150) NOT NULL, slug VARCHAR(120) NOT NULL UNIQUE, location VARCHAR(80) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)');
+        $pdo->exec('CREATE TABLE pc_menu_items (id ' . $idColumn . ", menu_id INTEGER NOT NULL, parent_id INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0, type VARCHAR(20) NOT NULL DEFAULT 'url', target_id INTEGER NULL, url VARCHAR(500) NULL, label VARCHAR(255) NOT NULL DEFAULT '', target VARCHAR(16) NOT NULL DEFAULT '_self', css_class VARCHAR(255) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
+        $menus = $app->get(\Prime\Site\Menu\MenuRepository::class);
+        $menuId = $menus->create('Notre menu');
+        $menus->replaceItems($menuId, [
+            ['type' => 'entry', 'target_id' => 1, 'label' => 'Article actuel', 'children' => [
+                ['type' => 'url', 'url' => '/services', 'label' => 'Services', 'children' => [
+                    ['type' => 'url', 'url' => '/details', 'label' => 'Détails'],
+                ]],
+            ]],
+            ['type' => 'entry', 'target_id' => 2, 'label' => 'Brouillon confidentiel'],
+            ['type' => 'url', 'url' => 'https://example.test/', 'label' => 'Externe', 'target' => '_blank'],
+        ]);
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Menu de navigation', $config['widgets']['navigation']['label']);
+        self::assertSame('enum', $config['widgets']['navigation']['fields']['menu_id']['type']);
+        self::assertSame('Notre menu', $config['widgets']['navigation']['fields']['menu_id']['option_labels'][(string) $menuId]);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'menu', 'type' => 'navigation', 'settings' => ['menu_id' => (string) $menuId, 'label' => 'Explorer'], 'styles' => [], 'children' => []],
+        ];
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        $previewHtml = json_decode($preview->body(), true)['data']['html'];
+        self::assertStringContainsString('>Services</a>', $previewHtml);
+        self::assertStringNotContainsString('Brouillon confidentiel', $previewHtml);
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('data-pb-live="/api/prime-builder/v1/documents/1/live"', $entry->contentHtml);
+        self::assertStringContainsString('href="/"', $entry->contentHtml);
+        self::assertStringNotContainsString('Article actuel', $entry->contentHtml);
+        self::assertStringNotContainsString('Brouillon confidentiel', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/navigation.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $otherAssets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $otherAssets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/navigation.css', $otherAssets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $otherAssets->renderScripts());
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $live->status(), $live->body());
+        self::assertStringContainsString('no-store', (string) $live->header('Cache-Control'));
+        $html = json_decode($live->body(), true)['data']['widgets']['menu'];
+        self::assertStringContainsString('aria-label="Explorer"', $html);
+        self::assertStringContainsString('href="/blog/article-publie" class="pb-nav__link" aria-current="page"', $html);
+        self::assertStringContainsString('<ul class="pb-nav__submenu">', $html);
+        self::assertStringContainsString('>Détails</a>', $html);
+        self::assertStringContainsString('target="_blank" rel="noopener noreferrer"', $html);
+        self::assertStringNotContainsString('site-nav__', $html);
+        self::assertStringNotContainsString('Brouillon confidentiel', $html);
+        $menus->replaceItems($menuId, [['type' => 'url', 'url' => '/nouveau', 'label' => 'Nouveau lien']]);
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        $updated = json_decode($live->body(), true)['data']['widgets']['menu'];
+        self::assertStringContainsString('Nouveau lien', $updated);
+        self::assertStringNotContainsString('Article actuel', $updated);
+        self::assertStringNotContainsString('Nouveau lien', $app->get(EntryRepository::class)->find(1)?->contentHtml ?? '');
+        $menus->delete($menuId);
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertStringContainsString('href="/"', json_decode($live->body(), true)['data']['widgets']['menu']);
+    }
+
     public function testSearchFormPersistsUsableHtmlAndRefreshesTheCoreSearchPath(): void
     {
         $app = $this->activated('admin');

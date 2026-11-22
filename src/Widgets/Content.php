@@ -9,6 +9,7 @@ use Prime\Content\Entry;
 use Prime\Content\EntryQuery;
 use Prime\Content\EntryRepository;
 use Prime\Content\TaxonomyRegistry;
+use Prime\Site\Menu\MenuRenderer;
 use Prime\Site\UrlGenerator;
 use Prime\Site\UrlResolver;
 use Prime\Site\Zone\DynamicBlockRegistry;
@@ -30,6 +31,7 @@ final class Content
         private readonly ?DynamicBlockRegistry $dynamicBlocks = null,
         private readonly ?TaxonomyRegistry $taxonomies = null,
         private readonly ?EntryRepository $entries = null,
+        private readonly ?MenuRenderer $menus = null,
     ) {
     }
 
@@ -222,6 +224,12 @@ final class Content
             . '<label for="' . Renderer::escape($input) . '">' . Renderer::escape($label) . '</label>'
             . '<div><input type="search" id="' . Renderer::escape($input) . '" name="q" maxlength="200"' . ($placeholder !== '' ? ' placeholder="' . Renderer::escape($placeholder) . '"' : '') . ' required>'
             . '<button type="submit">' . Renderer::escape($button) . '</button></div></form>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    public function navigation(array $settings, ?Entry $entry, bool $live): string
+    {
+        return Navigation::render($settings, $this->menus, $live, $entry !== null ? $this->urls->entryUrl($entry) : '/');
     }
 
     /** @param array<string, mixed> $settings */

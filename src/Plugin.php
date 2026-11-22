@@ -110,6 +110,7 @@ final class Plugin extends AbstractPlugin
             $context->app()->get(DynamicBlockRegistry::class),
             $context->app()->get(TaxonomyRegistry::class),
             $context->app()->get(EntryRepository::class),
+            $context->app()->get(\Prime\Site\Menu\MenuRenderer::class),
         );
         $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
         foreach (['content.saved', 'content.updated', 'content.published', 'content.deleted', 'content.trashed', 'content.restored', 'content.status_changed'] as $event) {

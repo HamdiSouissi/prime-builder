@@ -31,6 +31,97 @@
     }
     return template.content;
   };
+  // Enhance the CMS's ordinary list of links, rather than using the ARIA menu
+  // role: native links and disclosure buttons keep their expected Tab behavior.
+  const enhanceNavigation = node => {
+    const nav = node.querySelector('[data-pb-navigation]');
+    const list = nav?.querySelector(':scope > .pb-nav__list');
+    if (!nav || !list || nav.dataset.pbEnhanced === 'true') return;
+    const doc = nav.ownerDocument;
+    const makeId = prefix => {
+      let candidate = prefix, suffix = 2;
+      while (doc.getElementById(candidate)) candidate = `${prefix}-${suffix++}`;
+      return candidate;
+    };
+    const id = node.dataset.pbId;
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id || '')) return;
+    list.id = makeId(`pb-nav-${id}`);
+    let index = 0;
+    for (const item of list.querySelectorAll('.pb-nav__item--has-children')) {
+      const submenu = item.querySelector(':scope > .pb-nav__submenu');
+      const link = item.querySelector(':scope > .pb-nav__link');
+      if (!submenu || !link) continue;
+      submenu.id = makeId(`pb-nav-${id}-submenu-${++index}`);
+      const button = doc.createElement('button');
+      button.type = 'button';
+      button.className = 'pb-nav__submenu-toggle';
+      button.setAttribute('aria-controls', submenu.id);
+      button.setAttribute('aria-expanded', 'false');
+      button.setAttribute('aria-label', (nav.dataset.pbNavSubmenu || 'Submenu: :label').replace(':label', link.textContent.trim()));
+      const icon = doc.createElement('span');
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = '▾';
+      button.append(icon);
+      submenu.hidden = true;
+      item.insertBefore(button, submenu);
+      button.addEventListener('click', () => {
+        const open = button.getAttribute('aria-expanded') !== 'true';
+        button.setAttribute('aria-expanded', String(open));
+        submenu.hidden = !open;
+      });
+    }
+    const toggle = doc.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'pb-nav__mobile-toggle';
+    toggle.textContent = nav.dataset.pbNavMenu || 'Menu';
+    toggle.setAttribute('aria-controls', list.id);
+    nav.insertBefore(toggle, list);
+    const mobile = doc.defaultView.matchMedia('(max-width: 767px)');
+    const setOpen = open => {
+      toggle.setAttribute('aria-expanded', String(open));
+      list.hidden = !open;
+    };
+    const synchronize = () => {
+      // Never hide a focused descendant during a resize.
+      const open = !mobile.matches || list.contains(doc.activeElement);
+      setOpen(open);
+      if (!mobile.matches && doc.activeElement === toggle) list.querySelector('a')?.focus();
+    };
+    toggle.addEventListener('click', () => setOpen(toggle.getAttribute('aria-expanded') !== 'true'));
+    mobile.addEventListener('change', synchronize);
+    nav.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      const active = doc.activeElement;
+      let button = active?.closest('.pb-nav__submenu-toggle');
+      if (!button || button.getAttribute('aria-expanded') !== 'true') {
+        const enclosing = active?.closest('.pb-nav__submenu');
+        button = enclosing?.previousElementSibling;
+      }
+      if (button?.classList.contains('pb-nav__submenu-toggle') && button.getAttribute('aria-expanded') === 'true') {
+        button.click();
+        button.focus();
+        event.preventDefault();
+      } else if (mobile.matches && toggle.getAttribute('aria-expanded') === 'true') {
+        setOpen(false);
+        toggle.focus();
+        event.preventDefault();
+      }
+    });
+    nav.dataset.pbEnhanced = 'true';
+    synchronize();
+  };
+  const replaceNavigation = (node, html) => {
+    const replace = () => { node.innerHTML = html; enhanceNavigation(node); };
+    // An in-flight request must not remove a fallback link under the visitor's focus.
+    if (!node.contains(document.activeElement)) { replace(); return; }
+    const onFocusOut = () => queueMicrotask(() => {
+      if (!node.contains(document.activeElement)) {
+        node.removeEventListener('focusout', onFocusOut);
+        replace();
+      }
+    });
+    node.addEventListener('focusout', onFocusOut);
+  };
   const requests = new Map();
   for (const layout of document.querySelectorAll('.pb-layout[data-pb-live]')) {
     const url = layout.dataset.pbLive;
@@ -55,10 +146,11 @@
       const widgets = result?.data?.widgets;
       if (!widgets || typeof widgets !== 'object') return;
       for (const node of layout.querySelectorAll('[data-pb-id]')) {
-        if (!node.classList.contains('pb-posts') && !node.classList.contains('pb-current_content') && !node.classList.contains('pb-theme_zone') && !node.classList.contains('pb-search_form')) continue;
+        if (!node.classList.contains('pb-posts') && !node.classList.contains('pb-current_content') && !node.classList.contains('pb-theme_zone') && !node.classList.contains('pb-search_form') && !node.classList.contains('pb-navigation')) continue;
         const html = widgets[node.dataset.pbId];
         if (typeof html !== 'string') continue;
         if (node.classList.contains('pb-theme_zone')) node.replaceChildren(zoneFragment(html, node.dataset.pbId));
+        else if (node.classList.contains('pb-navigation')) replaceNavigation(node, html);
         else if (node.classList.contains('pb-search_form')) {
           // Update only the configured search path: do not erase text or move focus if
           // the visitor started typing while this asynchronous request was in flight.

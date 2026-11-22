@@ -32,6 +32,7 @@ require_once dirname(__DIR__) . '/src/Widgets/CodeHighlighter.php';
 require_once dirname(__DIR__) . '/src/Widgets/Countdown.php';
 require_once dirname(__DIR__) . '/src/Widgets/Map.php';
 require_once dirname(__DIR__) . '/src/Widgets/MediaCarousel.php';
+require_once dirname(__DIR__) . '/src/Widgets/Navigation.php';
 require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
@@ -881,6 +882,31 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('<a href="https://www.youtube.com/playlist?list=PL123"', $invalid);
         self::assertStringNotContainsString('<source', $invalid);
         self::assertStringNotContainsString('data-pb-embed-video', $invalid);
+    }
+
+    public function testNavigationValidatesMenuReferencesAndRendersASafeFallback(): void
+    {
+        $node = $this->element('navigation', 'menu');
+        $node['settings'] = ['menu_id' => '42', 'label' => 'Navigation <b>projets</b> & actualités'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $entry = \Prime\Content\Entry::fromRow(['id' => 1]);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer(), entry: $entry))->render($result['data']);
+        self::assertStringContainsString('data-pb-live="/api/prime-builder/v1/documents/1/live"', $html);
+        self::assertStringContainsString('<nav class="pb-nav" aria-label="Navigation projets &amp; actualités"', $html);
+        self::assertStringContainsString('href="/"', $html);
+        self::assertStringNotContainsString('<b>', $html);
+        foreach (['0', '-1', '01', '1.5', '1e3', '1<script>', str_repeat('9', 10)] as $bad) {
+            $node['settings'] = ['menu_id' => $bad];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+        $node['settings'] = ['menu_id' => 42];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['navigation'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/navigation.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/navigation.css');
     }
 
     public function testThemeZoneValidatesTheSlugAndHasAReadableFallback(): void

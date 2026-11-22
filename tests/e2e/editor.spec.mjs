@@ -2288,6 +2288,115 @@ test('departure dialog traps and restores focus and closes on Escape', async ({ 
   expect(nativeDialogs).toBe(0);
 });
 
+test('navigation uses CMS menus with keyboard disclosures on desktop and mobile', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] }, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  await page.getByRole('button', { name: 'Ajouter Menu de navigation', exact: true }).click();
+  await page.getByLabel('Menu du site', { exact: true }).selectOption({ label: 'Navigation démonstration' });
+  await page.getByLabel('Nom accessible de la navigation', { exact: true }).fill('Explorer nos pages');
+  const frame = page.frameLocator('[data-pb-frame]');
+  const preview = frame.getByRole('navigation', { name: 'Explorer nos pages' });
+  await expect(preview.getByRole('link', { name: 'Découvrir' })).toBeVisible();
+  await expect(preview.getByRole('link', { name: 'Services' })).toBeVisible();
+  await expect(preview.getByText('Brouillon confidentiel')).toHaveCount(0);
+  await expect(frame.locator('link[href*="/css/widgets/navigation.css"]')).toHaveCount(1);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('navigation-screen-editor-desktop.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await showMobilePreview(page, frame, '.pb-navigation');
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('navigation-screen-editor-mobile.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+
+  await page.goto('/test-prime-builder');
+  const nav = page.getByRole('navigation', { name: 'Explorer nos pages' });
+  const discover = nav.getByRole('link', { name: 'Découvrir' });
+  const discoverToggle = nav.getByRole('button', { name: 'Sous-menu : Découvrir' });
+  await expect(discover).toBeVisible();
+  await expect(discoverToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(nav.getByText('Brouillon confidentiel')).toHaveCount(0);
+  await expect(nav.getByRole('link', { name: 'Externe' })).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(page.locator('link[href*="/css/widgets/navigation.css"]')).toHaveCount(1);
+  await expect(page.locator('script[src*="/js/content.js"]')).toHaveCount(1);
+  await discover.focus();
+  await page.keyboard.press('Tab');
+  await expect(discoverToggle).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(discoverToggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(nav.getByRole('link', { name: 'Page actuelle' })).toHaveAttribute('aria-current', 'page');
+  await page.keyboard.press('Tab');
+  await expect(nav.getByRole('link', { name: 'Services' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  const servicesToggle = nav.getByRole('button', { name: 'Sous-menu : Services' });
+  await expect(servicesToggle).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(servicesToggle).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Tab');
+  await expect(nav.getByRole('link', { name: 'Détails' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(servicesToggle).toBeFocused();
+  await expect(servicesToggle).toHaveAttribute('aria-expanded', 'false');
+  await page.keyboard.press('Escape');
+  await expect(discoverToggle).toBeFocused();
+  await expect(discoverToggle).toHaveAttribute('aria-expanded', 'false');
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('navigation-screen-public-desktop.jpg'), fullPage: true, quality: 20 });
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.reload();
+  const mobileToggle = nav.getByRole('button', { name: 'Menu de navigation' });
+  await expect(mobileToggle).toBeVisible();
+  await expect(mobileToggle).toHaveAttribute('aria-expanded', 'false');
+  await mobileToggle.focus();
+  await page.keyboard.press('Enter');
+  await expect(mobileToggle).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Tab');
+  await expect(nav.getByRole('link', { name: 'Accueil' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(discover).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(discoverToggle).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(nav.getByRole('link', { name: 'Services' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('navigation-screen-public-mobile.jpg'), fullPage: true, quality: 20 });
+  await discover.evaluate(link => { link.dataset.originalText = link.textContent; link.textContent = 'W'.repeat(160); });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await discover.evaluate(link => { link.textContent = link.dataset.originalText; });
+  await page.keyboard.press('Escape');
+  await expect(discoverToggle).toHaveAttribute('aria-expanded', 'false');
+  await page.keyboard.press('Escape');
+  await expect(mobileToggle).toBeFocused();
+  await expect(mobileToggle).toHaveAttribute('aria-expanded', 'false');
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const fallbackNav = fallback.getByRole('navigation', { name: 'Explorer nos pages' });
+    await expect(fallbackNav.getByRole('link', { name: 'Accueil' })).toHaveAttribute('href', '/');
+    await expect(fallbackNav.getByText('Brouillon confidentiel')).toHaveCount(0);
+  } finally { await noJs.close(); }
+});
+
 // Keep the saved page intact: the CI workflow disables the plugin after the suite.
 test('save a page for the deactivation check', async ({ page }) => {
   await login(page);
