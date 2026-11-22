@@ -334,6 +334,80 @@ test('new basic widgets each expose content, style and advanced controls', async
   }
 });
 
+test('call to action and pricing widgets can be edited and remain usable without JavaScript', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const content = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] };
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  const widgets = [
+    ['Appel à l’action', 'call_to_action'],
+    ['Table de prix', 'price_table'],
+    ['Liste de prix', 'price_list'],
+  ];
+  for (const [name, type] of widgets) {
+    await page.locator('[data-pb-panel="widgets"]').click();
+    await page.getByRole('button', { name: `Ajouter ${name}`, exact: true }).click();
+    await expect(page.locator('[data-pb-fields] input, [data-pb-fields] textarea').first()).toBeVisible();
+    if (type === 'call_to_action') {
+      await page.getByLabel('Titre', { exact: true }).fill('Un projet ensemble');
+      await page.getByLabel('Texte', { exact: true }).fill('<p>Parlons de votre idée.</p>');
+      await page.getByLabel('Adresse URL', { exact: true }).fill('/test-prime-builder#contact');
+      await page.getByLabel('Texte du bouton', { exact: true }).fill('Nous contacter');
+    } else if (type === 'price_table') {
+      await page.getByLabel('Titre', { exact: true }).fill('Offre mensuelle');
+      await page.getByLabel('Prix (texte et devise)').fill('29 €');
+      await page.getByLabel('Période (facultative)').fill('par mois');
+      await page.getByLabel('Avantages (un par ligne)').fill('Conseil inclus\nSuivi personnalisé');
+      await page.getByLabel('Adresse URL', { exact: true }).fill('/test-prime-builder#tarifs');
+      await page.getByLabel('Texte du bouton', { exact: true }).fill('Choisir cette offre');
+    } else {
+      await page.getByLabel('Titre', { exact: true }).fill('Prestations');
+      await page.getByLabel('Articles : nom | prix | description facultative (30 lignes maximum)').fill('Conseil | 25 € | Une heure\nAtelier | Sur devis');
+    }
+    const frame = page.frameLocator('[data-pb-frame]');
+    await expect(frame.locator(`link[href*="/css/widgets/${type}.css"]`)).toHaveCount(1);
+    await page.getByRole('button', { name: 'Style', exact: true }).click();
+    await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Contenu', exact: true }).click();
+  }
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto('/test-prime-builder');
+  await expect(page.getByRole('heading', { name: 'Un projet ensemble' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Offre mensuelle' })).toBeVisible();
+  await expect(page.locator('.pb-price_list')).toContainText('Conseil');
+  await expect(page.locator('.pb-price_list')).toContainText('Sur devis');
+  for (const [, type] of widgets) await expect(page.locator(`link[href*="/css/widgets/${type}.css"]`)).toHaveCount(1);
+  const contact = page.locator('.pb-call_to_action').getByRole('link', { name: 'Nous contacter', exact: true });
+  await contact.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/#contact$/);
+  const choose = page.locator('.pb-price_table').getByRole('link', { name: 'Choisir cette offre', exact: true });
+  await choose.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/#tarifs$/);
+  await expectAccessible(page);
+  const noJs = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    await expect(fallback.locator('.pb-call_to_action').getByRole('link', { name: 'Nous contacter', exact: true })).toHaveAttribute('href', '/test-prime-builder#contact');
+    await expect(fallback.locator('.pb-price_table').getByRole('link', { name: 'Choisir cette offre', exact: true })).toHaveAttribute('href', '/test-prime-builder#tarifs');
+    await expect(fallback.locator('.pb-price_list')).toContainText('Une heure');
+  } finally { await noJs.close(); }
+});
+
 test('toggle works with keyboard on the public page, including without JavaScript', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
@@ -776,7 +850,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(35);
+  await expect(page.locator('.pb-element')).toHaveCount(38);
   await expectAccessible(page);
 });
 

@@ -168,6 +168,9 @@ final class Renderer
             'icon_list' => $this->renderIconList($settings),
             'image_box' => $this->renderImageBox($settings),
             'testimonial' => $this->renderTestimonial($settings),
+            'call_to_action' => $this->renderCallToAction($settings),
+            'price_table' => $this->renderPriceTable($settings),
+            'price_list' => $this->renderPriceList($settings),
             'toggle' => '<details' . (($settings['initial'] ?? 'closed') === 'open' ? ' open' : '') . '><summary>' . self::escape($this->fieldText($settings, 'title', t('plugin::prime-builder.widgets.toggle'))) . '</summary><div>' . $rich . '</div></details>',
             'social' => $this->renderSocial($settings),
             'map' => $this->renderMap($settings),
@@ -356,6 +359,84 @@ final class Renderer
             $html .= '</figcaption>';
         }
         return $html . '</figure>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderCallToAction(array $settings): string
+    {
+        $title = $this->fieldText($settings, 'title');
+        $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
+        $image = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'image_url'));
+        $url = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
+        $html = '<div class="pb-cta-content">';
+        if ($image !== null && $image !== '') {
+            $width = max(1, min(10000, (int) ($settings['width'] ?? 800)));
+            $height = max(1, min(10000, (int) ($settings['height'] ?? 600)));
+            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '" width="' . $width . '" height="' . $height . '" loading="lazy" decoding="async">';
+        }
+        $html .= '<div class="pb-cta-copy">';
+        if ($title !== '') {
+            $html .= '<h' . $level . '>' . self::escape($title) . '</h' . $level . '>';
+        }
+        $html .= $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text'));
+        if ($url !== null && $url !== '') {
+            $html .= '<a class="pb-button-link" href="' . self::escape($url) . '">' . self::escape($this->fieldText($settings, 'button_text', t('plugin::prime-builder.ui.read_more'))) . '</a>';
+        }
+        return $html . '</div></div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderPriceTable(array $settings): string
+    {
+        $title = $this->fieldText($settings, 'title');
+        $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
+        $price = $this->fieldText($settings, 'price');
+        $period = $this->fieldText($settings, 'period');
+        $url = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
+        $html = '<div class="pb-price-table-content">';
+        if ($title !== '') {
+            $html .= '<h' . $level . '>' . self::escape($title) . '</h' . $level . '>';
+        }
+        $html .= $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text'));
+        if ($price !== '' || $period !== '') {
+            $html .= '<p class="pb-price-table-amount"><strong>' . self::escape($price) . '</strong>' . ($period !== '' ? ' <span>' . self::escape($period) . '</span>' : '') . '</p>';
+        }
+        $features = preg_split('/\R/u', $this->fieldText($settings, 'features')) ?: [];
+        $items = '';
+        foreach ($features as $feature) {
+            if (trim($feature) !== '') {
+                $items .= '<li>' . self::escape(trim(strip_tags($feature))) . '</li>';
+            }
+        }
+        if ($items !== '') {
+            $html .= '<ul>' . $items . '</ul>';
+        }
+        if ($url !== null && $url !== '') {
+            $html .= '<a class="pb-button-link" href="' . self::escape($url) . '">' . self::escape($this->fieldText($settings, 'button_text', t('plugin::prime-builder.ui.read_more'))) . '</a>';
+        }
+        return $html . '</div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderPriceList(array $settings): string
+    {
+        $title = $this->fieldText($settings, 'title');
+        $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
+        $html = '<div class="pb-price-list-content">';
+        if ($title !== '') {
+            $html .= '<h' . $level . '>' . self::escape($title) . '</h' . $level . '>';
+        }
+        $items = '';
+        $lines = preg_split('/\R/u', $this->fieldText($settings, 'items')) ?: [];
+        foreach (array_slice($lines, 0, 30) as $line) {
+            $parts = array_map(static fn (string $part): string => trim(strip_tags($part)), explode('|', $line));
+            if (count($parts) < 2 || count($parts) > 3 || $parts[0] === '' || $parts[1] === '') {
+                continue;
+            }
+            $items .= '<div><dt>' . self::escape($parts[0]) . '</dt><dd><strong>' . self::escape($parts[1]) . '</strong>'
+                . (($parts[2] ?? '') !== '' ? '<span>' . self::escape($parts[2]) . '</span>' : '') . '</dd></div>';
+        }
+        return $html . ($items !== '' ? '<dl>' . $items . '</dl>' : '') . '</div>';
     }
 
     /** @param array<string, mixed> $settings */

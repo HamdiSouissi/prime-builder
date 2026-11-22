@@ -181,6 +181,7 @@ final class Validator
             'latitude', 'longitude' => $value === '' || Map::coordinate($value, $type === 'latitude') !== null ? trim($value) : null,
             'json_object' => is_object(json_decode($value)) ? $value : null,
             'media_list' => $this->mediaList($value),
+            'price_items' => $this->priceItems($value),
             'rich' => $this->sanitizer->sanitizeBasic($value),
             'href' => $value === '' ? '' : $this->sanitizer->sanitizeHref($value),
             'url' => $value === '' ? '' : $this->sanitizer->sanitizeResourceUrl($value),
@@ -190,6 +191,34 @@ final class Validator
             'enum' => in_array($value, is_array($schema['values'] ?? null) ? $schema['values'] : [], true) ? $value : null,
             default => null,
         };
+    }
+
+    /** Normalize at most 30 text-only rows: name | price | optional description. */
+    private function priceItems(string $value): ?string
+    {
+        if (trim($value) === '') {
+            return '';
+        }
+        $lines = preg_split('/\R/u', trim($value));
+        if (!is_array($lines)) {
+            return null;
+        }
+        $output = [];
+        foreach ($lines as $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+            if (count($output) >= 30) {
+                return null;
+            }
+            $parts = array_map(static fn (string $part): string => trim(strip_tags($part)), explode('|', $line));
+            if (count($parts) < 2 || count($parts) > 3 || $parts[0] === '' || $parts[1] === ''
+                || strlen($parts[0]) > 300 || strlen($parts[1]) > 120 || strlen($parts[2] ?? '') > 1000) {
+                return null;
+            }
+            $output[] = implode(' | ', $parts);
+        }
+        return implode("\n", $output);
     }
 
     private function mediaList(string $value): ?string

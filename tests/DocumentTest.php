@@ -320,6 +320,70 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('<cite>Camille</cite> <span>Designer</span>', $html);
     }
 
+    public function testCallToActionRendersSafeImageHeadingTextAndLink(): void
+    {
+        $html = $this->renderBasicWidget('call_to_action', [
+            'title' => 'Construisons ensemble', 'level' => 3, 'text' => '<p>Une <strong>idée</strong><script>alert(1)</script></p>',
+            'image_url' => '/uploads/atelier.jpg', 'alt' => 'Notre atelier', 'width' => 640, 'height' => 480,
+            'url' => '/contact', 'button_text' => 'Nous contacter',
+        ]);
+        self::assertStringContainsString('<h3>Construisons ensemble</h3>', $html);
+        self::assertStringContainsString('<strong>idée</strong>', $html);
+        self::assertStringNotContainsString('<script', $html);
+        self::assertStringContainsString('src="/uploads/atelier.jpg" alt="Notre atelier" width="640" height="480" loading="lazy"', $html);
+        self::assertStringContainsString('href="/contact">Nous contacter</a>', $html);
+        $node = $this->element('call_to_action');
+        $node['settings'] = ['url' => 'javascript:alert(1)', 'level' => 1];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        self::assertStringNotContainsString('<a ', $this->renderBasicWidget('call_to_action', ['title' => 'Sans lien']));
+    }
+
+    public function testPriceTableRendersEscapedPriceBenefitsAndOptionalLink(): void
+    {
+        $html = $this->renderBasicWidget('price_table', [
+            'title' => 'Offre & services', 'level' => 3, 'text' => '<p>Une <strong>offre</strong></p>',
+            'price' => '29 €', 'period' => 'par mois', 'features' => "Premier avantage\nAssistance & suivi", 'url' => '/offre', 'button_text' => 'Choisir',
+        ]);
+        self::assertStringContainsString('<h3>Offre &amp; services</h3>', $html);
+        self::assertStringContainsString('<strong>29 €</strong> <span>par mois</span>', $html);
+        self::assertStringContainsString('<ul><li>Premier avantage</li><li>Assistance &amp; suivi</li></ul>', $html);
+        self::assertStringContainsString('href="/offre">Choisir</a>', $html);
+        self::assertStringNotContainsString('<a ', $this->renderBasicWidget('price_table', ['title' => 'Sans lien']));
+        $node = $this->element('price_table');
+        $node['settings'] = ['url' => 'javascript:alert(1)'];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+    }
+
+    public function testPriceListValidatesAndRendersTextOnlyRows(): void
+    {
+        $html = $this->renderBasicWidget('price_list', ['title' => 'Tarifs', 'level' => 2, 'items' => "Conseil | 25 € | Suivi & aide\nAtelier | Sur devis"]);
+        self::assertStringContainsString('<h2>Tarifs</h2><dl>', $html);
+        self::assertStringContainsString('<dt>Conseil</dt><dd><strong>25 €</strong><span>Suivi &amp; aide</span></dd>', $html);
+        self::assertStringContainsString('<dt>Atelier</dt><dd><strong>Sur devis</strong></dd>', $html);
+        $withBlankLines = $this->renderBasicWidget('price_list', ['items' => "Conseil | 25 €\n\n Atelier | Sur devis\n"]);
+        self::assertStringContainsString('<dt>Conseil</dt>', $withBlankLines);
+        self::assertStringContainsString('<dt>Atelier</dt>', $withBlankLines);
+        $node = $this->element('price_list');
+        foreach (['Sans prix', 'Nom | | Description', 'Nom | Prix | Description | Extra', implode("\n", array_fill(0, 31, 'Nom | Prix'))] as $bad) {
+            $node['settings'] = ['items' => $bad];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+        $safe = $this->renderBasicWidget('price_list', ['items' => '<img src=x onerror=alert(1)>Conseil | 25 € | <script>alert(1)</script>']);
+        self::assertStringNotContainsString('<img', $safe);
+        self::assertStringNotContainsString('<script', $safe);
+        self::assertStringNotContainsString('onerror=', $safe);
+    }
+
+    public function testProPricingWidgetsHaveIndividualStylesAndNoPublicScript(): void
+    {
+        $definitions = (new Registry())->all();
+        foreach (['call_to_action', 'price_table', 'price_list'] as $type) {
+            self::assertSame('pro', $definitions[$type]['category']);
+            self::assertSame('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $definitions[$type]['style']);
+            self::assertArrayNotHasKey('script', $definitions[$type]);
+        }
+    }
+
     public function testToggleUsesNativeDetailsWithAnOptionalOpenInitialState(): void
     {
         $html = $this->renderBasicWidget('toggle', ['title' => 'Détails', 'text' => '<p>Informations</p>', 'initial' => 'open']);

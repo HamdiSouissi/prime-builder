@@ -257,6 +257,37 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/gallery.js', $assets->renderScripts());
     }
 
+    public function testCallToActionAndPricingStylesLoadOnlyWhenTheirWidgetsArePresent(): void
+    {
+        $app = $this->activated(null);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'cta', 'type' => 'call_to_action', 'settings' => ['title' => 'Ensemble', 'url' => '/contact', 'button_text' => 'Contacter'], 'styles' => [], 'children' => []],
+            ['id' => 'price1', 'type' => 'price_table', 'settings' => ['title' => 'Offre', 'price' => '29 €'], 'styles' => [], 'children' => []],
+            ['id' => 'price2', 'type' => 'price_table', 'settings' => ['title' => 'Autre offre', 'price' => '49 €'], 'styles' => [], 'children' => []],
+            ['id' => 'list', 'type' => 'price_list', 'settings' => ['title' => 'Tarifs', 'items' => 'Service | 25 € | Description'], 'styles' => [], 'children' => []],
+        ];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('href="/contact">Contacter</a>', $entry->contentHtml);
+        self::assertStringContainsString('<dt>Service</dt><dd><strong>25 €</strong><span>Description</span></dd>', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        foreach (['call_to_action', 'price_table', 'price_list'] as $type) {
+            self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/' . $type . '.css'));
+            self::assertStringNotContainsString('/assets/plugins/prime-builder/js/' . $type . '.js', $assets->renderScripts());
+        }
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        foreach (['call_to_action', 'price_table', 'price_list'] as $type) {
+            self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $assets->renderStyles());
+        }
+    }
+
     public function testThemeZoneUsesDeclaredCoreZonesAndRefreshesWithoutPersistingTheirContents(): void
     {
         $app = $this->activated('admin');
