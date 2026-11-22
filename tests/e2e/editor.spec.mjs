@@ -474,6 +474,110 @@ test('countdown uses a UTC deadline, announces expiry and keeps its date without
   } finally { await noJs.close(); }
 });
 
+test('review and flip box remain accessible with keyboard, reduced motion and no JavaScript', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] }, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  await page.getByRole('button', { name: 'Ajouter Avis', exact: true }).click();
+  await page.getByLabel('Titre', { exact: true }).fill('Une expérience réussie');
+  await page.getByLabel('Note (0 à 5 étoiles)', { exact: true }).fill('4');
+  await page.getByLabel('Texte', { exact: true }).fill('<p>Un accompagnement attentif.</p>');
+  await page.getByLabel('Auteur', { exact: true }).fill('Camille');
+  await page.getByLabel('Fonction', { exact: true }).fill('Designer');
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-panel="widgets"]').click();
+  await page.getByRole('button', { name: 'Ajouter Boîte retournable', exact: true }).click();
+  await page.getByLabel('Titre du recto').fill('Nos services');
+  await page.getByLabel('Texte du recto').fill('<p>Une présentation.</p>');
+  await page.getByLabel('Titre du verso').fill('Les détails');
+  await page.getByLabel('Texte du verso').fill('<p>Une suite accessible.</p>');
+  await page.getByLabel('Adresse URL', { exact: true }).fill('/test-prime-builder#details');
+  await page.getByLabel('Texte du bouton', { exact: true }).fill('Découvrir');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await expect(frame.locator('link[href*="/css/widgets/review.css"]')).toHaveCount(1);
+  await expect(frame.locator('link[href*="/css/widgets/flip_box.css"]')).toHaveCount(1);
+  await expect(frame.locator('.pb-flip_box [data-pb-flip-back]').first()).toContainText('Une suite accessible.');
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-panel="widgets"]').click();
+  await page.getByRole('button', { name: 'Ajouter Boîte retournable', exact: true }).click();
+  await page.getByLabel('Titre du recto').fill('Deuxième carte');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+
+  await page.goto('/test-prime-builder');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const review = page.locator('.pb-review');
+  await expect(review.getByRole('heading', { name: 'Une expérience réussie' })).toBeVisible();
+  await expect(review.getByRole('img', { name: '4 sur 5 étoiles' })).toBeVisible();
+  await expect(review).toContainText('Camille');
+  for (const type of ['review', 'flip_box']) await expect(page.locator(`link[href*="/css/widgets/${type}.css"]`)).toHaveCount(1);
+  await expect(page.locator('script[src*="/js/flip_box.js"]')).toHaveCount(1);
+  const controls = page.locator('[data-pb-flip-control]');
+  await expect(controls).toHaveCount(2);
+  const ids = await controls.evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-controls')));
+  expect(new Set(ids).size).toBe(2);
+  for (const panelId of ids) {
+    expect(panelId).toBeTruthy();
+    expect(await page.evaluate(id => document.querySelectorAll(`[id="${id}"]`).length, panelId)).toBe(1);
+  }
+  const flip = page.locator('.pb-flip_box').first();
+  const button = flip.locator('[data-pb-flip-control]');
+  const front = flip.locator('[data-pb-flip-front]');
+  const back = flip.locator('[data-pb-flip-back]');
+  await expect(button).toHaveAccessibleName('Voir le verso : Nos services');
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+  await expect(front).toBeVisible();
+  await expect(back).toBeHidden();
+  await button.focus();
+  await page.keyboard.press('Enter');
+  await expect(button).toHaveAccessibleName('Voir le recto : Nos services');
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+  await expect(front).toBeHidden();
+  await expect(back).toBeVisible();
+  await expect(back).toHaveCSS('animation-name', 'none');
+  const link = back.getByRole('link', { name: 'Découvrir', exact: true });
+  await page.keyboard.press('Tab');
+  await expect(link).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/#details$/);
+  await expectAccessible(page);
+  await button.focus();
+  await page.keyboard.press('Space');
+  await expect(front).toBeVisible();
+  await expect(back).toBeHidden();
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const staticFlip = fallback.locator('.pb-flip_box').first();
+    await expect(staticFlip.locator('[data-pb-flip-front]')).toBeVisible();
+    await expect(staticFlip.locator('[data-pb-flip-back]')).toBeVisible();
+    await expect(staticFlip.locator('[data-pb-flip-control]')).toHaveCount(0);
+    await expect(staticFlip.getByRole('link', { name: 'Découvrir' })).toHaveAttribute('href', '/test-prime-builder#details');
+    await expect(fallback.locator('.pb-review').getByRole('img', { name: '4 sur 5 étoiles' })).toBeVisible();
+  } finally { await noJs.close(); }
+});
+
 test('search form uses the CMS search and refreshes its URL without disturbing typing', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
@@ -1085,7 +1189,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(40);
+  await expect(page.locator('.pb-element')).toHaveCount(42);
   await expectAccessible(page);
 });
 

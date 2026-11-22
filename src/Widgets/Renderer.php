@@ -174,6 +174,8 @@ final class Renderer
             'icon_list' => $this->renderIconList($settings),
             'image_box' => $this->renderImageBox($settings),
             'testimonial' => $this->renderTestimonial($settings),
+            'review' => $this->renderReview($settings),
+            'flip_box' => $this->renderFlipBox($settings),
             'call_to_action' => $this->renderCallToAction($settings),
             'price_table' => $this->renderPriceTable($settings),
             'price_list' => $this->renderPriceList($settings),
@@ -391,6 +393,57 @@ final class Renderer
             $html .= '</figcaption>';
         }
         return $html . '</figure>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderReview(array $settings): string
+    {
+        $title = $this->fieldText($settings, 'title');
+        $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
+        $rating = max(0, min(5, (int) ($settings['rating'] ?? 5)));
+        $author = $this->fieldText($settings, 'author');
+        $job = $this->fieldText($settings, 'job_title');
+        $image = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'image_url'));
+        $html = '<article class="pb-review-card">';
+        if ($title !== '') {
+            $html .= '<h' . $level . '>' . self::escape($title) . '</h' . $level . '>';
+        }
+        $html .= '<p class="pb-review-rating">' . $this->renderStarRating(['value' => $rating]) . '</p>'
+            . '<blockquote>' . $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text')) . '</blockquote>';
+        if (($image !== null && $image !== '') || $author !== '' || $job !== '') {
+            $html .= '<div class="pb-review-credit">';
+            if ($image !== null && $image !== '') {
+                $width = max(1, min(10000, (int) ($settings['width'] ?? 100)));
+                $height = max(1, min(10000, (int) ($settings['height'] ?? 100)));
+                $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '" width="' . $width . '" height="' . $height . '" loading="lazy" decoding="async">';
+            }
+            if ($author !== '' || $job !== '') {
+                $html .= '<p>' . ($author !== '' ? '<cite>' . self::escape($author) . '</cite>' : '')
+                    . ($job !== '' ? '<span>' . self::escape($job) . '</span>' : '') . '</p>';
+            }
+            $html .= '</div>';
+        }
+        return $html . '</article>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderFlipBox(array $settings): string
+    {
+        $front = $this->fieldText($settings, 'front_title', t('plugin::prime-builder.ui.flip_front_default'));
+        $back = $this->fieldText($settings, 'back_title', t('plugin::prime-builder.ui.flip_back_default'));
+        $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
+        $url = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
+        $html = '<div class="pb-flip-box" data-pb-flip data-pb-flip-context="' . self::escape($front) . '"'
+            . ' data-pb-show-back="' . self::escape(t('plugin::prime-builder.ui.flip_show_back')) . '"'
+            . ' data-pb-show-front="' . self::escape(t('plugin::prime-builder.ui.flip_show_front')) . '">'
+            . '<div class="pb-flip-face pb-flip-front" data-pb-flip-front><h' . $level . '>' . self::escape($front) . '</h' . $level . '>'
+            . $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'front_text')) . '</div>'
+            . '<div class="pb-flip-face pb-flip-back" data-pb-flip-back><h' . $level . '>' . self::escape($back) . '</h' . $level . '>'
+            . $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'back_text'));
+        if ($url !== null && $url !== '') {
+            $html .= '<a class="pb-flip-link" href="' . self::escape($url) . '">' . self::escape($this->fieldText($settings, 'button_text', t('plugin::prime-builder.ui.read_more'))) . '</a>';
+        }
+        return $html . '</div></div>';
     }
 
     /** @param array<string, mixed> $settings */

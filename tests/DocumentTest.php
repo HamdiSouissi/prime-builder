@@ -331,6 +331,59 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('<cite>Camille</cite> <span>Designer</span>', $html);
     }
 
+    public function testReviewRendersAnAccessibleEditorialRatingAndSafeAttribution(): void
+    {
+        $html = $this->renderBasicWidget('review', [
+            'title' => 'Une belle expérience', 'level' => 3, 'rating' => 4,
+            'text' => '<p>Très <strong>utile</strong><script>alert(1)</script>.</p>',
+            'author' => 'Camille & Alex', 'job_title' => 'Designer',
+            'image_url' => '/uploads/portrait.jpg', 'alt' => '', 'width' => 100, 'height' => 100,
+        ]);
+        self::assertStringContainsString('<article class="pb-review-card"><h3>Une belle expérience</h3>', $html);
+        self::assertStringContainsString('<span role="img" aria-label="', $html);
+        self::assertStringContainsString('<span aria-hidden="true">★★★★☆</span>', $html);
+        self::assertStringContainsString('<blockquote><p>Très <strong>utile</strong>.</p></blockquote>', $html);
+        self::assertStringContainsString('src="/uploads/portrait.jpg" alt="" width="100" height="100" loading="lazy"', $html);
+        self::assertStringContainsString('<cite>Camille &amp; Alex</cite><span>Designer</span>', $html);
+        self::assertStringNotContainsString('<script', $html);
+        self::assertStringNotContainsString('itemprop=', $html);
+        $node = $this->element('review');
+        foreach ([['rating' => 6], ['rating' => -1], ['level' => 1], ['image_url' => 'javascript:alert(1)']] as $bad) {
+            $node['settings'] = $bad;
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+    }
+
+    public function testFlipBoxRendersBothSafeFacesAndAnOptionalLinkWithoutScript(): void
+    {
+        $html = $this->renderBasicWidget('flip_box', [
+            'front_title' => 'Recto & aperçu', 'front_text' => '<p>En avant<script>alert(1)</script>.</p>',
+            'back_title' => 'Verso', 'back_text' => '<p>Plus de détails.</p>', 'level' => 3,
+            'url' => '/contact', 'button_text' => 'Nous joindre',
+        ]);
+        self::assertStringContainsString('data-pb-flip-context="Recto &amp; aperçu"', $html);
+        self::assertStringContainsString('data-pb-flip-front><h3>Recto &amp; aperçu</h3><p>En avant.</p>', $html);
+        self::assertStringContainsString('data-pb-flip-back><h3>Verso</h3><p>Plus de détails.</p>', $html);
+        self::assertStringContainsString('href="/contact">Nous joindre</a>', $html);
+        self::assertStringNotContainsString(' hidden', $html);
+        self::assertStringNotContainsString('<button', $html);
+        self::assertStringNotContainsString('<script', $html);
+        $node = $this->element('flip_box');
+        foreach ([['url' => 'javascript:alert(1)'], ['level' => 7], ['front_title' => str_repeat('x', 201)]] as $bad) {
+            $node['settings'] = $bad;
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+        $definitions = (new Registry())->all();
+        foreach (['review', 'flip_box'] as $type) {
+            self::assertSame('pro', $definitions[$type]['category']);
+            self::assertSame('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $definitions[$type]['style']);
+            self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/' . $type . '.css');
+        }
+        self::assertArrayNotHasKey('script', $definitions['review']);
+        self::assertSame('/assets/plugins/prime-builder/js/flip_box.js', $definitions['flip_box']['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/js/flip_box.js');
+    }
+
     public function testCallToActionRendersSafeImageHeadingTextAndLink(): void
     {
         $html = $this->renderBasicWidget('call_to_action', [

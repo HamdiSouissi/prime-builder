@@ -295,6 +295,48 @@ final class IntegrationTest extends TestCase
         }
     }
 
+    public function testReviewAndFlipBoxPersistAndLoadOnlyTheirRequiredAssets(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Avis', $config['widgets']['review']['label']);
+        self::assertSame('Note (0 à 5 étoiles)', $config['widgets']['review']['fields']['rating']['label']);
+        self::assertSame('Boîte retournable', $config['widgets']['flip_box']['label']);
+        self::assertSame('Titre du recto', $config['widgets']['flip_box']['fields']['front_title']['label']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'review1', 'type' => 'review', 'settings' => ['title' => 'Avis', 'rating' => 4, 'text' => '<p>Très bien</p>', 'author' => 'Camille'], 'styles' => [], 'children' => []],
+            ['id' => 'review2', 'type' => 'review', 'settings' => ['rating' => 5], 'styles' => [], 'children' => []],
+            ['id' => 'container', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                ['id' => 'flip1', 'type' => 'flip_box', 'settings' => ['front_title' => 'Offre', 'back_title' => 'Détails', 'url' => '/offre', 'button_text' => 'Découvrir'], 'styles' => [], 'children' => []],
+            ]],
+            ['id' => 'flip2', 'type' => 'flip_box', 'settings' => [], 'styles' => [], 'children' => []],
+        ];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('aria-label="4 sur 5 étoiles"', $entry->contentHtml);
+        self::assertStringContainsString('data-pb-flip-front><h2>Offre</h2>', $entry->contentHtml);
+        self::assertStringContainsString('data-pb-flip-back><h2>Détails</h2>', $entry->contentHtml);
+        self::assertStringContainsString('href="/offre">Découvrir</a>', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        foreach (['review', 'flip_box'] as $type) {
+            self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/' . $type . '.css'));
+        }
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/flip_box.js'));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/review.js', $assets->renderScripts());
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        foreach (['review', 'flip_box'] as $type) {
+            self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $assets->renderStyles());
+        }
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/flip_box.js', $assets->renderScripts());
+    }
+
     public function testCountdownPersistsUtcDatesAndLoadsDeduplicatedAssetsOnlyWhereNeeded(): void
     {
         $app = $this->activated('admin');
@@ -1264,6 +1306,7 @@ final class IntegrationTest extends TestCase
             ['id' => 'tabs', 'type' => 'tabs', 'settings' => ['title_1' => 'Un', 'text_1' => 'Contenu', 'title_2' => 'Deux', 'text_2' => 'Suite'], 'styles' => [], 'children' => []],
             ['id' => 'map', 'type' => 'map', 'settings' => ['latitude' => '48.79', 'longitude' => '2.45'], 'styles' => [], 'children' => []],
             ['id' => 'countdown', 'type' => 'countdown', 'settings' => ['deadline' => '2028-02-29T13:05'], 'styles' => [], 'children' => []],
+            ['id' => 'flip', 'type' => 'flip_box', 'settings' => ['front_title' => 'Recto', 'back_title' => 'Verso'], 'styles' => [], 'children' => []],
             ['id' => 'anchor', 'type' => 'anchor', 'settings' => ['anchor' => 'section'], 'styles' => [], 'children' => []],
             ['id' => 'link', 'type' => 'button', 'settings' => ['text' => 'Lien', 'url' => '#section'], 'styles' => [], 'children' => []],
         ]];
@@ -1313,6 +1356,7 @@ final class IntegrationTest extends TestCase
         self::assertIsString($header);
         self::assertStringContainsString('En-tête du constructeur', $header);
         self::assertStringContainsString('datetime="2028-02-29T13:05:00Z"', $header);
+        self::assertStringContainsString('data-pb-flip-front><h2>Recto</h2>', $header);
         self::assertStringContainsString('class="pb-theme-header"', $header);
         self::assertStringContainsString('href="#pbt-header-', $header);
         self::assertStringContainsString('id="pbt-header-', $header);
@@ -1327,6 +1371,8 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('/assets/plugins/prime-builder/js/map.js', $assets->renderScripts());
         self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/countdown.js'));
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/countdown.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/flip_box.js'));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/flip_box.css'));
         self::assertStringContainsString('https://www.openstreetmap.org', (new \Prime\Themes\PublicCsp($hooks))->headerValue());
         self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\.css)~', $assets->renderStyles(), $matches));
         $css = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
@@ -1340,6 +1386,8 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/tabs.css', $assets->renderStyles());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/countdown.css', $assets->renderStyles());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/countdown.js', $assets->renderScripts());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/flip_box.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/flip_box.js', $assets->renderScripts());
         self::assertStringNotContainsString('https://www.openstreetmap.org', (new \Prime\Themes\PublicCsp($hooks))->headerValue());
         $fields['footer'] = $id;
         self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
@@ -1353,6 +1401,8 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/tabs.css'));
         self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/countdown.js'));
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/countdown.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/flip_box.js'));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/flip_box.css'));
         // A library manager deleting a source cannot silently change the selected theme snapshot.
         self::assertSame(200, $this->send($app, 'DELETE', '/api/prime-builder/v1/templates/' . $id, token: $admin)->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
