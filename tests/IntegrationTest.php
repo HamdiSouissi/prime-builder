@@ -632,7 +632,9 @@ final class IntegrationTest extends TestCase
         $updated = json_decode($live->body(), true)['data']['widgets']['menu'];
         self::assertStringContainsString('Nouveau lien', $updated);
         self::assertStringNotContainsString('Article actuel', $updated);
-        self::assertStringNotContainsString('Nouveau lien', $app->get(EntryRepository::class)->find(1)?->contentHtml ?? '');
+        $persisted = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($persisted);
+        self::assertStringNotContainsString('Nouveau lien', $persisted->contentHtml);
         $menus->delete($menuId);
         $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
         self::assertStringContainsString('href="/"', json_decode($live->body(), true)['data']['widgets']['menu']);

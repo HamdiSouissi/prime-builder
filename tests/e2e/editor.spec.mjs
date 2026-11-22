@@ -1607,7 +1607,7 @@ test('fingerprinted styles survive a public edit and protect drafts', async ({ p
 test('built-in default widgets save and remain accessible together', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
-  const response = await page.evaluate(async entryId => {
+  const { status, count } = await page.evaluate(async entryId => {
     const config = JSON.parse(document.querySelector('[data-pb-config]').value);
     const { createElement } = await import('/assets/plugins/prime-builder/js/model.js');
     const elements = Object.keys(config.widgets).filter(type => !config.widgets[type].hidden).map(type => {
@@ -1620,11 +1620,12 @@ test('built-in default widgets save and remain accessible together', async ({ pa
       method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
       body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements } }] }, status: 'published', published_at: '' }),
     });
-    return result.status;
+    return { status: result.status, count: elements.length };
   }, id);
-  expect(response).toBe(200);
+  expect(status).toBe(200);
+  expect(count).toBe(49);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(48);
+  await expect(page.locator('.pb-element')).toHaveCount(count);
   await expectAccessible(page);
 });
 
@@ -2302,7 +2303,7 @@ test('navigation uses CMS menus with keyboard disclosures on desktop and mobile'
   expect(reset).toBe(200);
   await page.reload();
   await page.getByRole('button', { name: 'Ajouter Menu de navigation', exact: true }).click();
-  await page.getByLabel('Menu du site', { exact: true }).selectOption({ label: 'Navigation démonstration' });
+  await page.getByRole('combobox', { name: 'Menu du site', exact: true }).selectOption({ label: 'Navigation démonstration' });
   await page.getByLabel('Nom accessible de la navigation', { exact: true }).fill('Explorer nos pages');
   const frame = page.frameLocator('[data-pb-frame]');
   const preview = frame.getByRole('navigation', { name: 'Explorer nos pages' });
