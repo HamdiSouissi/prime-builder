@@ -233,6 +233,13 @@ final class Content
     }
 
     /** @param array<string, mixed> $settings */
+    public function shareButtons(array $settings, ?Entry $entry): string
+    {
+        $url = $entry !== null ? $this->urls->absolute($this->urls->entryUrl($entry)) : '';
+        return ShareButtons::render($settings, $url);
+    }
+
+    /** @param array<string, mixed> $settings */
     public function themeZone(array $settings, bool $live): string
     {
         $slug = is_string($settings['zone'] ?? null) ? $settings['zone'] : '';

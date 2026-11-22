@@ -640,6 +640,40 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('href="/"', json_decode($live->body(), true)['data']['widgets']['menu']);
     }
 
+    public function testShareButtonsPersistPublicLinksAndLoadOnlyTheirAssets(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Boutons de partage', $config['widgets']['share_buttons']['label']);
+        self::assertSame('Afficher LinkedIn', $config['widgets']['share_buttons']['fields']['linkedin']['label']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                ['id' => 'share1', 'type' => 'share_buttons', 'settings' => ['label' => 'Faire connaître', 'message' => 'Bonjour & merci', 'linkedin' => 'hide'], 'styles' => [], 'children' => []],
+            ]],
+            ['id' => 'share2', 'type' => 'share_buttons', 'settings' => [], 'styles' => [], 'children' => []],
+        ];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $url = $app->get(UrlGenerator::class)->absolute($app->get(UrlGenerator::class)->entryUrl($entry));
+        self::assertStringContainsString('aria-label="Faire connaître"', $entry->contentHtml);
+        self::assertStringContainsString('https://www.facebook.com/sharer/sharer.php?u=' . rawurlencode($url), $entry->contentHtml);
+        self::assertStringContainsString('subject=Bonjour%20%26%20merci', $entry->contentHtml);
+        self::assertSame(1, substr_count($entry->contentHtml, 'https://www.linkedin.com/sharing/share-offsite/'));
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/share_buttons.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/share_buttons.js'));
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/share_buttons.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/share_buttons.js', $assets->renderScripts());
+    }
+
     public function testSearchFormPersistsUsableHtmlAndRefreshesTheCoreSearchPath(): void
     {
         $app = $this->activated('admin');
@@ -1705,6 +1739,14 @@ final class IntegrationTest extends TestCase
         $fields['header'] = json_decode($dynamicTemplate->body(), true)['data']['id'];
         self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
+        foreach (['navigation', 'share_buttons'] as $type) {
+            $unsupported = ['version' => 1, 'elements' => [['id' => 'dynamic', 'type' => $type, 'settings' => [], 'styles' => [], 'children' => []]]];
+            $template = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => $type, 'kind' => 'section', 'data' => $unsupported], $admin);
+            self::assertSame(201, $template->status(), $template->body());
+            $fields['header'] = json_decode($template->body(), true)['data']['id'];
+            self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+            self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
+        }
         $duplicates = ['version' => 1, 'elements' => [
             ['id' => 'a', 'type' => 'anchor', 'settings' => ['anchor' => 'repetition'], 'styles' => [], 'children' => []],
             ['id' => 'b', 'type' => 'anchor', 'settings' => ['anchor' => 'repetition'], 'styles' => [], 'children' => []],

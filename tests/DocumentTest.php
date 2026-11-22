@@ -25,6 +25,7 @@ use PrimeBuilder\Widgets\Countdown;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Registry;
 use PrimeBuilder\Widgets\Renderer;
+use PrimeBuilder\Widgets\ShareButtons;
 
 require_once dirname(__DIR__) . '/src/Widgets/Assets.php';
 require_once dirname(__DIR__) . '/src/Widgets/Content.php';
@@ -37,6 +38,7 @@ require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
 require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Renderer.php';
+require_once dirname(__DIR__) . '/src/Widgets/ShareButtons.php';
 require_once dirname(__DIR__) . '/src/Widgets/Portfolio.php';
 require_once dirname(__DIR__) . '/src/Widgets/Slideshow.php';
 require_once dirname(__DIR__) . '/src/Widgets/TermIds.php';
@@ -907,6 +909,42 @@ final class DocumentTest extends TestCase
         self::assertSame('/assets/plugins/prime-builder/css/widgets/navigation.css', $definition['style']);
         self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/navigation.css');
+    }
+
+    public function testShareButtonsEncodePublicUrlsAndRejectUnsafeValues(): void
+    {
+        $node = $this->element('share_buttons', 'share');
+        $node['settings'] = ['label' => 'Partager <b>ici</b> & ailleurs', 'message' => 'Bonjour & bienvenue', 'linkedin' => 'hide'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $html = ShareButtons::render($result['data']['elements'][0]['settings'], 'https://example.test/page?private_token=secret#fragment');
+        self::assertStringContainsString('aria-label="Partager ici &amp; ailleurs"', $html);
+        self::assertStringContainsString('data-pb-share-message="Bonjour &amp; bienvenue"', $html);
+        self::assertStringContainsString('https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fexample.test%2Fpage', $html);
+        self::assertStringContainsString('https://twitter.com/intent/tweet?url=https%3A%2F%2Fexample.test%2Fpage&amp;text=Bonjour%20%26%20bienvenue', $html);
+        self::assertStringNotContainsString('private_token', $html);
+        self::assertStringNotContainsString('secret', $html);
+        self::assertStringNotContainsString('fragment', $html);
+        self::assertStringContainsString('mailto:?subject=Bonjour%20%26%20bienvenue&amp;body=', $html);
+        self::assertStringNotContainsString('linkedin.com', $html);
+        self::assertStringNotContainsString('<script', $html);
+        self::assertStringNotContainsString('<b>', $html);
+        foreach (['javascript:alert(1)', '//example.test/page', 'https://user:pass@example.test/', "https://example.test/\r\nBcc:evil@example.test"] as $bad) {
+            self::assertStringNotContainsString('<a ', ShareButtons::render([], $bad));
+        }
+        $controls = ShareButtons::render(['message' => "Bonjour\r\nBcc:bad@example.test"], 'https://example.test/');
+        self::assertStringNotContainsString('%0A', $controls);
+        self::assertStringNotContainsString('%0D', $controls);
+        $node['settings'] = ['facebook' => 'yes'];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $node['settings'] = ['message' => str_repeat('a', 201)];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        self::assertStringContainsString(Renderer::escape(t('plugin::prime-builder.ui.share_none')), ShareButtons::render(['facebook' => 'hide', 'linkedin' => 'hide', 'x' => 'hide', 'email' => 'hide'], 'https://example.test/'));
+        $definition = (new Registry())->all()['share_buttons'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/share_buttons.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/share_buttons.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/share_buttons.css');
     }
 
     public function testThemeZoneValidatesTheSlugAndHasAReadableFallback(): void

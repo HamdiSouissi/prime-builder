@@ -1623,7 +1623,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
     return { status: result.status, count: elements.length };
   }, id);
   expect(status).toBe(200);
-  expect(count).toBe(49);
+  expect(count).toBe(50);
   await page.goto('/test-prime-builder');
   await expect(page.locator('.pb-element')).toHaveCount(count);
   await expectAccessible(page);
@@ -2287,6 +2287,115 @@ test('departure dialog traps and restores focus and closes on Escape', async ({ 
   await expect(dialog).not.toBeVisible();
   await expect(back).toBeFocused();
   expect(nativeDialogs).toBe(0);
+});
+
+test('share buttons use ordinary private-by-default links on desktop and mobile', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const reset = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] }, status: 'published', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(reset).toBe(200);
+  await page.reload();
+  await page.getByRole('button', { name: 'Ajouter Boutons de partage', exact: true }).click();
+  await page.getByLabel('Nom accessible du partage', { exact: true }).fill('Faire connaître cette page');
+  await page.getByLabel('Texte partagé (X et e-mail)', { exact: true }).fill('Bonjour & merci');
+  await page.getByRole('combobox', { name: 'Afficher LinkedIn', exact: true }).selectOption('hide');
+  const frame = page.frameLocator('[data-pb-frame]');
+  const preview = frame.getByRole('navigation', { name: 'Faire connaître cette page' });
+  await expect(preview.getByRole('link', { name: 'Partager sur Facebook' })).toBeVisible();
+  await expect(preview.getByRole('link', { name: 'Partager sur LinkedIn' })).toHaveCount(0);
+  await expect(frame.locator('link[href*="/css/widgets/share_buttons.css"]')).toHaveCount(1);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('share-screen-editor-desktop.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await showMobilePreview(page, frame, '.pb-share_buttons');
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('share-screen-editor-mobile.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+
+  const externalRequests = [];
+  page.on('request', request => {
+    if (/^https:\/\/(?:www\.)?(?:facebook\.com|linkedin\.com|twitter\.com)\//.test(request.url())) externalRequests.push(request.url());
+  });
+  await page.goto('/test-prime-builder?private_token=secret');
+  const share = page.getByRole('navigation', { name: 'Faire connaître cette page' });
+  const facebook = share.getByRole('link', { name: 'Partager sur Facebook' });
+  const x = share.getByRole('link', { name: 'Partager sur X' });
+  const email = share.getByRole('link', { name: 'Partager par e-mail' });
+  await expect(facebook).toBeVisible();
+  await expect(share.getByRole('link', { name: 'Partager sur LinkedIn' })).toHaveCount(0);
+  await expect(page.locator('link[href*="/css/widgets/share_buttons.css"]')).toHaveCount(1);
+  await expect(page.locator('script[src*="/js/share_buttons.js"]')).toHaveCount(1);
+  const publicUrl = new URL('/test-prime-builder', page.url()).href;
+  const facebookHref = await facebook.getAttribute('href');
+  expect(new URL(facebookHref).searchParams.get('u')).toBe(publicUrl);
+  expect(facebookHref).not.toContain('private_token');
+  expect(new URL(await x.getAttribute('href')).searchParams.get('text')).toBe('Bonjour & merci');
+  expect(await email.getAttribute('href')).toContain('subject=Bonjour%20%26%20merci');
+  await expect(facebook).toHaveAttribute('rel', 'noreferrer');
+  await facebook.focus();
+  await page.keyboard.press('Tab');
+  await expect(x).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(email).toBeFocused();
+  await expectAccessible(page);
+  expect(externalRequests).toEqual([]);
+  await page.screenshot({ path: test.info().outputPath('share-screen-public-desktop.jpg'), fullPage: true, quality: 20 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.reload();
+  await expect(facebook).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  expect(externalRequests).toEqual([]);
+  await page.screenshot({ path: test.info().outputPath('share-screen-public-mobile.jpg'), fullPage: true, quality: 20 });
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const fallbackLink = fallback.getByRole('navigation', { name: 'Faire connaître cette page' }).getByRole('link', { name: 'Partager sur Facebook' });
+    expect(new URL(await fallbackLink.getAttribute('href')).searchParams.get('u')).toContain('/test-prime-builder');
+  } finally { await noJs.close(); }
+  await page.route('https://www.facebook.com/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: 'Partage intercepté' }));
+  await facebook.focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => externalRequests.length).toBe(1);
+  expect(new URL(externalRequests[0]).searchParams.get('u')).toBe(publicUrl);
+
+  // Both private preview routes must keep the generated public fallback, never
+  // the admin URL or the preview query. No third party is contacted by previewing.
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const draftStatus = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const element = { id: 'share1', type: 'share_buttons', settings: { label: 'Faire connaître cette page', message: 'Bonjour & merci', linkedin: 'hide' }, styles: {}, children: [] };
+    const response = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [element] } }] }, status: 'draft', published_at: '' }),
+    });
+    return response.status;
+  }, id);
+  expect(draftStatus).toBe(200);
+  for (const previewUrl of [`/admin/content/page/${id}/preview?private_token=secret`, `/?preview=1&entry_id=${id}&private_token=secret`]) {
+    await page.goto(previewUrl);
+    const link = page.getByRole('navigation', { name: 'Faire connaître cette page' }).getByRole('link', { name: 'Partager sur Facebook' });
+    const href = await link.getAttribute('href');
+    expect(new URL(href).searchParams.get('u')).toBe(publicUrl);
+    expect(href).not.toMatch(/preview|private_token|secret|admin/);
+  }
+  expect(externalRequests).toHaveLength(1);
 });
 
 test('navigation uses CMS menus with keyboard disclosures on desktop and mobile', async ({ page, browser }) => {

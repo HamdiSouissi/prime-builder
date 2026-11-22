@@ -99,6 +99,14 @@ final class Registry
                 'menu_id' => ['type' => 'menu_id', 'max' => 9, 'label' => 'plugin::prime-builder.ui.navigation_select'],
                 'label' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.navigation_label'],
             ],
+            'share_buttons' => [
+                'label' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.share_label'],
+                'message' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.share_message'],
+                'facebook' => ['type' => 'enum', 'values' => ['show', 'hide'], 'label' => 'plugin::prime-builder.ui.share_toggle_facebook'],
+                'linkedin' => ['type' => 'enum', 'values' => ['show', 'hide'], 'label' => 'plugin::prime-builder.ui.share_toggle_linkedin'],
+                'x' => ['type' => 'enum', 'values' => ['show', 'hide'], 'label' => 'plugin::prime-builder.ui.share_toggle_x'],
+                'email' => ['type' => 'enum', 'values' => ['show', 'hide'], 'label' => 'plugin::prime-builder.ui.share_toggle_email'],
+            ],
             'toggle' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000], 'initial' => ['type' => 'enum', 'values' => ['closed', 'open']]],
             'social' => ['label' => $text, 'facebook' => ['type' => 'href', 'max' => 2048], 'instagram' => ['type' => 'href', 'max' => 2048], 'linkedin' => ['type' => 'href', 'max' => 2048], 'youtube' => ['type' => 'href', 'max' => 2048], 'mastodon' => ['type' => 'href', 'max' => 2048]],
             'theme_zone' => ['zone' => ['type' => 'zone_slug', 'max' => 80, 'label' => 'plugin::prime-builder.ui.theme_zone_select']],
@@ -146,7 +154,7 @@ final class Registry
         foreach ($fields as $type => $schema) {
             $definitions[$type] = [
                 'label' => 'plugin::prime-builder.widgets.' . $type,
-                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation'], true) ? 'pro' : 'base'),
+                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation', 'share_buttons'], true) ? 'pro' : 'base'),
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];
@@ -154,12 +162,12 @@ final class Registry
                 $definitions[$type]['hidden'] = true;
                 $definitions[$type]['read_only'] = true;
             }
-            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation'], true)) {
+            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation', 'share_buttons'], true)) {
                 $definitions[$type]['style'] = '/assets/plugins/prime-builder/css/widgets/' . $type . '.css';
             }
             if ($type === 'tabs') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
-            } elseif (in_array($type, ['countdown', 'flip_box', 'portfolio'], true)) {
+            } elseif (in_array($type, ['countdown', 'flip_box', 'portfolio', 'share_buttons'], true)) {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/' . $type . '.js';
             } elseif (in_array($type, ['posts', 'current_content', 'theme_zone', 'search_form', 'navigation'], true)) {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/content.js';

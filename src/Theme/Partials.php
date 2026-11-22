@@ -104,7 +104,7 @@ final class Partials
                 continue;
             }
             $type = $element['type'] ?? null;
-            if (in_array($type, ['posts', 'current_content', 'theme_zone', 'form', 'search_form', 'navigation'], true)) {
+            if (in_array($type, ['posts', 'current_content', 'theme_zone', 'form', 'search_form', 'navigation', 'share_buttons'], true)) {
                 return true;
             }
             $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
