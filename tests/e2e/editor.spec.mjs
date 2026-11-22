@@ -2371,7 +2371,10 @@ test('share buttons use ordinary private-by-default links on desktop and mobile'
   } finally { await noJs.close(); }
   await page.route('https://www.facebook.com/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: 'Partage intercepté' }));
   await facebook.focus();
-  await page.keyboard.press('Enter');
+  await Promise.all([
+    page.waitForURL(/^https:\/\/www\.facebook\.com\/sharer\//),
+    page.keyboard.press('Enter'),
+  ]);
   await expect.poll(() => externalRequests.length).toBe(1);
   expect(new URL(externalRequests[0]).searchParams.get('u')).toBe(publicUrl);
 
