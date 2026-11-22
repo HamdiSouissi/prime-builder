@@ -4,6 +4,7 @@ parameters:
         - src
         - views
         - lang
+        - migrations
         - tests
         - tools
         - .php-cs-fixer.dist.php

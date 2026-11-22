@@ -6,6 +6,8 @@ const mouseId = process.env.E2E_MOUSE_ENTRY_ID || '';
 const keyboardId = process.env.E2E_KEYBOARD_ENTRY_ID || '';
 const dragId = process.env.E2E_DRAG_ENTRY_ID || '';
 const htmlId = process.env.E2E_HTML_ENTRY_ID || '';
+const formId = process.env.E2E_FORM_ENTRY_ID || '';
+const menuId = process.env.E2E_MENU_ENTRY_ID || '';
 async function login(page) {
   await page.goto('/admin/login');
   await page.locator('input[name=email]').fill(process.env.E2E_ADMIN_EMAIL || 'builder@prime.test');
@@ -478,7 +480,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(24);
+  await expect(page.locator('.pb-element')).toHaveCount(25);
   await expectAccessible(page);
 });
 
@@ -598,6 +600,109 @@ test('context menu copies elements and styles with keyboard and restores focus',
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await expect(opener).toBeFocused();
+});
+
+test('context menu supports every action using only the keyboard', async ({ page }) => {
+  expect(menuId).toMatch(/^[1-9][0-9]*$/);
+  // No mouse, locator.focus, fill, click, or API setup: login and editing use keys.
+  await page.goto('/admin/login');
+  await expect(page.locator('input[name="email"]')).toBeFocused();
+  await page.keyboard.insertText(process.env.E2E_ADMIN_EMAIL || 'builder@prime.test');
+  await page.keyboard.press('Tab');
+  await expect(page.locator('input[name="password"]')).toBeFocused();
+  await page.keyboard.insertText(process.env.E2E_ADMIN_PASSWORD || 'Cascade-Corail-900!Orbit');
+  await Promise.all([page.waitForURL(/\/admin\/?$/), page.keyboard.press('Enter')]);
+  await page.goto(`/admin/prime-builder/edit/${menuId}`);
+
+  async function addHeading(value) {
+    await page.keyboard.press('Control+k');
+    await expect(page.getByLabel('Rechercher une commande')).toBeFocused();
+    await page.keyboard.insertText('Ajouter Titre');
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('dialog').getByRole('button', { name: 'Ajouter Titre', exact: true })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByLabel('Texte', { exact: true })).toBeFocused();
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText(value);
+  }
+  const menu = page.getByRole('menu', { name: 'Actions de l’élément' });
+  const opener = page.locator('[data-pb-context-open]');
+  const frame = page.frameLocator('[data-pb-frame]');
+  await addHeading('Source clavier intégral');
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: 'Style', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeFocused();
+  await page.keyboard.insertText('#123456');
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+F10');
+  await expect(menu.getByRole('menuitem', { name: 'Copier', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(opener).toBeFocused();
+  await expect(page.locator('[data-pb-live]')).toHaveText('Élément copié dans le constructeur.');
+
+  await addHeading('Cible clavier intégral');
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+F10');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Coller le style' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(frame.getByRole('heading', { name: 'Cible clavier intégral' })).toHaveCSS('color', 'rgb(18, 52, 86)');
+  await page.keyboard.press('Shift+F10');
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Coller', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(frame.getByRole('heading', { name: 'Source clavier intégral' })).toHaveCount(2);
+
+  await page.keyboard.press('Shift+F10');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Dupliquer', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  const sources = frame.getByRole('heading', { name: 'Source clavier intégral' });
+  await expect(sources).toHaveCount(3);
+  await expect(sources.nth(1)).toHaveCSS('color', 'rgb(18, 52, 86)');
+
+  await page.keyboard.press('Shift+F10');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Enregistrer comme modèle' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Enregistrer comme modèle' });
+  await expect(dialog.getByLabel('Nom du modèle')).toBeFocused();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.insertText('Modèle sans souris');
+  const saved = page.waitForResponse(response => response.url().endsWith('/api/prime-builder/v1/templates') && response.request().method() === 'POST');
+  await page.keyboard.press('Enter');
+  expect((await saved).status()).toBe(201);
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+  await page.keyboard.press('Shift+F10');
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(opener).toBeFocused();
+
+  await page.keyboard.press('Shift+F10');
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowUp');
+  await expect(menu.getByRole('menuitem', { name: 'Réinitialiser le style' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(sources.nth(1)).not.toHaveCSS('color', 'rgb(18, 52, 86)');
+  await page.keyboard.press('Shift+F10');
+  await page.keyboard.press('End');
+  await expect(menu.getByRole('menuitem', { name: 'Supprimer', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(sources).toHaveCount(2);
+  await expectAccessible(page);
+  await page.keyboard.press('Control+s');
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.reload();
+  await expect(frame.getByRole('heading', { name: 'Source clavier intégral' })).toHaveCount(2);
+  await expect(frame.getByRole('heading', { name: 'Cible clavier intégral' })).toHaveCSS('color', 'rgb(18, 52, 86)');
 });
 
 test('existing canvas elements can be dragged into a container', async ({ page }) => {
@@ -962,6 +1067,54 @@ test('filtered HTML is previewed, sanitized, saved and reopened', async ({ page 
   await expect(page.locator('.pb-html script, .pb-html [onclick]')).toHaveCount(0);
   await expect(page.locator('.pb-html [href^="javascript:"]')).toHaveCount(0);
   await expectAccessible(page);
+});
+
+test('simple contact form sends anonymously and the protected inbox receives it', async ({ page }) => {
+  expect(formId).toMatch(/^[1-9][0-9]*$/);
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${formId}`);
+  await page.getByRole('button', { name: 'Ajouter Formulaire de contact', exact: true }).click();
+  await expect(page.frameLocator('[data-pb-frame]').getByLabel('Adresse e-mail')).toBeVisible();
+  await page.locator('[data-pb-status]').selectOption('published');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+
+  await page.goto('/formulaire-test?contact=1');
+  const form = page.locator('[data-pb-form]');
+  await expect(form).toBeVisible();
+  await expect(form.locator('input[name="_csrf_token"], input[name="token"]')).toHaveCount(0);
+  await expect(form.getByRole('button', { name: 'Envoyer', exact: true })).toBeEnabled();
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('contact-public-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('contact-public-mobile.png'), fullPage: true });
+  await form.getByLabel('Nom', { exact: true }).fill('Camille Exemple');
+  await form.getByLabel('Adresse e-mail', { exact: true }).fill('camille@example.test');
+  await form.getByLabel('Message', { exact: true }).fill('Bonjour <img src=x onerror=alert(1)> depuis le navigateur.');
+  const sent = page.waitForResponse(response => response.url().endsWith(`/api/prime-builder/v1/forms/${formId}/submit`) && response.request().method() === 'POST');
+  await form.getByRole('button', { name: 'Envoyer', exact: true }).click();
+  const response = await sent;
+  expect(response.status()).toBe(201);
+  const headers = await response.request().allHeaders();
+  expect(headers.cookie).toBeUndefined();
+  expect(headers['x-prime-csrf']).toBeUndefined();
+  await expect(form.locator('[data-pb-form-status]')).toHaveText('Votre message a été enregistré.');
+
+  await page.goto('/admin/prime-builder/submissions');
+  const submission = page.locator('[data-pb-submission-id]').filter({ hasText: 'camille@example.test' });
+  await expect(submission).toHaveCount(1);
+  await expect(submission).toContainText('Bonjour <img src=x onerror=alert(1)> depuis le navigateur.');
+  await expect(submission.locator('img, script')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('contact-inbox-mobile.png'), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('contact-inbox-desktop.png'), fullPage: true });
+  await submission.getByRole('button', { name: /Supprimer l’envoi/ }).click();
+  await expect(page.locator('[data-pb-submission-id]').filter({ hasText: 'camille@example.test' })).toHaveCount(0);
 });
 
 test('departure dialog traps and restores focus and closes on Escape', async ({ page }) => {

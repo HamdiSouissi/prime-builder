@@ -163,11 +163,37 @@ final class Renderer
             'video', 'audio' => $this->renderMedia($type, $settings),
             'posts' => $this->content?->posts($settings, $this->live) ?? '',
             'current_content' => $this->content?->current($settings, $this->entry) ?? '',
+            'form' => $this->renderForm($settings, $id),
             'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry, is_string($settings['block_anchor'] ?? null) ? $settings['block_anchor'] : null),
             'original_content' => $this->renderOriginal($settings, false),
             'original_group' => $this->renderOriginal($settings, true),
             default => '',
         };
+    }
+
+    /**
+     * This first form has fixed fields. The start token is fetched anonymously by JS,
+     * never embedded in saved or cached HTML. The server checks the published entry.
+     *
+     * @param array<string, mixed> $settings
+     */
+    private function renderForm(array $settings, string $id): string
+    {
+        $entryId = $this->entry->id ?? 0;
+        $prefix = 'pb-form-' . $id;
+        $title = $this->fieldText($settings, 'title');
+        $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.forms.' . $key));
+        return '<form class="pb-contact-form" method="post" action="/api/prime-builder/v1/forms/' . $entryId . '/submit" data-pb-form data-pb-node="' . self::escape($id) . '"'
+            . ' data-pb-error="' . $copy('error') . '" data-pb-wait="' . $copy('wait') . '" data-pb-sent="' . $copy('sent') . '" data-pb-limited="' . $copy('limited') . '">'
+            . ($title !== '' ? '<h3>' . self::escape($title) . '</h3>' : '')
+            . '<p>' . $copy('required') . '</p>'
+            . '<label for="' . self::escape($prefix) . '-name">' . $copy('name') . '</label><input id="' . self::escape($prefix) . '-name" name="name" type="text" autocomplete="name" maxlength="160" required>'
+            . '<label for="' . self::escape($prefix) . '-email">' . $copy('email') . '</label><input id="' . self::escape($prefix) . '-email" name="email" type="email" autocomplete="email" maxlength="254" required>'
+            . '<label for="' . self::escape($prefix) . '-message">' . $copy('message') . '</label><textarea id="' . self::escape($prefix) . '-message" name="message" rows="5" maxlength="5000" required></textarea>'
+            . '<div class="pb-contact-trap" aria-hidden="true"><label for="' . self::escape($prefix) . '-website">' . $copy('trap') . '</label><input id="' . self::escape($prefix) . '-website" name="website" type="text" tabindex="-1" autocomplete="off"></div>'
+            . '<button class="pb-contact-submit" type="submit" disabled>' . self::escape($this->fieldText($settings, 'button_text', t('plugin::prime-builder.forms.submit'))) . '</button>'
+            . '<p class="pb-contact-status" role="status" aria-live="polite" data-pb-form-status></p>'
+            . '<noscript><p>' . $copy('javascript') . '</p></noscript></form>';
     }
 
     /** @param array<string, mixed> $settings */

@@ -40,6 +40,7 @@ final class Registry
             'audio' => ['url' => $url, 'transcript' => ['type' => 'rich', 'max' => 20000]],
             'posts' => ['limit' => ['type' => 'integer', 'min' => 1, 'max' => 12], 'show_excerpt' => ['type' => 'enum', 'values' => ['show', 'hide']]],
             'current_content' => ['source' => ['type' => 'enum', 'values' => ['title', 'excerpt', 'published', 'author']]],
+            'form' => ['title' => $text, 'button_text' => $text],
             'prime_block' => ['block_type' => ['type' => 'enum', 'values' => PrimeBlock::ALLOWED], 'block_data' => ['type' => 'json_object', 'max' => 20000], 'block_anchor' => ['type' => 'text', 'max' => 100]],
             'html' => [
                 'markup' => ['type' => 'rich', 'max' => 20000],
@@ -59,7 +60,7 @@ final class Registry
         foreach ($fields as $type => $schema) {
             $definitions[$type] = [
                 'label' => 'plugin::prime-builder.widgets.' . $type,
-                'category' => $type === 'container' ? 'structure' : (in_array($type, ['accordion', 'card', 'icon_box', 'counter', 'tabs', 'gallery', 'video', 'audio', 'posts', 'current_content', 'prime_block'], true) ? 'pro' : 'base'),
+                'category' => $type === 'container' ? 'structure' : (in_array($type, ['accordion', 'card', 'icon_box', 'counter', 'tabs', 'gallery', 'video', 'audio', 'posts', 'current_content', 'form', 'prime_block'], true) ? 'pro' : 'base'),
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];
@@ -71,6 +72,8 @@ final class Registry
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
             } elseif (in_array($type, ['posts', 'current_content'], true)) {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/content.js';
+            } elseif ($type === 'form') {
+                $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/forms.js';
             }
         }
         $filtered = $this->hooks?->apply('prime_builder.widgets', $definitions) ?? $definitions;

@@ -55,6 +55,7 @@ final class Documents
             'card' => ['title' => $copy('card_title'), 'text' => $copy('card_text')],
             'icon_box' => ['icon' => 'star', 'title' => $copy('icon_title'), 'text' => $copy('icon_text')],
             'counter' => ['title' => $copy('counter')],
+            'form' => ['title' => $copy('form_title'), 'button_text' => $copy('form_button')],
             'prime_block' => ['block_type' => 'paragraph', 'block_data' => (string) json_encode(['text' => $copy('prime_block')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)],
             'tabs' => ['label' => $copy('tabs_label'), 'title_1' => $copy('tab_1'), 'text_1' => $copy('tab_text_1'), 'title_2' => $copy('tab_2'), 'text_2' => $copy('tab_text_2')],
         ];

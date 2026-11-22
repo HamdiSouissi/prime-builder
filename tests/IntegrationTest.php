@@ -46,6 +46,16 @@ final class IntegrationTest extends TestCase
     public function testActivationRegistersEditorBlockAndPageFilter(): void
     {
         $app = $this->activated('admin');
+        // The fixture activates after CMS boot, so apply the menu filter explicitly.
+        // A syntactically valid but missing sprite icon can otherwise disappear or
+        // break every administration screen in debug mode on a fresh request.
+        $menu = $app->get(Hooks::class)->apply('admin.menu', new \Prime\Admin\Menu\AdminMenu());
+        self::assertInstanceOf(\Prime\Admin\Menu\AdminMenu::class, $menu);
+        foreach (['plugin.prime-builder', 'plugin.prime-builder-theme', 'plugin.prime-builder-submissions'] as $id) {
+            $item = $menu->get($id);
+            self::assertNotNull($item);
+            self::assertSame(true, \Prime\View\Icon::exists($item->icon));
+        }
         self::assertNotNull($app->get(BlockRegistry::class)->get('prime-builder/layout'));
         $editor = $app->get(EditorRegistry::class)->get('prime-builder');
         self::assertNotNull($editor);
@@ -561,6 +571,194 @@ final class IntegrationTest extends TestCase
         self::assertSame(403, $this->send($app, 'GET', '/api/v1/users', token: $admin['token'])->status());
     }
 
+    public function testContactFormRendersAndOnlyStartsForVisiblePublishedWidgets(): void
+    {
+        $app = $this->activated(null);
+        $this->publishContactForm($app);
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('action="/api/prime-builder/v1/forms/1/submit"', $entry->contentHtml);
+        self::assertStringContainsString('data-pb-form', $entry->contentHtml);
+        self::assertStringContainsString('name="name"', $entry->contentHtml);
+        self::assertStringContainsString('name="email"', $entry->contentHtml);
+        self::assertStringContainsString('name="message"', $entry->contentHtml);
+        self::assertStringNotContainsString('_csrf_token', $entry->contentHtml);
+        self::assertStringNotContainsString('name="token"', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/forms.js'));
+        $other = $app->get(EntryRepository::class)->find(3);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/forms.js', $assets->renderScripts());
+
+        $start = $this->formRequest($app, 'GET', '/api/prime-builder/v1/forms/1/start?node=contact');
+        self::assertSame(200, $start->status(), $start->body());
+        self::assertStringContainsString('no-store', (string) $start->header('Cache-Control'));
+        $token = json_decode($start->body(), true)['data']['token'];
+        self::assertIsString($token);
+        self::assertMatchesRegularExpression('/^[0-9]+\.[a-f0-9]{32}\.[a-f0-9]{64}$/D', $token);
+        $again = $this->formRequest($app, 'GET', '/api/prime-builder/v1/forms/1/start?node=contact');
+        self::assertSame(200, $again->status());
+        self::assertSame(false, $token === json_decode($again->body(), true)['data']['token']);
+        self::assertSame(404, $this->formRequest($app, 'GET', '/api/prime-builder/v1/forms/1/start?node=hidden_form')->status());
+        self::assertSame(404, $this->formRequest($app, 'GET', '/api/prime-builder/v1/forms/1/start?node=nested_hidden')->status());
+        self::assertSame(404, $this->formRequest($app, 'GET', '/api/prime-builder/v1/forms/1/start?node=unknown')->status());
+        self::assertSame(404, $this->formRequest($app, 'GET', '/api/prime-builder/v1/forms/2/start?node=contact')->status());
+        self::assertSame(404, $this->formRequest($app, 'GET', '/api/prime-builder/v1/forms/0/start?node=contact')->status());
+        self::assertSame(404, $this->formRequest($app, 'GET', '/api/prime-builder/v1/forms/1/start?node[]=contact')->status());
+
+        // Removing a form or unpublishing its entry invalidates even an already issued start.
+        $this->db($app)->pdo()->exec("UPDATE pc_entries SET status = 'draft' WHERE id = 1");
+        self::assertSame(404, $this->formRequest($app, 'GET', '/api/prime-builder/v1/forms/1/start?node=contact')->status());
+        self::assertSame(404, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', [
+            'node' => 'contact', 'name' => 'Nom', 'email' => 'a@example.test', 'message' => 'Bonjour', 'website' => '', 'token' => $token,
+        ])->status());
+    }
+
+    public function testContactFormValidatesAndProtectsRealAnonymousSubmissions(): void
+    {
+        $app = $this->activated(null);
+        $this->publishContactForm($app);
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $payload = static fn (string $ip, int $age = 4): array => [
+            'node' => 'contact', 'name' => '<script>danger()</script>', 'email' => 'sender@example.test',
+            'message' => "Bonjour <img src=x onerror=alert(1)>\nSuite", 'website' => '',
+            'token' => $tokens->issue(1, 'contact', $ip, time() - $age),
+        ];
+        $count = fn (): int => $this->db($app)->table('prime_builder_submissions')->count();
+        $trap = $payload('198.51.100.10');
+        $trap['website'] = 'https://spam.example';
+        self::assertSame(201, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $trap, '198.51.100.10')->status());
+        self::assertSame(0, $count());
+
+        $early = $payload('198.51.100.11', 0);
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $early, '198.51.100.11')->status());
+        $expired = $payload('198.51.100.12', 1801);
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $expired, '198.51.100.12')->status());
+        $future = $payload('198.51.100.13', -30);
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $future, '198.51.100.13')->status());
+        $forged = $payload('198.51.100.14');
+        $forged['token'] .= '0';
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $forged, '198.51.100.14')->status());
+        $wrongIp = $payload('198.51.100.15');
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $wrongIp, '198.51.100.16')->status());
+        $wrongNode = $payload('198.51.100.17');
+        $wrongNode['token'] = $tokens->issue(1, 'other', '198.51.100.17', time() - 4);
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $wrongNode, '198.51.100.17')->status());
+        $wrongEntry = $payload('198.51.100.18');
+        $wrongEntry['token'] = $tokens->issue(2, 'contact', '198.51.100.18', time() - 4);
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $wrongEntry, '198.51.100.18')->status());
+        $invalid = $payload('198.51.100.19');
+        $invalid['email'] = 'not an email';
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $invalid, '198.51.100.19')->status());
+        $invalid = $payload('198.51.100.20');
+        $invalid['message'] = str_repeat('x', 24001);
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $invalid, '198.51.100.20')->status());
+        $invalid = $payload('198.51.100.21');
+        $invalid['extra'] = 'unexpected';
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $invalid, '198.51.100.21')->status());
+        $invalid = $payload('198.51.100.22');
+        $invalid['name'] = ['not', 'a', 'string'];
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $invalid, '198.51.100.22')->status());
+        self::assertSame(0, $count());
+
+        $valid = $payload('198.51.100.23');
+        $response = $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $valid, '198.51.100.23');
+        self::assertSame(201, $response->status(), $response->body());
+        self::assertStringContainsString('no-store', (string) $response->header('Cache-Control'));
+        self::assertSame(1, $count());
+        self::assertSame(409, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $valid, '198.51.100.23')->status());
+        self::assertSame(1, $count());
+        $stored = $this->db($app)->table('prime_builder_submissions')->first();
+        self::assertNotNull($stored);
+        self::assertSame('<script>danger()</script>', $stored['sender_name']);
+        self::assertSame("Bonjour <img src=x onerror=alert(1)>\nSuite", $stored['message']);
+        self::assertStringNotContainsString('198.51.100.23', (string) json_encode($stored));
+        // Deleting the message does not allow its still-valid start token to be reused.
+        self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->where('id', '=', $stored['id'])->delete());
+        self::assertSame(409, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $valid, '198.51.100.23')->status());
+        self::assertSame(0, $count());
+    }
+
+    public function testContactFormRateLimitsAndScheduledPurge(): void
+    {
+        $app = $this->activated(null);
+        $this->publishContactForm($app);
+        $ip = '203.0.113.25';
+        $body = ['node' => 'contact', 'name' => 'Nom', 'email' => 'bad', 'message' => 'Bonjour', 'website' => '', 'token' => 'invalid'];
+        for ($i = 0; $i < 5; $i++) {
+            self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $body, $ip)->status());
+        }
+        $limited = $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $body, $ip);
+        self::assertSame(429, $limited->status());
+        self::assertSame(true, (int) $limited->header('Retry-After') > 0);
+        self::assertSame(422, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $body, '203.0.113.26')->status());
+        self::assertSame(0, $this->db($app)->table('prime_builder_submissions')->count());
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $now = time();
+        $limiter = new \PrimeBuilder\Forms\RateLimit($this->db($app), $tokens);
+        $first = $limiter->allow('probe', '203.0.113.40', 2, 60, $now);
+        $second = $limiter->allow('probe', '203.0.113.40', 2, 60, $now);
+        $third = $limiter->allow('probe', '203.0.113.40', 2, 60, $now);
+        self::assertSame([true, true, false], [$first, $second, $third]);
+        self::assertSame(true, $limiter->allow('probe', '203.0.113.41', 2, 60, $now));
+        self::assertSame(true, $limiter->allow('probe', '203.0.113.40', 2, 60, $now + 60));
+        $repository = new \PrimeBuilder\Forms\Submissions($this->db($app));
+        $values = ['name' => 'Nom', 'email' => 'a@example.test', 'message' => 'Message'];
+        self::assertSame(true, $repository->create(1, 'contact', $values, hash('sha256', 'old'), $now - 31 * 86400));
+        self::assertSame(true, $repository->create(1, 'contact', $values, hash('sha256', 'new'), $now));
+        $this->db($app)->table('prime_builder_form_limits')->insert(['key_hash' => hash('sha256', 'expired'), 'hits' => 1, 'expires_at' => gmdate('Y-m-d H:i:s', $now - 60)]);
+        $schedule = $app->get(Hooks::class)->apply('scheduler.register', new \Prime\Scheduler\Schedule());
+        self::assertSame(true, $schedule->has('prime-builder.purge-submissions'));
+        self::assertSame('prime-builder', $schedule->get('prime-builder.purge-submissions')->owner);
+        $purge = $schedule->get('prime-builder.purge-submissions')->closure();
+        self::assertNotNull($purge);
+        self::assertGreaterThanOrEqual(2, $purge());
+        self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->count());
+        self::assertSame(false, $this->db($app)->table('prime_builder_form_limits')->where('key_hash', '=', hash('sha256', 'expired'))->exists());
+    }
+
+    public function testSubmissionInboxRequiresItsOwnCapabilityAndCsrf(): void
+    {
+        $app = $this->activated(null);
+        $this->publishContactForm($app);
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $ip = '198.51.100.99';
+        $body = ['node' => 'contact', 'name' => '<script>danger()</script>', 'email' => 'sender@example.test', 'message' => '<img src=x onerror=alert(1)>', 'website' => '', 'token' => $tokens->issue(1, 'contact', $ip, time() - 4)];
+        self::assertSame(201, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $body, $ip)->status());
+        $row = $this->db($app)->table('prime_builder_submissions')->first();
+        self::assertNotNull($row);
+        $id = (int) $row['id'];
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $csrf = $app->get(Csrf::class)->token();
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/submissions')->status());
+        self::assertSame(403, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/submissions/' . $id . '/delete', body: ['_csrf_token' => $csrf]))->status());
+        self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->count());
+        $this->db($app)->pdo()->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.forms')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $csrf = $app->get(Csrf::class)->token();
+        $inbox = $this->send($app, 'GET', '/admin/prime-builder/submissions');
+        self::assertSame(200, $inbox->status(), $inbox->body());
+        self::assertStringContainsString('no-store', (string) $inbox->header('Cache-Control'));
+        self::assertStringContainsString('&lt;script&gt;danger()&lt;/script&gt;', $inbox->body());
+        self::assertStringContainsString('&lt;img src=x onerror=alert(1)&gt;', $inbox->body());
+        self::assertStringNotContainsString('<script>danger()</script>', $inbox->body());
+        self::assertSame(419, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/submissions/' . $id . '/delete'))->status());
+        self::assertSame(404, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/submissions/99999/delete', body: ['_csrf_token' => $csrf]))->status());
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/submissions/' . $id . '/delete', body: ['_csrf_token' => $csrf]))->status());
+        self::assertSame(0, $this->db($app)->table('prime_builder_submissions')->count());
+        $this->db($app)->pdo()->exec("DELETE FROM pc_role_capabilities WHERE role_id = 2 AND capability = 'prime_builder.forms'");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/submissions')->status());
+    }
+
     public function testThemePartialsUseRealTemplatesAndRequireTheirOwnCapability(): void
     {
         $app = $this->activated('contributor');
@@ -946,6 +1144,10 @@ final class IntegrationTest extends TestCase
         self::assertSame(200, $this->send($app, 'GET', $kitUrl)->status());
         $snapshotDirectory = $app->storagePath('prime-builder/styles');
         self::assertSame(true, is_dir($snapshotDirectory));
+        $schema = $this->db($app)->schema();
+        self::assertSame(true, $schema->hasTable('prime_builder_submissions'));
+        self::assertSame(true, $schema->hasTable('prime_builder_form_tokens'));
+        self::assertSame(true, $schema->hasTable('prime_builder_form_limits'));
         $manager = $app->get(PluginManager::class);
         $manager->deactivate('prime-builder');
         $entry = $app->get(EntryRepository::class)->find(1);
@@ -956,6 +1158,9 @@ final class IntegrationTest extends TestCase
         $view = new EntryView($entry, $app->get(UrlGenerator::class), zones: $zones, dynamicBlocks: $app->get(\Prime\Site\Zone\DynamicBlockRegistry::class));
         self::assertStringContainsString('<h2>Bonjour</h2>', $view->content());
         $manager->uninstall('prime-builder', deleteFiles: false);
+        self::assertSame(false, $schema->hasTable('prime_builder_submissions'));
+        self::assertSame(false, $schema->hasTable('prime_builder_form_tokens'));
+        self::assertSame(false, $schema->hasTable('prime_builder_form_limits'));
         self::assertSame(false, $settings->has('plugin.prime-builder.kit_primary'));
         $capabilities = $pdo->query("SELECT COUNT(*) FROM pc_role_capabilities WHERE capability LIKE 'prime!_builder.%' ESCAPE '!'");
         if ($capabilities === false) {
@@ -1232,6 +1437,39 @@ final class IntegrationTest extends TestCase
         $changed = $app->get(EntryRepository::class)->find(1);
         self::assertNotNull($changed);
         self::assertSame('<div>Changé ailleurs</div>', $changed->contentHtml);
+    }
+
+    private function publishContactForm(Application $app): void
+    {
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'contact editor', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'contact', 'type' => 'form', 'settings' => ['title' => 'Nous contacter', 'button_text' => 'Envoyer'], 'styles' => [], 'children' => []],
+            ['id' => 'hidden_form', 'type' => 'form', 'settings' => [], 'styles' => [], 'children' => [], 'hidden' => true],
+            ['id' => 'hidden_container', 'type' => 'container', 'settings' => [], 'styles' => [], 'hidden' => true, 'children' => [
+                ['id' => 'nested_hidden', 'type' => 'form', 'settings' => [], 'styles' => [], 'children' => []],
+            ]],
+        ];
+        $published = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $published->status(), $published->body());
+        $draft = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/2', ['content' => $document], $token);
+        self::assertSame(200, $draft->status(), $draft->body());
+    }
+
+    /** @param array<string, mixed>|null $body */
+    private function formRequest(Application $app, string $method, string $uri, ?array $body = null, string $ip = '127.0.0.1'): Response
+    {
+        $headers = ['Accept' => 'application/json'];
+        if ($body !== null) {
+            $headers['Content-Type'] = 'application/json';
+        }
+        return $app->get(Kernel::class)->handle(Request::create(
+            $method,
+            $uri,
+            headers: $headers,
+            server: ['REMOTE_ADDR' => $ip],
+            rawBody: $body === null ? '' : (string) json_encode($body),
+        ));
     }
 
     /** @return array<string, mixed> */

@@ -2,14 +2,14 @@
 
 Plugin de composition visuelle pour Prime CMS 1.0.1 et versions ultérieures compatibles. Il utilise le moteur de contenu et le thème actifs de Prime CMS, sans dépendance PHP ou JavaScript tierce à l’exécution.
 
-> **État : prototype partiel, version 0.1.0.** Il ne constitue pas encore un remplacement complet d’un constructeur visuel professionnel. Le Theme Builder se limite actuellement aux en-têtes et pieds de page statiques ; les formulaires, les popups, les widgets globaux et de nombreuses fonctions demandées ne sont pas implémentés. Ne l’utilisez pas en production sans revue, sauvegarde et tests adaptés à votre site. Voir [RETOUR.md](RETOUR.md).
+> **État : prototype partiel, version 0.1.0.** Il ne constitue pas encore un remplacement complet d’un constructeur visuel professionnel. Le Theme Builder se limite aux en-têtes et pieds de page statiques ; un formulaire de contact fixe existe, mais le constructeur de formulaires complet, les popups, les widgets globaux et de nombreuses fonctions demandées manquent. Ne l’utilisez pas en production sans revue, sauvegarde et tests adaptés à votre site. Voir [RETOUR.md](RETOUR.md).
 
 ## Prérequis
 
 - Prime CMS ≥ 1.0.1 avec PHP 8.2–8.x et les extensions requises par le CMS. **Privilégiez Prime CMS 1.0.2 ou une version ultérieure corrigée.** Le noyau 1.0.1 peut laisser un jeton conserver les droits révoqués. Lorsque Prime Builder est actif sur 1.0.1, il enveloppe l’authentification HTTP de l’API et intersecte les droits du jeton avec ceux du compte avant l’autorisation, pour les routes du noyau comme du plugin. Cette protection ne corrige pas le noyau : elle disparaît si le plugin est désactivé, ne couvre pas les appels directs au service de jetons hors de la pile HTTP et peut être remplacée par une autre extension utilisant le même alias `api.auth`. Un avertissement figure dans le diagnostic système. La compatibilité des futures versions n’a pas été vérifiée ; voir [RETOUR.md](RETOUR.md) pour les tests observés.
-- Accès à l’administration et aux capacités nécessaires : `prime_builder.edit` **et** les permissions de modification du contenu concerné. La publication requiert en outre la permission de publication du type de contenu. Les éditeurs peuvent consulter et insérer les modèles ; `prime_builder.templates` est requis pour enregistrer, importer ou supprimer. Le widget HTML filtré exige aussi `prime_builder.unfiltered_html` pour sa création, sa modification et son insertion depuis un modèle. La page de réglages nécessite `prime_builder.settings`. Les en-têtes et pieds de page du Theme Builder nécessitent `prime_builder.theme_builder` ; la capacité formulaires correspond à une fonction qui reste à développer.
+- Accès à l’administration et aux capacités nécessaires : `prime_builder.edit` **et** les permissions de modification du contenu concerné. La publication requiert en outre la permission de publication du type de contenu. Les éditeurs peuvent consulter et insérer les modèles ; `prime_builder.templates` est requis pour enregistrer, importer ou supprimer. Le widget HTML filtré exige aussi `prime_builder.unfiltered_html` pour sa création, sa modification et son insertion depuis un modèle. La page de réglages nécessite `prime_builder.settings`. Les en-têtes et pieds de page du Theme Builder nécessitent `prime_builder.theme_builder` ; la consultation et la suppression des envois nécessitent `prime_builder.forms`.
 - API REST du CMS activée pour enregistrer et actualiser les aperçus. Le dossier de stockage de Prime doit être accessible en écriture pour conserver les anciennes feuilles CSS à empreinte.
-- Un navigateur moderne avec JavaScript pour l’éditeur. Le contenu statique enregistré reste lisible sans JavaScript ; les listes d’articles utilisent alors un lien de repli vers l’archive.
+- Un navigateur moderne avec JavaScript pour l’éditeur et l’envoi du formulaire de contact. Le contenu statique enregistré reste lisible sans JavaScript ; les listes d’articles utilisent alors un lien de repli vers l’archive et le formulaire indique qu’il ne peut pas être envoyé.
 
 ## Installation
 
@@ -60,7 +60,7 @@ Raccourcis : `Ctrl/⌘ S` enregistrer, `Ctrl/⌘ K` ouvrir les commandes, `Ctrl/
 
 ## Éléments et modèles disponibles
 
-Les 24 widgets inclus sont : conteneur, titre, texte, HTML filtré, image, bouton, séparateur, espace, citation, alerte, progression, ancre, liste, accordéon, carte, boîte à icône, compteur, onglets, galerie, vidéo, audio, articles récents, contenu actuel et bloc Prime. Les médias locaux peuvent être choisis avec le sélecteur du CMS ; la vidéo accepte une piste WebVTT et une transcription. Les onglets restent lisibles sans JavaScript.
+Les 25 widgets inclus sont : conteneur, titre, texte, HTML filtré, image, bouton, séparateur, espace, citation, alerte, progression, ancre, liste, accordéon, carte, boîte à icône, compteur, onglets, galerie, vidéo, audio, articles récents, contenu actuel, formulaire de contact fixe et bloc Prime. Les médias locaux peuvent être choisis avec le sélecteur du CMS ; la vidéo accepte une piste WebVTT et une transcription. Les onglets restent lisibles sans JavaScript.
 
 - **Articles récents** affiche au maximum 12 articles publics ; sans JavaScript ou si l’API est indisponible, un lien vers l’archive est conservé à la place de titres potentiellement périmés.
 - **Contenu actuel** affiche titre, extrait, auteur ou date. La valeur sauvegardée peut être ancienne si JavaScript ou l’API est indisponible.
@@ -74,17 +74,25 @@ Les 24 widgets inclus sont : conteneur, titre, texte, HTML filtré, image, bouto
 
 Une personne ayant `prime_builder.theme_builder` peut ouvrir **Theme Builder — en-tête et pied de page**, choisir un modèle partagé enregistré dans le constructeur pour chaque partie et exclure jusqu’à 100 contenus par leur identifiant. Le thème actif doit appeler `$site->partial('header')` et `$site->partial('footer')` ; un thème qui inclut directement ses fichiers ne peut pas être remplacé par ce mécanisme. Un filtre précédent ayant déjà fourni une partie reste prioritaire. Sur un contenu exclu, le thème fournit ses parties habituelles.
 
-La sélection enregistre une **copie statique** du modèle : sa suppression ultérieure dans la bibliothèque ne modifie pas le thème. Pour changer cette copie, enregistrer et sélectionner un nouveau modèle. Un modèle contenant le widget HTML filtré exige également `prime_builder.unfiltered_html` lors de la sauvegarde de la configuration ; le HTML reste filtré. Les widgets de liste d’articles et de contenu actuel ne sont pas encore acceptés. Les identifiants et ancres de widgets sont renommés pour les distinguer du contenu de la page ; les liens des widgets bouton et carte vers ces ancres sont adaptés, mais les liens saisis à l’intérieur du texte riche ne sont pas réécrits. Les conditions par type, terme et priorité, ainsi que les modèles de contenu, archive, recherche et 404 restent à construire. La modification de cette configuration déclenche la purge du cache de pages ; tester le site et la désactivation sur une copie.
+La sélection enregistre une **copie statique** du modèle : sa suppression ultérieure dans la bibliothèque ne modifie pas le thème. Pour changer cette copie, enregistrer et sélectionner un nouveau modèle. Un modèle contenant le widget HTML filtré exige également `prime_builder.unfiltered_html` lors de la sauvegarde de la configuration ; le HTML reste filtré. Les widgets de liste d’articles, de contenu actuel et de formulaire ne sont pas acceptés dans ces parties statiques. Les identifiants et ancres de widgets sont renommés pour les distinguer du contenu de la page ; les liens des widgets bouton et carte vers ces ancres sont adaptés, mais les liens saisis à l’intérieur du texte riche ne sont pas réécrits. Les conditions par type, terme et priorité, ainsi que les modèles de contenu, archive, recherche et 404 restent à construire. La modification de cette configuration déclenche la purge du cache de pages ; tester le site et la désactivation sur une copie.
+
+## Formulaire de contact simple
+
+Dans une page publique, ajouter **Formulaire de contact**, régler si besoin son titre et le texte du bouton, puis publier. Le formulaire comporte trois champs obligatoires fixes : nom, adresse e-mail et message. Les compositions de contact livrées dans la bibliothèque restent des exemples statiques : elles ne deviennent pas automatiquement des formulaires.
+
+Avec JavaScript, le navigateur obtient un jeton temporaire sans cookie ; aucun jeton n’est inscrit dans le HTML mis en cache. La vérification côté serveur associe le jeton au contenu, au widget et à l’adresse réseau, impose un délai minimal et un usage unique ; pot de miel et quotas complètent cette protection, sans garantir l’absence de spam. Une `APP_KEY` valide et une API disponible sont nécessaires. Sans JavaScript ou après désactivation du plugin, l’envoi ne fonctionne pas.
+
+Les messages sont enregistrés en base, **sans envoi d’e-mail**, et visibles dans **Envois de formulaires** uniquement avec `prime_builder.forms`. L’écran présente les 100 derniers et permet leur suppression ; il ne fournit ni recherche ni export. Une tâche planifiée supprime les messages de plus de 30 jours si le planificateur du CMS fonctionne ; la désinstallation supprime les tables et tous les messages. Les visiteurs doivent être informés du traitement de leurs données et l’opérateur doit prévoir ses sauvegardes, contrôles d’accès et obligations légales. Aucun fichier ne peut être téléversé ; champs personnalisés, étapes multiples et notifications par e-mail restent à construire.
 
 ## Désactivation et désinstallation
 
 ```bash
 php bin/prime plugin:deactivate prime-builder
-# Facultatif et destructif pour les réglages/capacités/fichiers du plugin :
+# Facultatif et destructif pour les envois, réglages, capacités et fichiers du plugin :
 php bin/prime plugin:uninstall prime-builder
 ```
 
-Le HTML rendu est enregistré dans les contenus par le CMS et sert normalement de repli lorsque le plugin est désactivé ; l’apparence, les onglets interactifs et l’actualisation des données ne sont alors plus garantis. Prime CMS 1.0.1 identifie les blocs dynamiques par leur type, sans modification du JSON par le plugin. Testez la désactivation sur une copie du site. La désinstallation retire également les instantanés CSS du plugin, ses réglages et capacités ; elle ne supprime pas les contenus enregistrés.
+Le HTML rendu est enregistré dans les contenus par le CMS et sert normalement de repli lorsque le plugin est désactivé ; l’apparence, les onglets interactifs et l’actualisation des données ne sont alors plus garantis. Prime CMS 1.0.1 identifie les blocs dynamiques par leur type, sans modification du JSON par le plugin. Testez la désactivation sur une copie du site. La désinstallation retire également les tables et messages du formulaire, les instantanés CSS du plugin, ses réglages et capacités ; elle ne supprime pas les contenus enregistrés.
 
 ## Développement et vérification
 

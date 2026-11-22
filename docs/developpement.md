@@ -9,7 +9,7 @@ Ce document décrit l’implémentation 0.1.0, et non les fonctions encore absen
 - `src/Document/` : extraction du bloc, validation, modèles ; `src/Widgets/` : catalogue, rendu, contenu et pont limité vers des blocs Prime.
 - `src/Styles/` : compilation autorisée, kit et instantanés CSS ; `views/`, `assets/` et `lang/{fr,en}/` : interface et traductions.
 - `templates/` : modèles JSON ; `tests/` : tests PHP, modèle JS et Playwright/axe ; `.github/workflows/ci.yml` : CI.
-- Aucune migration SQL n’est requise par les fonctions présentes. `migrations/README.md` explique cet état.
+- `src/Forms/`, `src/Controller/ContactForms.php` et `migrations/` : formulaire fixe, jetons, quotas, envois et purge ; `migrations/README.md` décrit les tables et leur suppression.
 
 ## Format et limites
 
@@ -31,6 +31,8 @@ Le bloc est enregistré avec `PluginContext::blocks()` ; `EntryService::update()
 | `GET /admin/prime-builder/edit/{id}` | Éditeur plein écran ; capacité du plugin et `EntryService::canEdit()` pour l’entrée et son type. |
 | `GET/POST /admin/prime-builder/settings` | Réglages et kit ; `prime_builder.settings`, CSRF du CMS sur l’écriture, validation des valeurs avant enregistrement. |
 | `GET/POST /admin/prime-builder/theme` | Sélection de copies statiques pour l’en-tête et le pied de page ; `prime_builder.theme_builder`, CSRF, et `prime_builder.unfiltered_html` si une copie contient le widget HTML. |
+| `GET /admin/prime-builder/submissions` ; `POST /admin/prime-builder/submissions/{id}/delete` | Boîte limitée aux 100 derniers messages et suppression ; `prime_builder.forms`, CSRF du CMS sur la suppression, réponses privées `no-store`. |
+| `GET /api/prime-builder/v1/forms/{id}/start?node=…` ; `POST /api/prime-builder/v1/forms/{id}/submit` | Routes publiques pour un widget de formulaire visible sur une entrée publique ; jeton temporaire, quotas et validation côté serveur, réponses `no-store`. |
 | `PATCH /api/prime-builder/v1/documents/{id}` | Document v1 mono-bloc ; API du CMS, `prime_builder.edit`, contrôle par entrée, CSRF en session, validation et `EntryService::update()`. |
 | `POST /api/prime-builder/v1/documents/{id}/render` | Même contrôle ; valide tout l’arbre et retourne l’aperçu HTML sans enregistrer. Le champ facultatif `target` demande le rendu d’un seul sous-arbre existant ; sans lui, la réponse contient aussi le document normalisé. |
 | `GET /api/prime-builder/v1/documents/{id}/live` | Retours HTML des widgets de contenu ; entrée publiquement visible ou droits de modification ; `private, no-store`. La pile API du CMS applique sa limite de débit. |
@@ -48,7 +50,9 @@ Le validateur `BlockDefinition` ne reçoit ni acteur ni entrée. `HtmlContent` a
 
 Le filtre `content.saving` protège également les enregistrements par le service du noyau, sans modifier celui-ci. Comme `Hooks` isole les exceptions des plugins, ce filtre ne peut pas refuser l’opération par une exception : si un acteur sans droit rejoue un ancien widget signé, il restitue le contenu précédent, mais **l’API du noyau peut répondre 200 et les autres champs peuvent être modifiés**. Le constructeur, lui, répond 403 avant la sauvegarde. Lors d’une création ou duplication par le noyau, l’ID de destination n’existe pas encore : les widgets HTML signés sont convertis en texte riche filtré pour conserver leur contenu, sans conserver leur type. Un acteur autorisé qui copie un widget signé vers une entrée existante par l’API du noyau le fait signer pour l’entrée cible. L’autosauvegarde du noyau ne passe pas par ce filtre, mais la restauration passe par `update`. Ces limites et les tests observés sont consignés dans `RETOUR.md`.
 
-Le premier sous-ensemble du Theme Builder utilise `site.partial` pour `header` et `footer` quand le thème appelle ce hook. Le formulaire valide des modèles partagés, puis en stocke une copie indépendante dans `plugin.prime-builder.theme_partials` : un gestionnaire de bibliothèque ne peut pas changer la copie active en supprimant le modèle source. Un filtre antérieur qui a déjà produit une chaîne conserve la priorité. `Partials` revalide les copies, refuse les widgets de contenu dynamique et les ancres explicites en double, applique les exclusions par identifiant et espace de noms les identifiants et ancres pour chaque partie. Les liens des widgets vers ces ancres sont réécrits, pas les liens dans les champs HTML riche. La configuration déclenche `settings.updated` et la purge du cache de pages. Les CSS sont compilés et conservés sous `theme-<empreinte>.css` ; les scripts des widgets présents sont enregistrés depuis `site.assets`. Les modèles de contenu, archives, recherche et 404, conditions par type ou terme et priorités ne sont pas implémentés.
+Le premier sous-ensemble du Theme Builder utilise `site.partial` pour `header` et `footer` quand le thème appelle ce hook. Le formulaire valide des modèles partagés, puis en stocke une copie indépendante dans `plugin.prime-builder.theme_partials` : un gestionnaire de bibliothèque ne peut pas changer la copie active en supprimant le modèle source. Un filtre antérieur qui a déjà produit une chaîne conserve la priorité. `Partials` revalide les copies, refuse les widgets de contenu dynamique et le formulaire ainsi que les ancres explicites en double, applique les exclusions par identifiant et espace de noms les identifiants et ancres pour chaque partie. Les liens des widgets vers ces ancres sont réécrits, pas les liens dans les champs HTML riche. La configuration déclenche `settings.updated` et la purge du cache de pages. Les CSS sont compilés et conservés sous `theme-<empreinte>.css` ; les scripts des widgets présents sont enregistrés depuis `site.assets`. Les modèles de contenu, archives, recherche et 404, conditions par type ou terme et priorités ne sont pas implémentés.
+
+Le formulaire de contact est un premier sous-ensemble fixe, sans upload ni e-mail. `forms.js` demande un jeton à `start` avec `credentials: 'omit'`, puis envoie du JSON sans cookie. Le jeton HMAC, dérivé de `APP_KEY`, lie contenu, nœud, IP, nonce et horodatage ; le serveur impose 3–1 800 secondes et vérifie que le nœud et ses parents ne sont pas masqués dans une entrée publique. Les quotas sont de 30 démarrages par minute et 5 soumissions par 5 minutes pour chaque IP ; le pot de miel est ignoré silencieusement. Les empreintes de jetons utilisés sont insérées sous contrainte unique dans une transaction avec le message, puis conservées séparément pendant au moins la durée de validité maximale. Supprimer un message ne réactive pas son jeton. Les champs sont strictement validés et l’affichage admin échappé. Les compteurs utilisent des clés HMAC plutôt que des adresses en clair ; la résolution de l’IP dépend de la configuration de confiance proxy du CMS. Les tables, la purge après 30 jours et la désinstallation sont décrites dans `migrations/README.md`. Aucun mécanisme n’élimine tout spam et les contrôles de charge, conservation des sauvegardes et obligations de confidentialité restent à la charge de l’opérateur.
 
 La route `live` ne transmet pas les brouillons des articles listés : `EntryQuery` effectue une seule requête bornée aux articles publics pour les widgets de la requête. Le navigateur actualise les widgets concernés une fois par document ; le HTML de repli des articles ne contient pas de copie persistante des titres d’autres contenus.
 
@@ -109,12 +113,10 @@ php tools/benchmark.php /chemin/vers/prime-cms
 cd tests/e2e
 npm ci --no-audit --no-fund
 npx playwright install --with-deps chromium
-# Fournir E2E_BASE_URL, E2E_ENTRY_ID, E2E_LEGACY_ENTRY_ID, E2E_MISSING_ENTRY_ID,
-# E2E_MOUSE_ENTRY_ID, E2E_KEYBOARD_ENTRY_ID et E2E_DRAG_ENTRY_ID, et si nécessaire
-# E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD. Les trois identifiants de parcours pointent
-# vers des pages de test vierges ; les deux premières ont les slugs
-# parcours-souris et parcours-clavier. E2E_MISSING_ENTRY_ID identifie la page de test
-# bloc-indisponible, préparée par tests/e2e/mark-block-missing.php comme dans la CI.
+# Reproduire les fixtures et variables E2E_* de .github/workflows/ci.yml,
+# dont E2E_FORM_ENTRY_ID (page vierge formulaire-test) et E2E_MENU_ENTRY_ID
+# (page vierge pour le parcours clavier complet). Les tests publient et modifient
+# ces pages et suppriment un envoi : ne jamais viser une installation réelle.
 npm test
 ```
 

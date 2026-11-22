@@ -31,6 +31,7 @@ use Prime\Site\PageContext;
 use Prime\Site\UrlGenerator;
 use Prime\Support\Str;
 use Prime\Themes\ThemeAssetRegistry;
+use PrimeBuilder\Controller\ContactForms;
 use PrimeBuilder\Controller\Dashboard;
 use PrimeBuilder\Controller\Documents;
 use PrimeBuilder\Controller\Settings;
@@ -39,6 +40,8 @@ use PrimeBuilder\Controller\ThemeBuilder;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
+use PrimeBuilder\Forms\RateLimit;
+use PrimeBuilder\Forms\Submissions;
 use PrimeBuilder\Security\EffectiveApiAuthentication;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
@@ -162,6 +165,7 @@ final class Plugin extends AbstractPlugin
             if ($menu instanceof AdminMenu) {
                 $menu->add(new MenuItem(id: 'plugin.prime-builder', label: 'plugin::prime-builder.menu', icon: 'layout-dashboard', url: '/admin/prime-builder', position: 60, accent: 'brand', capability: 'prime_builder.edit', group: 'admin.menu.groups.content'));
                 $menu->add(new MenuItem(id: 'plugin.prime-builder-theme', label: 'plugin::prime-builder.theme.title', icon: 'layout-dashboard', url: '/admin/prime-builder/theme', position: 61, accent: 'brand', capability: 'prime_builder.theme_builder', group: 'admin.menu.groups.content'));
+                $menu->add(new MenuItem(id: 'plugin.prime-builder-submissions', label: 'plugin::prime-builder.forms.inbox', icon: 'inbox', url: '/admin/prime-builder/submissions', position: 62, accent: 'brand', capability: 'prime_builder.forms', group: 'admin.menu.groups.content'));
             }
             return $menu;
         });
@@ -170,6 +174,7 @@ final class Plugin extends AbstractPlugin
         $settings = new Settings($context);
         $templates = new Templates($context);
         $theme = new ThemeBuilder($context);
+        $forms = new ContactForms($context);
         $context->router()->adminGroup(static function (Router $router) use ($controller, $dashboard): void {
             $router->get('/', [$dashboard, 'index'])->name('index');
             $router->get('/edit/{id:\d+}', [$controller, 'edit'])->name('edit');
@@ -184,6 +189,10 @@ final class Plugin extends AbstractPlugin
             $router->get('/theme', [$theme, 'show'])->name('theme');
             $router->post('/theme', [$theme, 'save'])->name('theme.save');
         }, capability: 'prime_builder.theme_builder');
+        $context->router()->adminGroup(static function (Router $router) use ($forms): void {
+            $router->get('/submissions', [$forms, 'index'])->name('submissions');
+            $router->post('/submissions/{id:\d+}/delete', [$forms, 'delete'])->name('submissions.delete');
+        }, capability: 'prime_builder.forms');
         $context->router()->frontGroup(static function (Router $router) use ($controller, $theme): void {
             $router->get('/prime-builder/css/{file}', [$controller, 'stylesheet'])->name('css');
             $router->get('/prime-builder/kit/{file}', [$controller, 'kitStylesheet'])->name('kit');
@@ -193,12 +202,15 @@ final class Plugin extends AbstractPlugin
         $context->api()->post('/documents/{id}/render', [$controller::class, 'render'], permission: 'prime_builder.edit');
         $context->api()->post('/documents/{id}/import', [$controller::class, 'import'], permission: 'prime_builder.templates');
         $context->api()->get('/documents/{id}/live', [$controller::class, 'live'], public: true);
+        $context->api()->get('/forms/{id}/start', [$forms::class, 'start'], public: true);
+        $context->api()->post('/forms/{id}/submit', [$forms::class, 'submit'], public: true);
         $context->api()->get('/templates', [$templates::class, 'index'], permission: 'prime_builder.edit');
         $context->api()->post('/templates', [$templates::class, 'create'], permission: 'prime_builder.templates');
         $context->api()->delete('/templates/{id}', [$templates::class, 'delete'], permission: 'prime_builder.templates');
         // PluginContext is not a container service, so API controllers need explicit bindings.
         $context->app()->container()->singleton(Documents::class, static fn (): Documents => $controller);
         $context->app()->container()->singleton(Templates::class, static fn (): Templates => $templates);
+        $context->app()->container()->singleton(ContactForms::class, static fn (): ContactForms => $forms);
         $context->hooks()->filter('scheduler.register', static function (mixed $schedule) use ($context): mixed {
             if ($schedule instanceof Schedule) {
                 $schedule->call(
@@ -206,6 +218,16 @@ final class Plugin extends AbstractPlugin
                     action: static fn (): int => (new Snapshots($context->app()->storagePath('prime-builder/styles')))->prune(),
                     expression: '30 4 * * *',
                     description: t('plugin::prime-builder.scheduler.prune_styles'),
+                    owner: 'prime-builder',
+                );
+                $schedule->call(
+                    name: 'prime-builder.purge-submissions',
+                    action: static function () use ($context): int {
+                        $now = time();
+                        return (new Submissions($context->db()))->purge($now) + RateLimit::purge($context->db(), $now);
+                    },
+                    expression: '15 4 * * *',
+                    description: t('plugin::prime-builder.scheduler.purge_submissions'),
                     owner: 'prime-builder',
                 );
             }

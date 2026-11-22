@@ -265,6 +265,14 @@ jobs:
           HTML_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
           test -n "$HTML_ID"
           echo "E2E_HTML_ENTRY_ID=$HTML_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Formulaire de test' --slug=formulaire-test --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          FORM_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$FORM_ID"
+          echo "E2E_FORM_ENTRY_ID=$FORM_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Menu clavier' --slug=menu-clavier --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          MENU_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$MENU_ID"
+          echo "E2E_MENU_ENTRY_ID=$MENU_ID" >> "$GITHUB_ENV"
           php -S 0.0.0.0:8080 -t public public/router.php > /tmp/prime-builder-server.log 2>&1 &
       - name: Report installation output on failure
         if: failure()

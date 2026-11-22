@@ -34,6 +34,8 @@ function expectCount(string $name, int $actual, int $expected): void
 $settings = "SELECT COUNT(*) FROM `{$prefix}settings` WHERE `name` LIKE ?";
 $capabilities = "SELECT COUNT(*) FROM `{$prefix}role_capabilities` WHERE `capability` LIKE ? ESCAPE '!'";
 $plugin = "SELECT COUNT(*) FROM `{$prefix}plugins` WHERE `slug` = ?";
+$formTables = 'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?)';
+$formTableNames = [$prefix . 'prime_builder_submissions', $prefix . 'prime_builder_form_tokens', $prefix . 'prime_builder_form_limits'];
 $entry = $pdo->prepare("SELECT `content_html` FROM `{$prefix}entries` WHERE `id` = ?");
 $entry->execute([(int) $entryId]);
 $html = $entry->fetchColumn();
@@ -62,11 +64,16 @@ if (($argv[1] ?? '') === 'seed') {
     expectCount('plugin setting', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}settings` WHERE `name` = ?", ['plugin.prime-builder.configuration']), 1);
     expectCount('plugin capability', countRows($pdo, $roleCapability, $roleParameters), 1);
     expectCount('installed plugin', countRows($pdo, $plugin, ['prime-builder']), 1);
+    expectCount('form tables', countRows($pdo, $formTables, $formTableNames), 3);
+    $submission = $pdo->prepare("INSERT INTO `{$prefix}prime_builder_submissions` (`entry_id`, `node_id`, `sender_name`, `sender_email`, `message`, `created_at`) VALUES (?, ?, ?, ?, ?, ?)");
+    $submission->execute([(int) $entryId, 'fixture', 'Test', 'test@example.test', 'Fixture', gmdate('Y-m-d H:i:s')]);
+    expectCount('form fixture', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}prime_builder_submissions`"), 1);
     echo "Lifecycle fixtures present before uninstall.\n";
 } elseif (($argv[1] ?? '') === 'verify') {
     expectCount('plugin settings', countRows($pdo, $settings, ['plugin.prime-builder.%']), 0);
     expectCount('plugin capabilities', countRows($pdo, $capabilities, ['prime!_builder.%']), 0);
     expectCount('installed plugin', countRows($pdo, $plugin, ['prime-builder']), 0);
+    expectCount('form tables', countRows($pdo, $formTables, $formTableNames), 0);
     echo "Uninstall removed plugin data and preserved content and administrator access.\n";
 } else {
     throw new RuntimeException('Usage: lifecycle-check.php seed|verify');
