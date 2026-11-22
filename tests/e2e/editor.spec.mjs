@@ -162,7 +162,7 @@ test('build and publish four widgets with the mouse', async ({ page }) => {
   await page.getByRole('button', { name: 'Ajouter Texte' }).click();
   await page.getByLabel('Texte', { exact: true }).fill('<p>Texte composé à la souris.</p>');
   await page.locator('[data-pb-panel="widgets"]').click();
-  await page.getByRole('button', { name: 'Ajouter Bouton' }).click();
+  await page.getByRole('button', { name: 'Ajouter Bouton', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Lien souris');
   await page.getByLabel('Adresse URL').fill('/');
   await page.locator('[data-pb-panel="widgets"]').click();
