@@ -803,7 +803,10 @@ test('media carousel keeps native video controls and stops hidden playback', asy
   await page.screenshot({ path: test.info().outputPath('media-screen-editor-desktop.jpg'), fullPage: true, quality: 20 });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.locator('[data-pb-device="mobile"]').click();
-  await frame.locator('.pb-media_carousel').evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await frame.locator('.pb-media_carousel').evaluate(node => {
+    node.scrollIntoView({ block: 'start' });
+    node.ownerDocument.defaultView.scrollBy(0, -90); // Keep the slide below the theme's sticky header.
+  });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await expect.poll(() => frame.locator('html').evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0);
   await expectAccessible(page);
@@ -907,7 +910,10 @@ test('testimonial carousel works with keyboard and keeps every quote without Jav
   await page.screenshot({ path: test.info().outputPath('testimonial-screen-editor-desktop.jpg'), fullPage: true, quality: 45 });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.locator('[data-pb-device="mobile"]').click();
-  await frame.locator('.pb-testimonial_carousel').evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await frame.locator('.pb-testimonial_carousel').evaluate(node => {
+    node.scrollIntoView({ block: 'start' });
+    node.ownerDocument.defaultView.scrollBy(0, -90); // Keep the quote below the theme's sticky header.
+  });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await expect.poll(() => frame.locator('html').evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0);
   await expectAccessible(page);
