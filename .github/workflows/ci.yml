@@ -293,39 +293,6 @@ jobs:
         run: npm test 2>&1 | tee /tmp/prime-builder-e2e.log
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
-      # Temporary transport: the sandbox cannot download the artifact host.
-      - name: Report portfolio-screen-editor-desktop capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-editor-desktop 0
-      - name: Report portfolio-screen-editor-desktop capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-editor-desktop 1
-      - name: Report portfolio-screen-editor-desktop capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-editor-desktop 2
-      - name: Report portfolio-screen-editor-desktop capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-editor-desktop 3
-      - name: Report portfolio-screen-editor-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-editor-mobile 0
-      - name: Report portfolio-screen-editor-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-editor-mobile 1
-      - name: Report portfolio-screen-editor-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-editor-mobile 2
-      - name: Report portfolio-screen-editor-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-editor-mobile 3
-      - name: Report portfolio-screen-public-desktop capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-public-desktop 0
-      - name: Report portfolio-screen-public-desktop capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-public-desktop 1
-      - name: Report portfolio-screen-public-desktop capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-public-desktop 2
-      - name: Report portfolio-screen-public-desktop capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-public-desktop 3
-      - name: Report portfolio-screen-public-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-public-mobile 0
-      - name: Report portfolio-screen-public-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-public-mobile 1
-      - name: Report portfolio-screen-public-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-public-mobile 2
-      - name: Report portfolio-screen-public-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh portfolio-screen-public-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |
