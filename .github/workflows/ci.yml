@@ -293,6 +293,19 @@ jobs:
         run: npm test 2>&1 | tee /tmp/prime-builder-e2e.log
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
+      # Temporary transport for visual inspection where the artifact host is unavailable.
+      - name: Report testimonial screen captures
+        run: |
+          mapfile -t captures < <(find builder/tests/e2e/test-results -type f -name 'testimonial-screen-*.jpg' | sort)
+          test "${#captures[@]}" -eq 4
+          for capture in "${captures[@]}"; do
+            name=$(basename "$capture" .jpg)
+            part=0
+            while IFS= read -r chunk || [[ -n "$chunk" ]]; do
+              printf '::notice title=PBSCREEN-%s-%03d::%s\n' "$name" "$part" "$chunk"
+              part=$((part+1))
+            done < <(base64 -w0 "$capture" | fold -w 12000)
+          done
       - name: Report browser test output on failure
         if: failure()
         run: |

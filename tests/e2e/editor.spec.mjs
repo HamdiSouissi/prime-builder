@@ -798,6 +798,13 @@ test('testimonial carousel works with keyboard and keeps every quote without Jav
   await expect(frame.locator('.pb-testimonial_carousel [data-pb-slide]')).toHaveCount(2);
   await expect(frame.locator('.pb-testimonial_carousel')).toContainText('Une collaboration précieuse.');
   await expect(frame.locator('link[href*="/css/widgets/testimonial_carousel.css"]')).toHaveCount(1);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('testimonial-screen-editor-desktop.jpg'), fullPage: true, quality: 45 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expectAccessible(page);
+  await page.screenshot({ path: test.info().outputPath('testimonial-screen-editor-mobile.jpg'), fullPage: true, quality: 45 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole('button', { name: 'Style', exact: true }).click();
   await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Avancé', exact: true }).click();
@@ -825,11 +832,11 @@ test('testimonial carousel works with keyboard and keeps every quote without Jav
   await expect(carousel.getByRole('status')).toHaveText('Témoignage 1 sur 2');
   await expect(next).toBeFocused();
   await expectAccessible(page);
-  await page.screenshot({ path: test.info().outputPath('testimonial-carousel-desktop.png'), fullPage: true });
+  await page.screenshot({ path: test.info().outputPath('testimonial-screen-public-desktop.jpg'), fullPage: true, quality: 45 });
   await page.setViewportSize({ width: 375, height: 812 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await expectAccessible(page);
-  await page.screenshot({ path: test.info().outputPath('testimonial-carousel-mobile.png'), fullPage: true });
+  await page.screenshot({ path: test.info().outputPath('testimonial-screen-public-mobile.jpg'), fullPage: true, quality: 45 });
 
   const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
   try {
