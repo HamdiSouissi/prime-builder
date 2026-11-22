@@ -393,12 +393,21 @@ final class Renderer
     private function renderGallery(array $settings): string
     {
         $lines = preg_split('/\R/u', $this->fieldText($settings, 'images')) ?: [];
-        $html = '<div class="pb-gallery-grid">';
-        foreach (array_slice($lines, 0, 20) as $line) {
+        $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.gallery_' . $key));
+        $html = '<div class="pb-gallery-grid" data-pb-gallery data-pb-gallery-dialog="' . $copy('dialog') . '"'
+            . ' data-pb-gallery-close="' . $copy('close') . '" data-pb-gallery-previous="' . $copy('previous') . '"'
+            . ' data-pb-gallery-next="' . $copy('next') . '" data-pb-gallery-position="' . $copy('position') . '">';
+        foreach (array_slice($lines, 0, 20) as $index => $line) {
             $parts = explode('|', $line, 2);
             $url = $this->sanitizer->sanitizeResourceUrl(trim($parts[0]));
             if ($url !== null) {
-                $html .= '<img src="' . self::escape($url) . '" alt="' . self::escape(trim($parts[1] ?? '')) . '" loading="lazy" decoding="async">';
+                $alt = trim(strip_tags($parts[1] ?? ''));
+                $label = $alt !== ''
+                    ? t('plugin::prime-builder.ui.gallery_open_named', ['number' => $index + 1, 'description' => $alt])
+                    : t('plugin::prime-builder.ui.gallery_open', ['number' => $index + 1]);
+                // The link is a useful fallback if JS is unavailable or the plugin is disabled.
+                $html .= '<a href="' . self::escape($url) . '" data-pb-gallery-item aria-label="' . self::escape($label) . '">'
+                    . '<img src="' . self::escape($url) . '" alt="' . self::escape($alt) . '" loading="lazy" decoding="async"></a>';
             }
         }
         return $html . '</div>';

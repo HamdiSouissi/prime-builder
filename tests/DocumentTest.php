@@ -389,6 +389,21 @@ final class DocumentTest extends TestCase
         self::assertStringNotContainsString('data-pb-embed-video', $invalid);
     }
 
+    public function testGalleryRendersAccessibleImageLinksAsNoScriptFallback(): void
+    {
+        $html = $this->renderBasicWidget('gallery', ['images' => "/uploads/a.jpg|Fleur & cascade\n/uploads/b.jpg|"]);
+        self::assertStringContainsString('data-pb-gallery-item aria-label="', $html);
+        self::assertStringContainsString('href="/uploads/a.jpg"', $html);
+        self::assertStringContainsString('alt="Fleur &amp; cascade"', $html);
+        self::assertStringContainsString('href="/uploads/b.jpg"', $html);
+        self::assertStringContainsString('alt=""', $html);
+        self::assertStringNotContainsString('<dialog', $html);
+        self::assertStringNotContainsString('<script', $html);
+        $bad = $this->element('gallery');
+        $bad['settings'] = ['images' => 'javascript:alert(1)|Danger'];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$bad]])['errors']);
+    }
+
     public function testMediaUrlsAndGalleryAreValidated(): void
     {
         $gallery = $this->element('gallery', 'gallery');

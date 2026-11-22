@@ -373,6 +373,54 @@ test('toggle works with keyboard on the public page, including without JavaScrip
   } finally { await noJs.close(); }
 });
 
+test('gallery lightbox works with keyboard, restores focus and keeps image links without JS', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  const status = await page.evaluate(async entryId => {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const element = { id: 'gallery_demo', type: 'gallery', settings: { images: '/assets/plugins/prime-builder/icon.svg|Couronne\n/assets/plugins/prime-builder/icon.svg?second=1|Deuxième image' }, styles: {}, children: [] };
+    const result = await fetch(`/api/prime-builder/v1/documents/${entryId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
+      body: JSON.stringify({ content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [element] } }] }, status: 'published', published_at: '' }),
+    });
+    return result.status;
+  }, id);
+  expect(status).toBe(200);
+  await page.goto('/test-prime-builder');
+  const first = page.getByRole('link', { name: 'Agrandir l’image 1 : Couronne' });
+  await first.focus();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Image agrandie' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Fermer l’image' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog.getByRole('button', { name: 'Image suivante' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Fermer l’image' })).toBeFocused();
+  await expect(dialog.locator('img')).toHaveAttribute('alt', 'Couronne');
+  await expect(dialog.getByRole('status')).toHaveText('Image 1 sur 2 — Couronne');
+  await page.keyboard.press('ArrowRight');
+  await expect(dialog.locator('img')).toHaveAttribute('alt', 'Deuxième image');
+  await expect(dialog.getByRole('status')).toHaveText('Image 2 sur 2 — Deuxième image');
+  await expectAccessible(page);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(first).toBeFocused();
+  await first.press('Enter');
+  await dialog.getByRole('button', { name: 'Image précédente' }).click();
+  await expect(dialog.locator('img')).toHaveAttribute('alt', 'Deuxième image');
+  await dialog.getByRole('button', { name: 'Fermer l’image' }).click();
+  await expect(first).toBeFocused();
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    await expect(fallback.getByRole('link', { name: 'Agrandir l’image 1 : Couronne' })).toHaveAttribute('href', '/assets/plugins/prime-builder/icon.svg');
+    await expect(fallback.locator('dialog')).toHaveCount(0);
+  } finally { await noJs.close(); }
+});
+
 test('external videos contact their providers only after keyboard activation', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);

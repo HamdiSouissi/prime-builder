@@ -84,6 +84,8 @@ final class Registry
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/tabs.js';
             } elseif (in_array($type, ['posts', 'current_content'], true)) {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/content.js';
+            } elseif ($type === 'gallery') {
+                $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/gallery.js';
             } elseif ($type === 'video') {
                 $definitions[$type]['script'] = '/assets/plugins/prime-builder/js/video.js';
             } elseif ($type === 'form') {
