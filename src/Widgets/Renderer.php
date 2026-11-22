@@ -157,6 +157,13 @@ final class Renderer
             'accordion' => '<details><summary>' . self::escape($this->fieldText($settings, 'title', t('plugin::prime-builder.widgets.accordion'))) . '</summary><div class="pb-accordion-content">' . $rich . '</div></details>',
             'card' => $this->renderCard($settings),
             'icon_box' => $this->renderIconBox($settings),
+            'icon' => $this->renderIcon($settings),
+            'icon_list' => $this->renderIconList($settings),
+            'image_box' => $this->renderImageBox($settings),
+            'testimonial' => $this->renderTestimonial($settings),
+            'toggle' => '<details' . (($settings['initial'] ?? 'closed') === 'open' ? ' open' : '') . '><summary>' . self::escape($this->fieldText($settings, 'title', t('plugin::prime-builder.widgets.toggle'))) . '</summary><div>' . $rich . '</div></details>',
+            'social' => $this->renderSocial($settings),
+            'star_rating' => $this->renderStarRating($settings),
             'counter' => '<div class="pb-counter-value">' . self::escape($this->fieldText($settings, 'prefix')) . max(0, min(1000000000, (int) ($settings['value'] ?? 0))) . self::escape($this->fieldText($settings, 'suffix')) . '</div><p>' . self::escape($this->fieldText($settings, 'title')) . '</p>',
             'tabs' => $this->renderTabs($settings, $id),
             'gallery' => $this->renderGallery($settings),
@@ -258,13 +265,108 @@ final class Renderer
     /** @param array<string, mixed> $settings */
     private function renderIconBox(array $settings): string
     {
-        $icons = ['star' => '★', 'check' => '✓', 'heart' => '♥', 'spark' => '✦'];
-        $icon = $settings['icon'] ?? 'star';
-        $symbol = is_string($icon) ? ($icons[$icon] ?? $icons['star']) : $icons['star'];
+        $symbol = $this->iconSymbol($settings);
         $title = $this->fieldText($settings, 'title');
         return '<div class="pb-icon-box-content"><span class="pb-icon-box-symbol" aria-hidden="true">' . $symbol . '</span>'
             . ($title !== '' ? '<h3>' . self::escape($title) . '</h3>' : '')
             . $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text')) . '</div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function iconSymbol(array $settings): string
+    {
+        $icons = ['star' => '★', 'check' => '✓', 'heart' => '♥', 'spark' => '✦'];
+        $icon = $settings['icon'] ?? 'star';
+        return is_string($icon) ? ($icons[$icon] ?? $icons['star']) : $icons['star'];
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderIcon(array $settings): string
+    {
+        $label = $this->fieldText($settings, 'accessible_label');
+        $attributes = $label === '' ? ' aria-hidden="true"' : ' role="img" aria-label="' . self::escape($label) . '"';
+        return '<span' . $attributes . '>' . $this->iconSymbol($settings) . '</span>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderIconList(array $settings): string
+    {
+        $lines = preg_split('/\R/u', $this->fieldText($settings, 'items')) ?: [];
+        $items = '';
+        foreach (array_slice($lines, 0, 50) as $line) {
+            if (trim($line) !== '') {
+                $items .= '<li><span aria-hidden="true">' . $this->iconSymbol($settings) . '</span> ' . self::escape(trim($line)) . '</li>';
+            }
+        }
+        return $items === '' ? '' : '<ul>' . $items . '</ul>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderImageBox(array $settings): string
+    {
+        $image = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'image_url'));
+        $width = max(1, min(10000, (int) ($settings['width'] ?? 800)));
+        $height = max(1, min(10000, (int) ($settings['height'] ?? 600)));
+        $title = $this->fieldText($settings, 'title');
+        $url = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
+        $html = '<div>';
+        if ($image !== null && $image !== '') {
+            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '" width="' . $width . '" height="' . $height . '" loading="lazy" decoding="async">';
+        }
+        if ($title !== '') {
+            $html .= '<h3>' . self::escape($title) . '</h3>';
+        }
+        $html .= $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text'));
+        if ($url !== null && $url !== '') {
+            $html .= '<a class="pb-button-link" href="' . self::escape($url) . '">' . self::escape($this->fieldText($settings, 'button_text', t('plugin::prime-builder.ui.read_more'))) . '</a>';
+        }
+        return $html . '</div>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderTestimonial(array $settings): string
+    {
+        $image = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'image_url'));
+        $author = $this->fieldText($settings, 'author');
+        $job = $this->fieldText($settings, 'job_title');
+        $html = '<figure><blockquote>' . $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text')) . '</blockquote>';
+        if (($image !== null && $image !== '') || $author !== '' || $job !== '') {
+            $html .= '<figcaption>';
+            if ($image !== null && $image !== '') {
+                $width = max(1, min(10000, (int) ($settings['width'] ?? 100)));
+                $height = max(1, min(10000, (int) ($settings['height'] ?? 100)));
+                $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '" width="' . $width . '" height="' . $height . '" loading="lazy" decoding="async"> ';
+            }
+            if ($author !== '') {
+                $html .= '<cite>' . self::escape($author) . '</cite>';
+            }
+            if ($job !== '') {
+                $html .= ' <span>' . self::escape($job) . '</span>';
+            }
+            $html .= '</figcaption>';
+        }
+        return $html . '</figure>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderSocial(array $settings): string
+    {
+        $links = '';
+        foreach (['facebook' => 'Facebook', 'instagram' => 'Instagram', 'linkedin' => 'LinkedIn', 'youtube' => 'YouTube', 'mastodon' => 'Mastodon'] as $key => $name) {
+            $url = $this->sanitizer->sanitizeHref($this->fieldText($settings, $key));
+            if ($url !== null && $url !== '') {
+                $links .= '<li><a href="' . self::escape($url) . '">' . $name . '</a></li>';
+            }
+        }
+        return $links === '' ? '' : '<nav aria-label="' . self::escape($this->fieldText($settings, 'label', t('plugin::prime-builder.widgets.social'))) . '"><ul>' . $links . '</ul></nav>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderStarRating(array $settings): string
+    {
+        $value = max(0, min(5, (int) ($settings['value'] ?? 0)));
+        $label = t('plugin::prime-builder.ui.star_rating_value', ['value' => $value]);
+        return '<span role="img" aria-label="' . self::escape($label) . '"><span aria-hidden="true">' . str_repeat('★', $value) . str_repeat('☆', 5 - $value) . '</span></span>';
     }
 
     /** @param array<string, mixed> $settings */

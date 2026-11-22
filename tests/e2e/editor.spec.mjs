@@ -312,6 +312,61 @@ test('context menu saves a reusable template with keyboard, reload and deletion'
   await expectAccessible(page);
 });
 
+test('new basic widgets each expose content, style and advanced controls', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  for (const name of ['Icône', 'Liste d’icônes', 'Boîte image', 'Témoignage', 'Bascule', 'Réseaux sociaux', 'Note par étoiles']) {
+    await page.locator('[data-pb-panel="widgets"]').click();
+    await page.getByRole('button', { name: `Ajouter ${name}`, exact: true }).click();
+    await expect(page.locator('[data-pb-fields] input, [data-pb-fields] select, [data-pb-fields] textarea').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Style', exact: true }).click();
+    await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Contenu', exact: true }).click();
+    await expect(page.locator('[data-pb-fields] input, [data-pb-fields] select, [data-pb-fields] textarea').first()).toBeVisible();
+  }
+});
+
+test('toggle works with keyboard on the public page, including without JavaScript', async ({ page, browser }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Bascule' }).click();
+  await page.getByLabel('Titre', { exact: true }).fill('Pourquoi cette option ?');
+  await page.getByLabel('Texte', { exact: true }).fill('<p>Une réponse accessible.</p>');
+  await page.getByLabel('État initial').selectOption('closed');
+  await page.getByRole('button', { name: 'Style', exact: true }).click();
+  await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+  await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+  await page.locator('[data-pb-status]').selectOption('published');
+  await page.locator('[data-pb-save]').click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+  await page.goto('/test-prime-builder');
+  const details = page.locator('.pb-toggle details').last();
+  const summary = details.locator('summary');
+  await expect(summary).toHaveText('Pourquoi cette option ?');
+  await expect(details).not.toHaveAttribute('open', '');
+  await summary.focus();
+  await page.keyboard.press('Enter');
+  await expect(details).toHaveAttribute('open', '');
+  await expect(details.getByText('Une réponse accessible.')).toBeVisible();
+  await expectAccessible(page);
+  await page.keyboard.press('Space');
+  await expect(details).not.toHaveAttribute('open', '');
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const fallback = await noJs.newPage();
+    await fallback.goto('/test-prime-builder');
+    const native = fallback.locator('.pb-toggle details').last();
+    await native.locator('summary').focus();
+    await fallback.keyboard.press('Enter');
+    await expect(native).toHaveAttribute('open', '');
+    await expect(native.getByText('Une réponse accessible.')).toBeVisible();
+  } finally { await noJs.close(); }
+});
+
 test('tabs work with keyboard and remain readable without JavaScript', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
@@ -480,7 +535,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
   }, id);
   expect(response).toBe(200);
   await page.goto('/test-prime-builder');
-  await expect(page.locator('.pb-element')).toHaveCount(25);
+  await expect(page.locator('.pb-element')).toHaveCount(32);
   await expectAccessible(page);
 });
 

@@ -17,7 +17,7 @@
 
 Le relecteur indique séparément, sur CMS 1.0.2 et MySQL, `OK (52 tests, 903 assertions)` et l’ouverture des écrans Theme Builder et Envois sans erreur console. Ce résultat est attribué au relecteur, distinct de la CI ci-dessus.
 
-**Reste :** B catalogue complet, puis C widgets globaux/dynamique, D Theme Builder, E formulaires complets, F popups et G finitions. Le formulaire, le widget HTML et le Theme Builder actuels ne sont que des premiers sous-ensembles. Le plugin reste partiel et n’est pas prêt pour la production.
+**Reste :** B catalogue complet, puis C widgets globaux/dynamique, D Theme Builder, E formulaires complets, F popups et G finitions. B est en cours : sept widgets de base et leurs tests viennent d’être ajoutés ; leur exécution en CI reste à observer. La vidéo distante, la lightbox, le carrousel, la carte et la zone de thème restent à faire, ainsi que le chargement CSS conditionnel. Le formulaire, le widget HTML et le Theme Builder actuels ne sont que des premiers sous-ensembles. Le plugin reste partiel et n’est pas prêt pour la production.
 
 ## Jalon A — corrections : terminé
 
@@ -111,20 +111,20 @@ Le statut concerne le **périmètre indiqué dans la ligne**, pas une parité co
 | Bouton | **Fait et testé** : texte, lien ; D, E2E `build and publish four widgets with the mouse`. | Non |
 | Séparateur | **Fait et testé** : élément simple, styles communs ; D, E2E quatre widgets. | Non |
 | Espaceur | **Fait et testé** : styles communs, sans réglage spécifique ; D, P. | Non |
-| Icône | **Non fait** : pas de widget icône seul dans le catalogue actuel. | — |
+| Icône | **Non fait — en cours** : icône seule, description accessible ; `DT::testIconRendersAnAccessibleOrDecorativeSymbol` ajouté, CI à observer. | Non |
 | Boîte icône | **Fait et testé** pour la version simple : quatre symboles, titre, texte ; D, P. | Non |
-| Boîte image | **Non fait** — partiel : `card` fournit image, titre, texte et lien, pas le widget complet ; D, P. | Non |
-| Liste d’icônes | **Non fait** — partiel : liste ordonnée ou non, sans icônes ; `DT::testNewWidgetsProduceSafeReadableFallbacks`. | Non |
+| Boîte image | **Non fait — en cours** : image, dimensions, titre, texte et lien ; `DT::testImageBoxRendersSafeImageDimensionsContentAndLink` ajouté, CI à observer. | Non |
+| Liste d’icônes | **Non fait — en cours** : symboles décoratifs et lignes textuelles ; `DT::testIconListRendersEscapedItemsWithDecorativeIcons` ajouté, CI à observer. | Non |
 | Compteur | **Fait et testé** pour une valeur statique : valeur, préfixe, suffixe, titre ; D, P. Pas d’animation. | Non |
 | Barre de progression | **Fait et testé** : libellé, valeur 0–100, `<progress>` ; D, P. | Non |
-| Témoignage | **Non fait** : une citation simple ne remplace pas le widget demandé. | — |
+| Témoignage | **Non fait — en cours** : citation, auteur, fonction et portrait ; `DT::testTestimonialRendersQuotationAttributionAndOptionalPortrait` ajouté, CI à observer. | Non |
 | Onglets | **Fait et testé** pour 2–3 panneaux : titres et textes ; E2E `tabs work with keyboard and remain readable without JavaScript`, `DT::testNewWidgetsProduceSafeReadableFallbacks`. | Oui, `tabs.js` |
 | Accordéon | **Fait et testé** pour un `<details>` : titre, texte ; `DT::testNewWidgetsProduceSafeReadableFallbacks`, P. | Non |
-| Bascule | **Non fait** : pas de widget distinct. | — |
+| Bascule | **Non fait — en cours** : `<details>` natif, ouvert/fermé ; `DT::testToggleUsesNativeDetailsWithAnOptionalOpenInitialState` et E2E clavier ajoutés, CI à observer. | Non |
 | Alerte | **Fait et testé** pour texte filtré simple ; D, P. | Non |
-| Réseaux sociaux | **Non fait**. | — |
+| Réseaux sociaux | **Non fait — en cours** : navigation nommée et cinq liens ; `DT::testSocialLinksUseNamedNavigationAndRejectUnsafeUrls` ajouté, CI à observer. | Non |
 | Carte OpenStreetMap | **Non fait** : le widget `card` est une carte éditoriale, pas une carte géographique. | — |
-| Note par étoiles | **Non fait**. | — |
+| Note par étoiles | **Non fait — en cours** : 0–5 étoiles et libellé accessible ; `DT::testStarRatingRendersOneAccessibleLabelAndFiveVisualStars` et test de localisation ajoutés, CI à observer. | Non |
 | Galerie et lightbox | **Non fait** — partiel : liste de 20 URL/alternatifs, pas de lightbox ; `DT::testMediaUrlsAndGalleryAreValidated`. | Non |
 | Carrousel d’images | **Non fait**. | — |
 | Ancre de menu | **Fait et testé** pour une ancre simple : identifiant validé ; D, P. | Non |
