@@ -17,6 +17,20 @@ export function inheritedStyle(styles, device, name) {
   }
   return null;
 }
+// For spacing, each breakpoint's shorthand resets all four sides before its
+// explicit side overrides. Search from the active breakpoint toward desktop.
+export function spacingStyleSource(styles, device, name) {
+  const match = typeof name === 'string' && name.match(/^(padding|margin)_(top|right|bottom|left)$/);
+  const modes = device === 'mobile' ? ['mobile', 'tablet', 'desktop'] : device === 'tablet' ? ['tablet', 'desktop'] : device === 'desktop' ? ['desktop'] : [];
+  if (!match) return null;
+  for (const mode of modes) {
+    const values = styles?.[mode];
+    if (!values || typeof values !== 'object') continue;
+    if (Object.hasOwn(values, name)) return { mode, key: name, value: values[name] };
+    if (Object.hasOwn(values, match[1])) return { mode, key: match[1], value: values[match[1]] };
+  }
+  return null;
+}
 // PHP encodes an empty styles map as []; writing named properties on that
 // array would silently lose them during JSON serialization and history checks.
 export function setResponsiveStyle(styles, device, name, value) {

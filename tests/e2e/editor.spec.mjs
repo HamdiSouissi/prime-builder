@@ -2178,6 +2178,234 @@ test('color picker uses kit references and spacing has numeric units', async ({ 
   await expectAccessible(page);
 });
 
+test('per-side spacing follows the responsive cascade in the editor and public theme', async ({ page, browser }) => {
+  test.setTimeout(180_000);
+  page.setDefaultTimeout(12_000);
+  await login(page);
+  let csrf = null, entryId = null, templateId = null, originalTheme = null, originalBreakpoints = null;
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  const saveBreakpoints = async (tablet, mobile) => {
+    await page.goto('/admin/prime-builder/settings');
+    await page.locator('#pb-tablet').fill(String(tablet));
+    await page.locator('#pb-mobile').fill(String(mobile));
+    const response = page.waitForResponse(result => result.request().method() === 'POST' && result.url().endsWith('/admin/prime-builder/settings'));
+    await page.locator('form[action="/admin/prime-builder/settings"] button[type="submit"]').click();
+    expect((await response).status()).toBe(302);
+  };
+  try {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    await page.goto('/admin/prime-builder/settings');
+    originalBreakpoints = [await page.locator('#pb-tablet').inputValue(), await page.locator('#pb-mobile').inputValue()];
+    await saveBreakpoints(1000, 600);
+    const layout = { version: 1, elements: [
+      { id: 'spacing-section', type: 'container', settings: { layout: 'flex', direction: 'column' }, styles: {}, children: [
+        // Side properties precede shorthands to verify that JSON key order does
+        // not change the visual result in the editor or compiled stylesheet.
+        { id: 'spacing-button', type: 'button', settings: { text: 'Bords adaptatifs', url: '/' }, styles: {
+          desktop: { padding_top: 12, margin_left: 'auto', padding: 20, margin: 8, margin_right: -4 },
+        }, children: [] },
+      ] },
+    ] };
+    const created = await api('/api/v1/content/page', 'POST', {
+      title: 'Espacements responsive', slug: 'pb-espacements-responsive', status: 'published', published_at: '2021-01-01 10:00:00',
+      content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: layout }] },
+    });
+    expect(created.status, created.body).toBe(201);
+    entryId = JSON.parse(created.body).data.id;
+    await page.goto(`/admin/prime-builder/edit/${entryId}`);
+    await page.locator('[data-pb-panel="navigator"]').click();
+    await page.locator('[data-pb-tree-select="spacing-button"]').click();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    const padding = page.getByRole('spinbutton', { name: 'Marge intérieure', exact: true });
+    const top = page.getByRole('spinbutton', { name: 'Intérieure : haut', exact: true });
+    const right = page.getByRole('spinbutton', { name: 'Intérieure : droite', exact: true });
+    const rightUnit = page.getByRole('combobox', { name: 'Unité : Intérieure : droite', exact: true });
+    const bottom = page.getByRole('spinbutton', { name: 'Intérieure : bas', exact: true });
+    const bottomUnit = page.getByRole('combobox', { name: 'Unité : Intérieure : bas', exact: true });
+    const margin = page.getByRole('spinbutton', { name: 'Marge extérieure', exact: true });
+    const marginRight = page.getByRole('spinbutton', { name: 'Extérieure : droite', exact: true });
+    const marginRightUnit = page.getByRole('combobox', { name: 'Unité : Extérieure : droite', exact: true });
+    const marginLeft = page.getByRole('spinbutton', { name: 'Extérieure : gauche', exact: true });
+    const marginLeftUnit = page.getByRole('combobox', { name: 'Unité : Extérieure : gauche', exact: true });
+    const frame = page.frameLocator('[data-pb-frame]');
+    const preview = frame.locator('[data-pb-id="spacing-button"]');
+    await expect(preview).toHaveCSS('padding-top', '12px');
+    await expect(preview).toHaveCSS('padding-right', '20px');
+    await expect(preview).toHaveCSS('margin-right', '-4px');
+    await expect(marginLeft).toBeDisabled();
+    await expect(right).toHaveAccessibleDescription('Valeur générale pour Ordinateur : 20px');
+    await expect(top).toHaveAccessibleDescription('Défini pour Ordinateur.');
+    // Changing the shorthand updates the source descriptions of the side
+    // controls without stealing focus or overwriting an explicit side.
+    await padding.focus();
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText('24');
+    await expect(padding).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('combobox', { name: 'Unité : Marge intérieure', exact: true })).toBeFocused();
+    await expect(right).toHaveAccessibleDescription('Valeur générale pour Ordinateur : 24px');
+    await expect(preview).toHaveCSS('padding-top', '12px');
+    await expect(preview).toHaveCSS('padding-right', '24px');
+    await top.fill('14');
+    await expect(preview).toHaveCSS('padding-top', '14px');
+
+    await page.getByRole('button', { name: 'Tablette', exact: true }).click();
+    await expect(top).toHaveAccessibleDescription('Hérité de Ordinateur : 14px');
+    await expect(right).toHaveAccessibleDescription('Valeur générale pour Ordinateur : 24px');
+    await padding.fill('0');
+    await expect(top).toHaveAccessibleDescription('Valeur générale pour Tablette : 0px');
+    await expect(preview).toHaveCSS('padding-top', '0px');
+    await top.fill('5');
+    await expect(preview).toHaveCSS('padding-top', '5px');
+    await top.fill('');
+    await expect(top).toHaveAccessibleDescription('Valeur générale pour Tablette : 0px');
+    await expect(preview).toHaveCSS('padding-top', '0px');
+    await rightUnit.selectOption('rem');
+    await right.fill('1.5');
+    await expect.poll(() => preview.evaluate(node => node.style.paddingRight)).toBe('1.5rem');
+    await margin.fill('4');
+    await marginRight.fill('0');
+    await expect(preview).toHaveCSS('margin-right', '0px');
+    await expect(marginLeft).toHaveAccessibleDescription('Valeur générale pour Tablette : 4px');
+
+    await page.getByRole('button', { name: 'Mobile', exact: true }).click();
+    await expect(top).toHaveAccessibleDescription('Valeur générale pour Tablette : 0px');
+    await expect(right).toHaveAccessibleDescription('Hérité de Tablette : 1.5rem');
+    await bottomUnit.selectOption('rem');
+    await bottom.fill('2');
+    await marginRightUnit.selectOption('em');
+    await marginRight.fill('-1.25');
+    await marginLeftUnit.selectOption('auto');
+    await expect(marginLeft).toBeDisabled();
+    await expect.poll(() => preview.evaluate(node => node.style.paddingBottom)).toBe('2rem');
+    await expect.poll(() => preview.evaluate(node => node.style.marginRight)).toBe('-1.25em');
+    await expect.poll(() => preview.evaluate(node => node.style.marginLeft)).toBe('auto');
+    await marginLeftUnit.selectOption('px');
+    await expect(marginLeft).toBeEnabled();
+    await expect(marginLeft).toHaveAccessibleDescription('Valeur générale pour Tablette : 4px');
+    await expect(preview).toHaveCSS('margin-left', '4px');
+    await marginLeftUnit.selectOption('auto');
+
+    const selectedLabelFits = control => control.evaluate(node => {
+      const style = getComputedStyle(node);
+      const context = document.createElement('canvas').getContext('2d');
+      context.font = style.font;
+      return node.clientWidth >= context.measureText(node.selectedOptions[0].textContent).width
+        + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 16;
+    });
+    await page.setViewportSize({ width: 1440, height: 1400 });
+    await page.getByRole('group', { name: 'Marge intérieure par côté' }).scrollIntoViewIfNeeded();
+    expect(await selectedLabelFits(marginLeftUnit)).toBe(true);
+    await expectAccessible(page);
+    await page.locator('[data-pb-settings-panel]').screenshot({ path: test.info().outputPath('spacing-editor.jpg'), quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.getByRole('group', { name: 'Marge extérieure par côté' }).scrollIntoViewIfNeeded();
+    expect(await selectedLabelFits(marginLeftUnit)).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.locator('[data-pb-settings-panel]').screenshot({ path: test.info().outputPath('spacing-editor-mobile.jpg'), quality: 15 });
+    await page.setViewportSize({ width: 320, height: 812 });
+    expect(await selectedLabelFits(marginLeftUnit)).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+    await expectAccessible(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const saving = page.waitForResponse(result => result.request().method() === 'PATCH' && result.url().endsWith(`/documents/${entryId}`));
+    await page.locator('[data-pb-save]').click();
+    const saved = await (await saving).json();
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    const persisted = saved.data.content.blocks[0].data;
+    expect(persisted.elements[0].children[0].styles).toEqual({
+      desktop: { padding_top: 14, margin_left: 'auto', padding: 24, margin: 8, margin_right: -4 },
+      tablet: { padding: 0, padding_right: '1.5rem', margin: 4, margin_right: 0 },
+      mobile: { padding_bottom: '2rem', margin_right: '-1.25em', margin_left: 'auto' },
+    });
+    await page.reload();
+    await page.locator('[data-pb-panel="navigator"]').click();
+    await page.locator('[data-pb-tree-select="spacing-button"]').click();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await page.getByRole('button', { name: 'Mobile', exact: true }).click();
+    await expect(bottom).toHaveValue('2');
+    await expect(bottomUnit).toHaveValue('rem');
+    await expect(marginRight).toHaveValue('-1.25');
+    await expect(marginLeftUnit).toHaveValue('auto');
+    await expect.poll(() => preview.evaluate(node => node.style.paddingBottom)).toBe('2rem');
+
+    const template = await api('/api/prime-builder/v1/templates', 'POST', { name: 'Espacements du thème', kind: 'section', data: persisted });
+    expect(template.status, template.body).toBe(201);
+    templateId = JSON.parse(template.body).data.id;
+    await page.goto('/admin/prime-builder/theme');
+    originalTheme = {
+      header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
+      footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
+      exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
+    };
+    await page.getByLabel('En-tête', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Contenus exclus', { exact: true }).fill('');
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await expect(page.getByLabel('En-tête', { exact: true })).toHaveValue(templateId);
+    await page.goto('/pb-espacements-responsive');
+    await expect(page.locator('script[src*="/assets/plugins/prime-builder/js/"]')).toHaveCount(0);
+    await expectAccessible(page);
+
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const publicPage = await noJs.newPage();
+      await publicPage.goto('/pb-espacements-responsive');
+      const areas = [publicPage.locator('main .pb-layout'), publicPage.locator('header.pb-theme-header'), publicPage.locator('footer.pb-theme-footer')];
+      for (const width of [1440, 1001, 1000, 601, 600, 375]) {
+        await publicPage.setViewportSize({ width, height: 812 });
+        const tablet = width <= 1000;
+        const mobile = width <= 600;
+        for (const area of areas) {
+          const target = area.locator('.pb-button').filter({ hasText: 'Bords adaptatifs' });
+          await expect(target).toHaveCount(1);
+          await expect(target).toHaveCSS('padding-top', tablet ? '0px' : '14px');
+          const elementSize = await target.evaluate(node => parseFloat(getComputedStyle(node).fontSize));
+          await expect(target).toHaveCSS('margin-right', mobile ? `${-1.25 * elementSize}px` : tablet ? '0px' : '-4px');
+          const rootSize = await publicPage.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+          await expect(target).toHaveCSS('padding-right', tablet ? `${1.5 * rootSize}px` : '24px');
+          await expect(target).toHaveCSS('padding-bottom', mobile ? `${2 * rootSize}px` : tablet ? '0px' : '24px');
+        }
+        if (width === 1440 || width === 375) {
+          await publicPage.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+          await publicPage.screenshot({ path: test.info().outputPath(width === 375 ? 'spacing-public-mobile.jpg' : 'spacing-public.jpg'), quality: 15, fullPage: true });
+        }
+      }
+    } finally { await noJs.close(); }
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (originalTheme) {
+        await page.goto('/admin/prime-builder/theme');
+        await page.getByLabel('En-tête', { exact: true }).selectOption(originalTheme.header);
+        await page.getByLabel('Pied de page', { exact: true }).selectOption(originalTheme.footer);
+        await page.getByLabel('Contenus exclus', { exact: true }).fill(originalTheme.exclude);
+        await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+      }
+      if (originalBreakpoints) await saveBreakpoints(...originalBreakpoints);
+      if (templateId) {
+        const deleted = await api(`/api/prime-builder/v1/templates/${templateId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(200);
+      }
+      if (entryId) {
+        const trashed = await api(`/api/v1/content/page/${entryId}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/page/${entryId}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+    } finally { page.off('dialog', leave); }
+  }
+});
+
 test('responsive visibility inherits, preserves layouts and works without JavaScript', async ({ page, browser }) => {
   test.setTimeout(180_000);
   page.setDefaultTimeout(12_000);

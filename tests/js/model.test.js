@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { History, add, changedElement, containsWidget, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, update } from '../../assets/js/model.js';
+import { History, add, changedElement, containsWidget, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update } from '../../assets/js/model.js';
 
 test('preview diff selects a single changed subtree and rejects structural or multiple changes', () => {
   const parent = createElement('container'), first = createElement('heading'), second = createElement('text');
@@ -147,6 +147,26 @@ test('responsive inheritance finds the nearest previous explicit value, includin
   assert.deepEqual(inheritedStyle(styles, 'mobile', 'color'), { mode: 'desktop', value: 'kit:primary' });
   assert.equal(inheritedStyle(styles, 'mobile', 'width'), null);
   assert.equal(inheritedStyle(null, 'mobile', 'width'), null);
+});
+test('per-side spacing follows the cascade of side and all-sides values at each breakpoint', () => {
+  const styles = {
+    desktop: { padding_top: 12, padding: 20, margin: '8px', margin_left: 'auto' },
+    tablet: { padding: 0, margin_right: -4 },
+    mobile: { padding_left: '2rem' },
+  };
+  assert.deepEqual(spacingStyleSource(styles, 'desktop', 'padding_top'), { mode: 'desktop', key: 'padding_top', value: 12 });
+  assert.deepEqual(spacingStyleSource(styles, 'desktop', 'padding_bottom'), { mode: 'desktop', key: 'padding', value: 20 });
+  assert.deepEqual(spacingStyleSource(styles, 'tablet', 'padding_top'), { mode: 'tablet', key: 'padding', value: 0 });
+  assert.deepEqual(spacingStyleSource(styles, 'mobile', 'padding_top'), { mode: 'tablet', key: 'padding', value: 0 });
+  assert.deepEqual(spacingStyleSource(styles, 'mobile', 'padding_left'), { mode: 'mobile', key: 'padding_left', value: '2rem' });
+  assert.deepEqual(spacingStyleSource(styles, 'mobile', 'margin_left'), { mode: 'desktop', key: 'margin_left', value: 'auto' });
+  assert.deepEqual(spacingStyleSource(styles, 'mobile', 'margin_right'), { mode: 'tablet', key: 'margin_right', value: -4 });
+  const cleared = setResponsiveStyle(styles, 'tablet', 'padding', undefined);
+  assert.deepEqual(spacingStyleSource(cleared, 'mobile', 'padding_top'), { mode: 'desktop', key: 'padding_top', value: 12 });
+  assert.equal(styles.tablet.padding, 0);
+  assert.equal(spacingStyleSource(null, 'mobile', 'padding_left'), null);
+  assert.equal(spacingStyleSource(styles, 'mobile', 'padding'), null);
+  assert.equal(spacingStyleSource(styles, 'mobile', 'padding_unsafe'), null);
 });
 test('position inheritance distinguishes zero, automatic resets and cleared overrides', () => {
   const desktop = setResponsiveStyle([], 'desktop', 'offset_top', -12);

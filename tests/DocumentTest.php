@@ -216,6 +216,42 @@ final class DocumentTest extends TestCase
         }
     }
 
+    public function testResponsiveSpacingSidesAreBoundedAndOverrideShorthandDeterministically(): void
+    {
+        $node = $this->element('button', 'spaced');
+        $node['styles'] = [
+            // Side values precede shorthands in the JSON on purpose: CSS output
+            // must give a side value precedence within the same breakpoint.
+            'desktop' => ['padding_top' => 12, 'margin_left' => 'auto', 'padding' => 20, 'margin' => 8, 'margin_right' => -4, 'padding_bottom' => '1.5rem'],
+            'tablet' => ['padding' => 0, 'margin' => 4, 'margin_right' => 0],
+            'mobile' => ['padding_left' => '2rem', 'margin_bottom' => '-1.25em'],
+        ];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame($node['styles'], $result['data']['elements'][0]['styles']);
+        $css = (new Compiler(1000, 600))->compile($result['data']);
+        self::assertStringContainsString('.pb-element[data-pb-id="spaced"]{padding:20px;margin:8px;padding-top:12px;padding-bottom:1.5rem;margin-right:-4px;margin-left:auto;}', $css);
+        self::assertStringContainsString('@media(max-width:1000px){.pb-element[data-pb-id="spaced"]{padding:0px;margin:4px;margin-right:0px;}}', $css);
+        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="spaced"]{padding-left:2rem;margin-bottom:-1.25em;}}', $css);
+        foreach ([
+            ['padding_top', 0, '0px'], ['padding_right', '2000vh', '2000vh'], ['padding_bottom', '0.01rem', '0.01rem'], ['padding_left', 2000, '2000px'],
+            ['margin_top', -2000, '-2000px'], ['margin_right', '-2000vw', '-2000vw'], ['margin_bottom', 'auto', 'auto'], ['margin_left', '0px', '0px'],
+        ] as [$key, $value, $expected]) {
+            $node['styles'] = ['desktop' => [$key => $value]];
+            self::assertSame([], $this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors'], (string) $key);
+            self::assertStringContainsString(str_replace('_', '-', (string) $key) . ':' . $expected . ';', (new Compiler())->compile(['elements' => [$node]]));
+        }
+        foreach ([
+            ['padding_top', -1], ['padding_right', '-1px'], ['padding_bottom', 'auto'], ['padding_left', '2000.01px'],
+            ['padding_top', '1px;display:none'], ['margin_top', -2001], ['margin_right', '2001rem'],
+            ['margin_bottom', 'auto;display:none'], ['margin_left', 'calc(1px + 2px)'], ['margin_top', 1.5],
+        ] as [$key, $bad]) {
+            $node['styles'] = ['desktop' => [$key => $bad]];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors'], (string) $key);
+            self::assertSame('', (new Compiler())->compile(['elements' => [$node]]), (string) $key);
+        }
+    }
+
     public function testKitColorReferencesAndTypedLengthUnitsAreValidatedAndCompiled(): void
     {
         $node = $this->element();

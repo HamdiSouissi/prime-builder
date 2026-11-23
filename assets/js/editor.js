@@ -1,4 +1,4 @@
-import { History, add, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, update } from './model.js';
+import { History, add, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update } from './model.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -643,7 +643,11 @@ function renderSettings() {
     fields.append(text('p', ui.responsive_help, 'pb-intro'));
     const schemas = tab === 'style'
       ? { color: { type: 'color' }, background: { type: 'color' }, font_size: { type: 'length' }, align: { type: 'enum', values: ['left', 'center', 'right'] }, radius: { type: 'length' } }
-      : { padding: { type: 'length' }, margin: { type: 'length' }, gap: { type: 'length' }, min_height: { type: 'length' }, width: { type: 'length' },
+      : { padding: { type: 'length' },
+        padding_top: { type: 'length' }, padding_right: { type: 'length' }, padding_bottom: { type: 'length' }, padding_left: { type: 'length' },
+        margin: { type: 'length' },
+        margin_top: { type: 'offset' }, margin_right: { type: 'offset' }, margin_bottom: { type: 'offset' }, margin_left: { type: 'offset' },
+        gap: { type: 'length' }, min_height: { type: 'length' }, width: { type: 'length' },
         visibility: { type: 'enum', values: ['show', 'hide'] },
         position: { type: 'enum', values: ['static', 'relative', 'absolute', 'fixed', 'sticky'] },
         offset_top: { type: 'offset' }, offset_right: { type: 'offset' }, offset_bottom: { type: 'offset' }, offset_left: { type: 'offset' },
@@ -654,29 +658,45 @@ function renderSettings() {
           justify: { type: 'enum', values: ['start', 'center', 'end', 'space-between'] }, items_align: { type: 'enum', values: ['start', 'center', 'end', 'stretch'] },
         } : {}),
       };
+    const sourceHints = [];
+    const spacingGroups = {};
     for (const [name, schema] of Object.entries(schemas)) {
       const group = document.createElement('div'); group.className = 'pb-style-field';
       const hint = text('small', '', 'pb-inherit-hint'); hint.id = id();
+      const side = name.match(/^(padding|margin)_(top|right|bottom|left)$/);
       const showSource = styles => {
         const own = styles?.[device];
         if (own && Object.hasOwn(own, name)) { hint.textContent = `${ui.value_defined} ${ui[device]}.`; return; }
-        const inherited = inheritedStyle(styles, device, name);
+        const inherited = side ? spacingStyleSource(styles, device, name) : inheritedStyle(styles, device, name);
         if (!inherited) { hint.textContent = ui.value_default; return; }
         const value = inherited.value === 'kit:primary' ? ui.kit_primary : inherited.value === 'kit:text' ? ui.kit_text
           : typeof inherited.value === 'number' && ['length', 'offset'].includes(schema.type) ? `${inherited.value}px` : ui[inherited.value] || String(inherited.value);
-        hint.textContent = `${ui.value_inherited} ${ui[inherited.mode]} : ${value}`;
+        const label = side && inherited.key !== name ? ui.value_all_sides : ui.value_inherited;
+        hint.textContent = `${label} ${ui[inherited.mode]} : ${value}`;
       };
       const field = makeField(name, schema, element.styles?.[device]?.[name], value => {
         const current = find(history.present, selected); if (!current) return;
         const styles = setResponsiveStyle(current.styles, device, name, value);
         commit(update(history.present, selected, { styles }), false, `${ui[tab]} : ${ui[name] || name}`);
-        showSource(styles);
+        // A shorthand can change the source of all four side fields without
+        // rebuilding the controls or moving keyboard focus.
+        sourceHints.forEach(updateHint => updateHint(styles));
       });
       const warningText = name === 'visibility' ? ui.visibility_warning : name === 'position' ? ui.position_warning : null;
       const warning = warningText ? text('small', warningText, 'pb-inherit-hint') : null;
       if (warning) warning.id = id();
       field.querySelectorAll('input,select,textarea').forEach(control => control.setAttribute('aria-describedby', warning ? `${hint.id} ${warning.id}` : hint.id));
-      showSource(element.styles || {}); group.append(field, hint); if (warning) group.append(warning); fields.append(group);
+      sourceHints.push(showSource); showSource(element.styles || {}); group.append(field, hint); if (warning) group.append(warning);
+      if (side) {
+        if (!spacingGroups[side[1]]) {
+          const fieldset = document.createElement('fieldset'); fieldset.className = 'pb-spacing-group';
+          fieldset.append(text('legend', ui[`${side[1]}_sides`]));
+          if (side[1] === 'margin') fieldset.append(text('p', ui.margin_sides_help, 'pb-spacing-help'));
+          const grid = document.createElement('div'); grid.className = 'pb-spacing-grid'; fieldset.append(grid);
+          fields.append(fieldset); spacingGroups[side[1]] = grid;
+        }
+        spacingGroups[side[1]].append(group);
+      } else fields.append(group);
     }
   }
 }
@@ -795,6 +815,12 @@ function cssColor(value) {
   return typeof value === 'string' && /^#[a-f\d]{3}([a-f\d]{3})?$/i.test(value) ? value : null;
 }
 function applyVisualStyles(doc) {
+  const spacingSides = {
+    padding_top: ['paddingTop', cssLength], padding_right: ['paddingRight', cssLength],
+    padding_bottom: ['paddingBottom', cssLength], padding_left: ['paddingLeft', cssLength],
+    margin_top: ['marginTop', cssOffset], margin_right: ['marginRight', cssOffset],
+    margin_bottom: ['marginBottom', cssOffset], margin_left: ['marginLeft', cssOffset],
+  };
   function walk(elements) {
     for (const element of elements) {
       const node = doc.querySelector(`[data-pb-id="${CSS.escape(element.id)}"]`);
@@ -813,6 +839,7 @@ function applyVisualStyles(doc) {
           const style = element.styles?.[mode] || {};
           const lengths = { padding: 'padding', margin: 'margin', gap: 'gap', font_size: 'fontSize', radius: 'borderRadius', min_height: 'minHeight' };
           for (const [key, value] of Object.entries(style)) {
+            if (Object.hasOwn(spacingSides, key)) continue;
             if (key in lengths && cssLength(value) !== null) {
               node.style[lengths[key]] = cssLength(value);
               if (key === 'font_size') node.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary').forEach(child => { child.style.fontSize = 'inherit'; });
@@ -833,6 +860,12 @@ function applyVisualStyles(doc) {
             else if ((key === 'justify' && ['start', 'center', 'end', 'space-between'].includes(value)) || (key === 'items_align' && ['start', 'center', 'end', 'stretch'].includes(value))) {
               node.style[key === 'justify' ? 'justifyContent' : 'alignItems'] = value === 'start' ? 'flex-start' : value === 'end' ? 'flex-end' : value;
             }
+          }
+          // Match the compiler: same-breakpoint side values win over shorthand
+          // values even when the JSON keys arrived in a different order.
+          for (const [key, [property, parse]] of Object.entries(spacingSides)) {
+            const value = parse(style[key]);
+            if (value !== null) node.style[property] = value;
           }
         }
         if (responsiveVisibility(element.styles, device) === 'hide') node.style.setProperty('display', 'none', 'important');

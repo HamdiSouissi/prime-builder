@@ -7,6 +7,12 @@ namespace PrimeBuilder\Styles;
 /** Compile only a small allowlist of CSS properties; never concatenate arbitrary CSS. */
 final class Compiler
 {
+    /** @var array<string, string> */
+    private const SPACING_SIDES = [
+        'padding_top' => 'padding-top', 'padding_right' => 'padding-right', 'padding_bottom' => 'padding-bottom', 'padding_left' => 'padding-left',
+        'margin_top' => 'margin-top', 'margin_right' => 'margin-right', 'margin_bottom' => 'margin-bottom', 'margin_left' => 'margin-left',
+    ];
+
     private readonly int $tablet;
     private readonly int $mobile;
 
@@ -78,7 +84,16 @@ final class Compiler
                 }
                 $declarations = '';
                 foreach ($values as $key => $value) {
-                    $declarations .= $this->declaration((string) $key, $value);
+                    if (!isset(self::SPACING_SIDES[(string) $key])) {
+                        $declarations .= $this->declaration((string) $key, $value);
+                    }
+                }
+                // Shorthands reset all sides in CSS. Always emit them before
+                // per-side overrides, regardless of the input JSON key order.
+                foreach (self::SPACING_SIDES as $key => $_) {
+                    if (array_key_exists($key, $values)) {
+                        $declarations .= $this->declaration($key, $values[$key]);
+                    }
                 }
                 if ($declarations !== '') {
                     $modes[$mode] .= $selector . '{' . $declarations . '}';
@@ -99,6 +114,10 @@ final class Compiler
         if (isset($numeric[$key])) {
             $length = Values::length($value);
             return $length !== null ? $numeric[$key] . ':' . $length . ';' : '';
+        }
+        if (isset(self::SPACING_SIDES[$key])) {
+            $length = str_starts_with($key, 'margin_') ? Values::offset($value) : Values::length($value);
+            return $length !== null ? self::SPACING_SIDES[$key] . ':' . $length . ';' : '';
         }
         if (in_array($key, ['color', 'background'], true)) {
             $color = Values::color($value);
