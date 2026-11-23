@@ -4898,13 +4898,35 @@ test('theme share buttons use the public canonical context without scripts or tr
 
     // When an entry also loads the refresh script, it must not replace the
     // canonical URL already resolved by the server in the two theme slots.
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/pb-partage-theme?private_token=browser-secret');
-    const entryFacebook = page.getByRole('navigation', { name: 'Partage de la page' }).getByRole('link', { name: 'Partager sur Facebook' });
+    const entryShare = page.getByRole('navigation', { name: 'Partage de la page' });
+    const entryFacebook = entryShare.getByRole('link', { name: 'Partager sur Facebook' });
     await expect(page.locator('script[src*="/js/share_buttons.js"]')).toHaveCount(1);
-    await expect.poll(() => target(entryFacebook)).toBe(new URL('/pb-partage-theme', page.url()).href);
+    await expect(page.locator('head link[rel="canonical"]')).toHaveAttribute('href', 'https://example.test/canonique?private_token=secret#fragment');
+    await expect.poll(() => target(entryFacebook)).toBe('https://example.test/canonique');
+    expect(await entryFacebook.getAttribute('href')).not.toMatch(/secret|private_token|fragment/);
     expect(await target(facebook)).toBe('https://example.test/canonique');
     expect(await target(footer.getByRole('link', { name: 'Partager sur Facebook' }))).toBe('https://example.test/canonique');
+    await entryFacebook.focus();
+    await page.keyboard.press('Tab');
+    await expect(entryShare.getByRole('link', { name: 'Partager sur LinkedIn' })).toBeFocused();
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('share-canonical-public.jpg'), fullPage: true, quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('share-canonical-public-mobile.jpg'), fullPage: true, quality: 15 });
+    await page.setViewportSize({ width: 1440, height: 900 });
     expect(externalRequests).toEqual([]);
+    // Authenticated customizer previews keep the saved fallback, not the
+    // canonical emitted for a potentially private preview context.
+    await page.goto('/pb-partage-theme?customizer_preview=1&private_token=preview-secret');
+    await expect(page.locator('body')).toHaveClass(/is-customizer-preview/);
+    expect(await target(entryFacebook)).toBe(new URL('/pb-partage-theme', page.url()).href);
+    expect(await entryFacebook.getAttribute('href')).not.toMatch(/preview|private_token|secret/);
+    await page.goto('/pb-partage-theme?private_token=browser-secret');
+    await expect.poll(() => target(entryFacebook)).toBe('https://example.test/canonique');
 
     const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
     noJs.on('request', recordExternal);
@@ -4917,6 +4939,9 @@ test('theme share buttons use the public canonical context without scripts or tr
       const publicHeader = publicPage.locator('header.pb-theme-header');
       const publicFooter = publicPage.locator('footer.pb-theme-footer');
       const publicFacebook = publicHeader.getByRole('link', { name: 'Partager sur Facebook' });
+      // The saved entry fallback remains independent of the live canonical.
+      const noJsEntryFacebook = publicPage.getByRole('navigation', { name: 'Partage de la page' }).getByRole('link', { name: 'Partager sur Facebook' });
+      expect(await target(noJsEntryFacebook)).toBe(new URL('/pb-partage-theme', publicPage.url()).href);
       expect(await target(publicFacebook)).toBe('https://example.test/canonique');
       expect(await target(publicFooter.getByRole('link', { name: 'Partager sur Facebook' }))).toBe('https://example.test/canonique');
       expect(await publicFacebook.getAttribute('href')).not.toMatch(/secret|private_token|fragment/);
@@ -4928,10 +4953,15 @@ test('theme share buttons use the public canonical context without scripts or tr
       await publicPage.reload();
       expect(await target(publicFacebook)).toBe('https://example.test/nouveau');
       expect(await target(publicFooter.getByRole('link', { name: 'Partager sur Facebook' }))).toBe('https://example.test/nouveau');
+      await page.reload();
+      await expect.poll(() => target(entryFacebook)).toBe('https://example.test/nouveau');
+      expect(await entryFacebook.getAttribute('href')).not.toMatch(/secret|token/);
       result = await api(`/api/v1/content/page/${entryId}`, 'PATCH', { slug: 'pb-partage-renomme', seo: { canonical: '' } });
       expect(result.status, result.body).toBe(200);
       await publicPage.goto('/pb-partage-renomme?private_token=secret');
       expect(await target(publicFacebook)).toBe(new URL('/pb-partage-renomme', publicPage.url()).href);
+      await page.goto('/pb-partage-renomme?private_token=secret');
+      await expect.poll(() => target(entryFacebook)).toBe(new URL('/pb-partage-renomme', page.url()).href);
       await publicPage.goto('/recherche?q=terme-confidentiel');
       expect(await target(publicFacebook)).toBe(new URL('/recherche', publicPage.url()).href);
       expect(await publicFacebook.getAttribute('href')).not.toContain('terme-confidentiel');

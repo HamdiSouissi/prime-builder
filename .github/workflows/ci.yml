@@ -297,38 +297,38 @@ jobs:
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
       # Temporary transport: the sandbox cannot download the artifact host.
-      - name: Report variant-editor capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh variant-editor 0
-      - name: Report variant-editor capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh variant-editor 1
-      - name: Report variant-editor capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh variant-editor 2
-      - name: Report variant-editor capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh variant-editor 3
-      - name: Report variant-editor-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh variant-editor-mobile 0
-      - name: Report variant-editor-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh variant-editor-mobile 1
-      - name: Report variant-editor-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh variant-editor-mobile 2
-      - name: Report variant-editor-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh variant-editor-mobile 3
-      - name: Report variant-public capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh variant-public 0
-      - name: Report variant-public capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh variant-public 1
-      - name: Report variant-public capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh variant-public 2
-      - name: Report variant-public capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh variant-public 3
-      - name: Report variant-public-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh variant-public-mobile 0
-      - name: Report variant-public-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh variant-public-mobile 1
-      - name: Report variant-public-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh variant-public-mobile 2
-      - name: Report variant-public-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh variant-public-mobile 3
+      - name: Report share-screen-editor-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-desktop 0
+      - name: Report share-screen-editor-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-desktop 1
+      - name: Report share-screen-editor-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-desktop 2
+      - name: Report share-screen-editor-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-desktop 3
+      - name: Report share-screen-editor-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-mobile 0
+      - name: Report share-screen-editor-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-mobile 1
+      - name: Report share-screen-editor-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-mobile 2
+      - name: Report share-screen-editor-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh share-screen-editor-mobile 3
+      - name: Report share-canonical-public capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh share-canonical-public 0
+      - name: Report share-canonical-public capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh share-canonical-public 1
+      - name: Report share-canonical-public capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh share-canonical-public 2
+      - name: Report share-canonical-public capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh share-canonical-public 3
+      - name: Report share-canonical-public-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh share-canonical-public-mobile 0
+      - name: Report share-canonical-public-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh share-canonical-public-mobile 1
+      - name: Report share-canonical-public-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh share-canonical-public-mobile 2
+      - name: Report share-canonical-public-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh share-canonical-public-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |
