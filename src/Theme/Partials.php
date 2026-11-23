@@ -49,9 +49,9 @@ final class Partials
     }
 
     /**
-     * Revalidate even stored data. Most entry- and route-dependent widgets lack
-     * a suitable theme context and are not accepted in this first slice. Site
-     * identity and archive widgets are resolved server-side and are permitted.
+     * Revalidate even stored data. Some route-dependent widgets lack a suitable
+     * theme context and are not accepted in this first slice. Site identity,
+     * entry metadata and archive widgets are resolved server-side and permitted.
      *
      * @param array<mixed> $elements
      * @return array<string, mixed>|null
@@ -105,7 +105,7 @@ final class Partials
                 continue;
             }
             $type = $element['type'] ?? null;
-            if (in_array($type, ['posts', 'current_content', 'theme_zone', 'form', 'search_form', 'navigation', 'share_buttons', 'breadcrumbs', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author'], true)) {
+            if (in_array($type, ['posts', 'current_content', 'theme_zone', 'form', 'search_form', 'navigation', 'share_buttons', 'breadcrumbs'], true)) {
                 return true;
             }
             $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
@@ -126,12 +126,20 @@ final class Partials
     /** Whether either stored theme snapshot uses a widget, including nested ones. */
     public function usesWidget(string $type): bool
     {
-        $contains = static function (array $elements) use (&$contains, $type): bool {
+        return $this->usesAnyWidget([$type]);
+    }
+
+    /** @param list<string> $types */
+    public function usesAnyWidget(array $types): bool
+    {
+        $wanted = array_fill_keys($types, true);
+        $contains = static function (array $elements) use (&$contains, $wanted): bool {
             foreach ($elements as $element) {
                 if (!is_array($element)) {
                     continue;
                 }
-                if (($element['type'] ?? null) === $type) {
+                $type = $element['type'] ?? null;
+                if (is_string($type) && isset($wanted[$type])) {
                     return true;
                 }
                 if (is_array($element['children'] ?? null) && $contains($element['children'])) {

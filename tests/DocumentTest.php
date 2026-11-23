@@ -1090,6 +1090,10 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('>Camille &amp; Co</a>', $html);
         self::assertStringContainsString('>Arts &amp; &lt;idées&gt;</a>', $html);
         self::assertStringNotContainsString('Arts &amp;', CurrentEntry::info([], $view, false));
+        self::assertStringNotContainsString('Camille', CurrentEntry::info([], $view, true, false));
+        $unlinked = CurrentEntry::info(['date' => 'hide', 'categories' => 'hide'], $view, true, true, false);
+        self::assertStringContainsString('Camille &amp; Co', $unlinked);
+        self::assertStringNotContainsString('<a ', $unlinked);
         self::assertSame('', CurrentEntry::info(['date' => 'hide', 'author' => 'hide', 'categories' => 'hide'], $view, true));
         self::assertSame('', CurrentEntry::info([], null, true));
         $node['settings']['author'] = 'maybe';

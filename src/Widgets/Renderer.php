@@ -102,7 +102,7 @@ final class Renderer
                         $page = is_string($rawPage) && preg_match('/^[1-9][0-9]{0,3}$/D', $rawPage) === 1 && (int) $rawPage <= 1000 ? (int) $rawPage : 1;
                         $output[$id] = $this->content->posts($settings, true, $id, $page);
                     } elseif ($type === 'current_content') {
-                        $output[$id] = $this->content->current($settings, $this->entry);
+                        $output[$id] = $this->content->current($settings, $this->entry, true);
                     } elseif ($type === 'search_form') {
                         $output[$id] = $this->content->searchForm($settings, $id);
                     } elseif ($type === 'navigation') {
@@ -238,13 +238,15 @@ final class Renderer
             'image_carousel' => $this->renderImageCarousel($settings),
             'video', 'audio' => $this->renderMedia($type, $settings),
             'posts' => $this->content?->posts($settings, $this->live, $id) ?? '',
-            'current_content' => $this->content?->current($settings, $this->entry) ?? '',
+            'current_content' => $this->content?->current($settings, $this->entry, $this->live) ?? '',
             'search_form' => $this->content?->searchForm($settings, $id) ?? '',
             'navigation' => $this->content?->navigation($settings, $this->entry, $this->live) ?? Navigation::render($settings, null, false),
             'breadcrumbs' => $this->content?->breadcrumbs($settings, $this->entry, $this->live, $this->sanitizer) ?? Breadcrumbs::fallback($settings),
             'site_title' => $this->content?->siteTitle($settings) ?? '',
             'site_logo' => $this->content?->siteLogo($settings) ?? '',
-            'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author' => $this->content?->entryWidget($type, $settings, $this->entry, $this->live) ?? '',
+            'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author' => $this->pageContext !== null
+                ? ($this->content?->entryWidgetInPage($type, $settings, $this->pageContext) ?? '')
+                : ($this->content?->entryWidget($type, $settings, $this->entry, $this->live) ?? ''),
             'archive_title', 'archive_list' => $this->pageContext !== null
                 ? ($this->content?->archiveWidget($type, $settings, $this->pageContext) ?? '')
                 : ($this->live && $this->trustedPreview ? '<p class="pb-archive-preview">' . self::escape(t('plugin::prime-builder.ui.archive_preview')) . '</p>' : ''),

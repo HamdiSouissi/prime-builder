@@ -2862,6 +2862,154 @@ test('archive title and list use the real public context without JavaScript', as
   }
 });
 
+test('theme partial entry widgets use the public context without JavaScript', async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  page.setDefaultTimeout(12_000);
+  await login(page);
+  let csrf = null, termId = null, mediaId = null, templateId = null, originalTheme = null;
+  const posts = [];
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  try {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    const upload = await page.evaluate(async csrf => {
+      const canvas = document.createElement('canvas'); canvas.width = 400; canvas.height = 200;
+      const ctx = canvas.getContext('2d'); ctx.fillStyle = '#255f57'; ctx.fillRect(0, 0, 400, 200);
+      ctx.fillStyle = '#ffd998'; ctx.font = 'bold 38px sans-serif'; ctx.fillText('CARNET', 100, 115);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const form = new FormData(); form.append('file', blob, 'contexte-carnet.png');
+      const response = await fetch('/api/v1/media', { method: 'POST', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' }, body: form });
+      return { status: response.status, body: await response.text() };
+    }, csrf);
+    expect(upload.status, upload.body).toBe(201);
+    mediaId = JSON.parse(upload.body).data.id;
+    let result = await api(`/api/v1/media/${mediaId}`, 'PATCH', { alt: 'Couverture du carnet' });
+    expect(result.status, result.body).toBe(200);
+    result = await api('/api/v1/terms/category', 'POST', { name: 'Atelier & idées', slug: 'pb-atelier-contexte' });
+    expect(result.status, result.body).toBe(201);
+    termId = JSON.parse(result.body).data.id;
+    for (const [title, slug, published_at, status] of [
+      ['Chapitre antérieur', 'pb-theme-avant', '2021-01-01 10:00:00', 'published'],
+      ['Chapitre en cours', 'pb-theme-present', '2022-01-01 10:00:00', 'published'],
+      ['Chapitre ultérieur', 'pb-theme-apres', '2023-01-01 10:00:00', 'published'],
+      ['Chapitre secret', 'pb-theme-secret', '2021-06-01 10:00:00', 'draft'],
+    ]) {
+      result = await api('/api/v1/content/post', 'POST', {
+        title, slug, status, published_at, excerpt: 'Résumé du carnet.', featured_media_id: mediaId,
+        terms: { category: [termId] }, content: { version: 1, blocks: [] },
+      });
+      expect(result.status, result.body).toBe(201);
+      posts.push(JSON.parse(result.body).data);
+    }
+    const [previous, current, next] = posts;
+    const types = ['entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author'];
+    const layout = { version: 1, elements: types.map(type => ({
+      id: type, type, settings: type === 'entry_title' ? { tag: 'h3', link: 'show' } : {}, styles: {}, children: [],
+    })) };
+    result = await api('/api/prime-builder/v1/templates', 'POST', { name: 'Contenu courant dans le thème', kind: 'section', data: layout });
+    expect(result.status, result.body).toBe(201);
+    templateId = JSON.parse(result.body).data.id;
+    await page.goto('/admin/prime-builder/theme');
+    originalTheme = {
+      header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
+      footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
+      exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
+    };
+    await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Contenus exclus', { exact: true }).fill('');
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await expect(page.getByLabel('Pied de page', { exact: true })).toHaveValue(templateId);
+    await page.goto(current.url);
+    const footer = page.locator('footer.pb-theme-footer');
+    await expect(footer.locator('.pb-entry_title h3 a')).toHaveText('Chapitre en cours');
+    await expect(footer.locator('.pb-entry_title h3 a')).toHaveAttribute('href', current.url);
+    await expect(footer.locator('.pb-entry_excerpt')).toHaveText('Résumé du carnet.');
+    await expect(footer.locator('.pb-entry_featured_image img')).toHaveAttribute('alt', 'Couverture du carnet');
+    await expect(footer.locator('.pb-entry_info')).toContainText('Atelier & idées');
+    await expect(footer.locator('.pb-entry_info time')).toHaveAttribute('datetime', /2022-01-01/);
+    const nav = footer.getByRole('navigation', { name: 'Navigation entre contenus' });
+    await expect(nav.getByRole('link', { name: /Chapitre antérieur/ })).toHaveAttribute('href', previous.url);
+    await expect(nav.getByRole('link', { name: /Chapitre ultérieur/ })).toHaveAttribute('href', next.url);
+    await expect(footer.locator('.pb-entry_author')).not.toBeEmpty();
+    await expect(footer).not.toContainText('Chapitre secret');
+    await expect(footer.locator('[data-pb-live]')).toHaveCount(0);
+    await expect(page.locator('script[src*="/js/content.js"]')).toHaveCount(0);
+    for (const type of types) await expect(page.locator(`link[href*="/css/widgets/${type}.css"]`)).toHaveCount(1);
+    await expectAccessible(page);
+    await footer.screenshot({ path: test.info().outputPath('partial-entry-screen-public-desktop.jpg'), quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    const longWidth = await footer.locator('.pb-entry_title a').evaluate(node => {
+      const original = node.textContent; node.textContent = 'W'.repeat(160);
+      const width = document.documentElement.scrollWidth; node.textContent = original; return width;
+    });
+    expect(longWidth).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await footer.screenshot({ path: test.info().outputPath('partial-entry-screen-public-mobile.jpg'), quality: 15 });
+
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const publicPage = await noJs.newPage();
+      const response = await publicPage.goto(current.url);
+      expect(response.status()).toBe(200);
+      const partial = publicPage.locator('footer.pb-theme-footer');
+      await expect(partial.locator('.pb-entry_title')).toContainText('Chapitre en cours');
+      await expect(partial.locator('.pb-entry_info')).toContainText('Atelier & idées');
+      await partial.getByRole('link', { name: /Chapitre antérieur/ }).focus();
+      await publicPage.keyboard.press('Enter');
+      await expect(publicPage).toHaveURL(new RegExp(previous.url + '$'));
+      await expect(partial.locator('.pb-entry_title')).toContainText('Chapitre antérieur');
+      result = await api(`/api/v1/content/post/${previous.id}`, 'PATCH', { status: 'draft', title: 'Retiré confidentiel' });
+      expect(result.status, result.body).toBe(200);
+      result = await api(`/api/v1/content/post/${current.id}`, 'PATCH', { title: 'Chapitre actualisé', excerpt: 'Résumé actualisé.' });
+      expect(result.status, result.body).toBe(200);
+      await publicPage.goto(current.url);
+      await expect(partial.locator('.pb-entry_title')).toContainText('Chapitre actualisé');
+      await expect(partial.locator('.pb-entry_excerpt')).toHaveText('Résumé actualisé.');
+      await expect(partial).not.toContainText('Chapitre antérieur');
+      await expect(partial).not.toContainText('Retiré confidentiel');
+    } finally { await noJs.close(); }
+    await page.goto('/');
+    for (const type of types) await expect(page.locator(`footer.pb-theme-footer .pb-${type}`)).toBeEmpty();
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (originalTheme) {
+        await page.goto('/admin/prime-builder/theme');
+        await page.getByLabel('En-tête', { exact: true }).selectOption(originalTheme.header);
+        await page.getByLabel('Pied de page', { exact: true }).selectOption(originalTheme.footer);
+        await page.getByLabel('Contenus exclus', { exact: true }).fill(originalTheme.exclude);
+        await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+      }
+      for (const post of posts) {
+        const trashed = await api(`/api/v1/content/post/${post.id}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/post/${post.id}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (termId) {
+        const deleted = await api(`/api/v1/terms/category/${termId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (mediaId) {
+        const deleted = await api(`/api/v1/media/${mediaId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (templateId) {
+        const deleted = await api(`/api/prime-builder/v1/templates/${templateId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(200);
+      }
+    } finally { page.off('dialog', leave); }
+  }
+});
+
 test('current entry navigation and author box use public CMS data', async ({ page, browser }) => {
   test.setTimeout(120_000);
   await login(page);

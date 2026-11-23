@@ -345,11 +345,32 @@ final class Content
             'entry_title' => CurrentEntry::title($settings, $view),
             'entry_excerpt' => CurrentEntry::excerpt($settings, $view),
             'entry_featured_image' => CurrentEntry::featuredImage($settings, $view),
-            // A public taxonomy can later be made private by another plugin. Never
-            // persist its names or links in content_html or the page cache.
-            'entry_info' => CurrentEntry::info($settings, $view, $live && $this->taxonomies?->get('category')?->public === true),
+            'entry_info' => $this->entryInfo($settings, $view, $live),
             default => '',
         };
+    }
+
+    /**
+     * A theme partial receives the real resolved page, unlike a saved entry's
+     * block renderer. Never expose draft, future or unreachable entry data even
+     * when another plugin constructs an unexpected page context.
+     *
+     * @param array<string, mixed> $settings
+     */
+    public function entryWidgetInPage(string $type, array $settings, ?PageContext $page): string
+    {
+        if ($page === null || $page->httpStatus !== 200 || $page->isRedirect()
+            || !in_array($page->type, [PageContext::TYPE_ENTRY, PageContext::TYPE_FRONT, PageContext::TYPE_BLOG], true)) {
+            return '';
+        }
+        $entry = $page->entry;
+        if ($entry === null || $this->types->get($entry->type)?->public !== true || !UrlResolver::isPubliclyVisible($entry)) {
+            return '';
+        }
+        if ($entry->type === 'page' && $this->resolvePageAncestors([$entry]) === []) {
+            return '';
+        }
+        return $this->entryWidget($type, $settings, $entry, true);
     }
 
     /** @param array<string, mixed> $settings */
@@ -414,15 +435,32 @@ final class Content
     /** @param array<string, mixed> $settings */
     private function entryAuthor(array $settings, ?EntryView $entry): string
     {
+        [$public, $archiveAvailable] = $this->authorAvailability($entry);
+        return $public ? CurrentEntry::author($settings, $entry, $archiveAvailable) : '';
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function entryInfo(array $settings, ?EntryView $entry, bool $live): string
+    {
+        // An author or taxonomy can become private after the content is saved.
+        // Neither profile names nor term names/links belong in the saved fallback.
+        [$publicAuthor, $archiveAvailable] = $live && ($settings['author'] ?? 'show') === 'show'
+            ? $this->authorAvailability($entry) : [false, false];
+        return CurrentEntry::info($settings, $entry, $live && $this->taxonomies?->get('category')?->public === true, $publicAuthor, $archiveAvailable);
+    }
+
+    /** @return array{bool, bool} Public profile and unambiguous archive link. */
+    private function authorAvailability(?EntryView $entry): array
+    {
         $authorId = $entry?->raw()->authorId;
         $user = $authorId !== null && $authorId > 0 ? $this->users?->find($authorId) : null;
-        if ($entry === null || $user === null || !$user->isActive()) {
-            return '';
+        if ($user === null || !$user->isActive()) {
+            return [false, false];
         }
-        // A duplicate slug can resolve to a different user. In that case show
-        // the author's name, but never link it to someone else's archive.
+        // A duplicate slug can resolve to a different user. Keep the name but
+        // never link it to someone else's archive.
         $resolved = $this->users->findByAuthorSlug($user->authorSlug());
-        return CurrentEntry::author($settings, $entry, $resolved !== null && $resolved->id === $user->id && $resolved->isActive());
+        return [true, $resolved !== null && $resolved->id === $user->id && $resolved->isActive()];
     }
 
     private function entryView(?Entry $entry): ?EntryView
@@ -465,9 +503,11 @@ final class Content
     }
 
     /** @param array<string, mixed> $settings */
-    public function current(array $settings, ?Entry $entry): string
+    public function current(array $settings, ?Entry $entry, bool $live = false): string
     {
-        if ($entry === null) {
+        // Core renders saved HTML with the previous entry during an update. Do
+        // not leak an unpublished title or excerpt when publishing that entry.
+        if ($entry === null || (!$live && ($this->types->get($entry->type)?->public !== true || !UrlResolver::isPubliclyVisible($entry)))) {
             return '';
         }
         $source = is_string($settings['source'] ?? null) ? $settings['source'] : 'title';
@@ -479,12 +519,18 @@ final class Content
             $day = substr($date, 0, 10);
             return '<time datetime="' . Renderer::escape($day) . '">' . Renderer::escape($day) . '</time>';
         }
-        $value = match ($source) {
-            'excerpt' => $entry->excerpt ?? '',
-            'author' => $entry->authorName ?? '',
-            'title' => $entry->title,
-            default => '',
-        };
+        if ($source === 'author') {
+            // A previously public profile may later be disabled. Do not keep
+            // its name in saved HTML, and check the current account at runtime.
+            $author = $live && $entry->authorId !== null && $entry->authorId > 0 ? $this->users?->find($entry->authorId) : null;
+            $value = $author !== null && $author->isActive() ? $author->displayName : '';
+        } else {
+            $value = match ($source) {
+                'excerpt' => $entry->excerpt ?? '',
+                'title' => $entry->title,
+                default => '',
+            };
+        }
         $value = trim(strip_tags($value));
         return $value === '' ? '' : '<p>' . Renderer::escape($value) . '</p>';
     }

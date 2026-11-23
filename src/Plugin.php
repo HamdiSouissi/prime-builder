@@ -200,12 +200,14 @@ final class Plugin extends AbstractPlugin
             $renderer = new Renderer($registry, $context->app()->get(\Prime\Security\HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, true, $page);
             return '<' . $name . ' class="pb-theme-' . $name . '">' . $renderer->render($layout) . '</' . $name . '>';
         });
-        // Archive data in a shared snapshot may depend on a custom archive path,
-        // a term, or an author. Core has no complete invalidation events for all
-        // of those dependencies, so favour correctness over page caching while
-        // either contextual widget is installed in a theme partial.
+        // Contextual snapshots depend on routes, terms, profiles, media and other
+        // entries. Core has no complete invalidation events for all dependencies,
+        // so favour freshness over page caching while any such widget is installed.
         $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable) use ($partials): mixed {
-            if ($cacheable === true && ($partials->usesWidget('archive_title') || $partials->usesWidget('archive_list'))) {
+            if ($cacheable === true && $partials->usesAnyWidget([
+                'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_featured_image',
+                'entry_info', 'entry_navigation', 'entry_author',
+            ])) {
                 return false;
             }
             return $cacheable;
@@ -358,7 +360,15 @@ final class Plugin extends AbstractPlugin
                 $collect(is_array($layout['elements'] ?? null) ? $layout['elements'] : []);
             }
             $hasMap = $hasMap || isset($types['map']);
-            Assets::register($assets, $types, $registry->all());
+            $definitions = $registry->all();
+            // These widgets are fully resolved in a theme partial; there is no
+            // data-pb-live endpoint for the snapshot and no refresh script needed.
+            foreach (['site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author'] as $type) {
+                if (($definitions[$type]['script'] ?? null) === '/assets/plugins/prime-builder/js/content.js') {
+                    unset($definitions[$type]['script']);
+                }
+            }
+            Assets::register($assets, $types, $definitions);
         });
         $context->hooks()->filter('site.csp', static function (mixed $directives) use (&$hasMap): mixed {
             if (!$hasMap || !is_array($directives)) {

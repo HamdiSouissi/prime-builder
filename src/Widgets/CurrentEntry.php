@@ -115,7 +115,7 @@ final class CurrentEntry
     }
 
     /** @param array<string, mixed> $settings */
-    public static function info(array $settings, ?EntryView $entry, bool $publicCategories): string
+    public static function info(array $settings, ?EntryView $entry, bool $publicCategories, bool $publicAuthor = true, bool $authorArchiveAvailable = true): string
     {
         if ($entry === null) {
             return '';
@@ -128,10 +128,11 @@ final class CurrentEntry
                 $items[] = '<li><span>' . Renderer::escape(t('plugin::prime-builder.ui.entry_info_date')) . '</span> <time datetime="' . Renderer::escape($iso) . '">' . $date . '</time></li>';
             }
         }
-        if (($settings['author'] ?? 'show') === 'show') {
+        if (($settings['author'] ?? 'show') === 'show' && $publicAuthor) {
             $author = $entry->author();
             if ($author['id'] > 0 && $author['name'] !== '') {
-                $items[] = '<li><span>' . Renderer::escape(t('plugin::prime-builder.ui.entry_info_author')) . '</span> <a href="' . $author['url'] . '">' . $author['name'] . '</a></li>';
+                $name = $authorArchiveAvailable ? '<a href="' . $author['url'] . '">' . $author['name'] . '</a>' : $author['name'];
+                $items[] = '<li><span>' . Renderer::escape(t('plugin::prime-builder.ui.entry_info_author')) . '</span> ' . $name . '</li>';
             }
         }
         if (($settings['categories'] ?? 'show') === 'show' && $publicCategories) {

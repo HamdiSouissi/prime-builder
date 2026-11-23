@@ -1069,6 +1069,142 @@ final class IntegrationTest extends TestCase
         $db->enableQueryLog(false);
     }
 
+    public function testEntryWidgetsInThemePartialsUsePublicContextWithoutJavascriptOrStaleProfiles(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec("UPDATE pc_entries SET published_at = '2024-06-01 10:00:00' WHERE id = 1");
+        $pdo->exec("UPDATE pc_users SET display_name = 'Camille & Co', username = 'camille', bio = 'Bio <publique>' WHERE id = 1");
+        $previous = $this->insertGridEntry($pdo, 'post', 'published', 'Avant public', 'avant-public', 1, published: '2024-05-01 10:00:00');
+        $this->insertGridEntry($pdo, 'post', 'published', 'Après public', 'apres-public', 1, published: '2024-07-01 10:00:00');
+        $this->insertGridEntry($pdo, 'post', 'draft', 'Voisin privé', 'voisin-prive', 1, published: '2024-05-15 10:00:00');
+        $pdo->exec("INSERT INTO pc_terms (id, taxonomy, name, slug, parent_id, menu_order, `count`) VALUES (11, 'category', 'Nature & idées', 'nature', 0, 0, 1)");
+        $pdo->exec('INSERT INTO pc_entry_terms (entry_id, term_id, position) VALUES (1, 11, 0)');
+        $media = $app->get(\Prime\Media\MediaRepository::class)->create([
+            'disk_path' => 'entry/theme.png', 'filename' => 'theme.png', 'original_name' => 'theme.png',
+            'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'width' => 600, 'height' => 300, 'alt' => 'Photo de l’article',
+        ]);
+        $entries = $app->get(EntryRepository::class);
+        $entries->setMeta(1, ['_featured_media_id' => $media->id]);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'theme context', ['*'])['token'];
+        $types = ['entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author'];
+        $children = [];
+        foreach ($types as $type) {
+            $children[] = ['id' => $type, 'type' => $type, 'settings' => [], 'styles' => [], 'children' => []];
+        }
+        $layout = ['version' => 1, 'elements' => [[
+            'id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => $children,
+        ]]];
+        $template = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Contenu courant', 'kind' => 'section', 'data' => $layout], $token);
+        self::assertSame(201, $template->status(), $template->body());
+        $templateId = json_decode($template->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $templateId, 'footer' => '', 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $entry = $entries->find(1);
+        self::assertNotNull($entry);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, path: '/blog/article-publie', entry: $entry);
+        $hooks = $app->get(Hooks::class);
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($header);
+        self::assertStringContainsString('>Article publié</h2>', $header);
+        self::assertStringContainsString('>Résumé</p>', $header);
+        self::assertStringContainsString('alt="Photo de l’article"', $header);
+        self::assertStringContainsString('>Nature &amp; idées</a>', $header);
+        self::assertStringContainsString('href="/blog/avant-public" rel="prev"', $header);
+        self::assertStringContainsString('href="/blog/apres-public" rel="next"', $header);
+        self::assertStringContainsString('href="/auteur/camille">Camille &amp; Co</a>', $header);
+        self::assertStringContainsString('Bio &lt;publique&gt;', $header);
+        self::assertStringNotContainsString('Voisin privé', $header);
+        self::assertStringNotContainsString('data-pb-live=', $header);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        foreach ($types as $type) {
+            self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/' . $type . '.css'));
+        }
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+        // An entry layout still needs its live script even when a matching widget
+        // is rendered server-side in the partial.
+        $entryWithLayout = \Prime\Content\Entry::fromRow([
+            'id' => 1, 'type' => 'post', 'status' => 'published', 'title' => 'Article publié',
+            'published_at' => '2024-06-01 10:00:00',
+            'content' => json_encode(['version' => 1, 'blocks' => [['id' => 'layout', 'type' => 'prime-builder/layout', 'data' => $layout]]]),
+        ]);
+        $entryAssets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $entryAssets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entryWithLayout));
+        self::assertSame(1, substr_count($entryAssets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        self::assertSame(false, $cache->isCacheableRequest(Request::create('GET', '/blog/article-publie')));
+
+        // The context is guarded independently of the source of the PageContext.
+        $draft = $entries->find(2);
+        self::assertNotNull($draft);
+        $invalidPages = [
+            new PageContext(type: PageContext::TYPE_ENTRY, entry: $draft),
+            new PageContext(type: PageContext::TYPE_SEARCH, entry: $entry),
+            new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry, httpStatus: 404),
+            PageContext::redirect('/redirection', '/destination'),
+            new PageContext(type: PageContext::TYPE_ENTRY, entry: \Prime\Content\Entry::fromRow(['id' => 99, 'type' => 'post', 'status' => 'published', 'title' => 'Futur privé', 'published_at' => '2999-01-01 00:00:00'])),
+        ];
+        $parent = $this->insertGridEntry($pdo, 'page', 'draft', 'Parent privé', 'parent-prive', 1);
+        $child = $this->insertGridEntry($pdo, 'page', 'published', 'Enfant inaccessible', 'enfant-inaccessible', 1, $parent);
+        $unreachable = $entries->find($child);
+        self::assertNotNull($unreachable);
+        $invalidPages[] = new PageContext(type: PageContext::TYPE_ENTRY, entry: $unreachable);
+        $cycle = $this->insertGridEntry($pdo, 'page', 'published', 'Page cyclique', 'page-cyclique', 1);
+        $pdo->exec('UPDATE pc_entries SET parent_id = ' . $cycle . ' WHERE id = ' . $cycle);
+        $cyclic = $entries->find($cycle);
+        self::assertNotNull($cyclic);
+        $invalidPages[] = new PageContext(type: PageContext::TYPE_ENTRY, entry: $cyclic);
+        $futureParent = $this->insertGridEntry($pdo, 'page', 'published', 'Parent futur', 'parent-futur', 1, published: '2999-01-01 00:00:00');
+        $futureChild = $this->insertGridEntry($pdo, 'page', 'published', 'Page sous parent futur', 'page-sous-parent-futur', 1, $futureParent);
+        $unpublishedParent = $entries->find($futureChild);
+        self::assertNotNull($unpublishedParent);
+        $invalidPages[] = new PageContext(type: PageContext::TYPE_ENTRY, entry: $unpublishedParent);
+        $app->get(ContentTypeRegistry::class)->register(new ContentType(name: 'vault', labels: ['singular' => 'Privé'], public: false));
+        $invalidPages[] = new PageContext(type: PageContext::TYPE_ENTRY, entry: \Prime\Content\Entry::fromRow(['id' => 100, 'type' => 'vault', 'status' => 'published', 'title' => 'Type privé']));
+        foreach ($invalidPages as $invalid) {
+            $rendered = $hooks->apply('site.partial', null, 'header', $invalid, []);
+            self::assertIsString($rendered);
+            self::assertStringNotContainsString('pb-entry-title__text', $rendered);
+            self::assertStringNotContainsString('Brouillon admin', $rendered);
+            self::assertStringNotContainsString('Enfant inaccessible', $rendered);
+            self::assertStringNotContainsString('Page cyclique', $rendered);
+            self::assertStringNotContainsString('Page sous parent futur', $rendered);
+            self::assertStringNotContainsString('Futur privé', $rendered);
+            self::assertStringNotContainsString('Type privé', $rendered);
+        }
+
+        $pdo->exec("UPDATE pc_entries SET status = 'draft', title = 'Retiré privé' WHERE id = " . $previous);
+        $pdo->exec("UPDATE pc_users SET status = 'disabled', bio = 'Bio devenue privée' WHERE id = 1");
+        $app->get(TaxonomyRegistry::class)->register(new Taxonomy(name: 'category', labels: ['singular' => 'Catégorie'], contentTypes: ['post'], public: false));
+        $fresh = $entries->find(1);
+        self::assertNotNull($fresh);
+        $updated = $hooks->apply('site.partial', null, 'header', new PageContext(type: PageContext::TYPE_ENTRY, entry: $fresh), []);
+        self::assertIsString($updated);
+        self::assertStringNotContainsString('Avant public', $updated);
+        self::assertStringNotContainsString('Retiré privé', $updated);
+        self::assertStringNotContainsString('Bio devenue privée', $updated);
+        self::assertStringNotContainsString('Camille &amp; Co', $updated);
+        self::assertStringNotContainsString('pb-entry-author__card', $updated);
+        self::assertStringNotContainsString('Nature &amp; idées', $updated);
+        self::assertStringContainsString('Après public', $updated);
+        $settings = $app->get(Settings::class);
+        $stored = json_encode($settings->get('plugin.prime-builder.theme_partials'));
+        self::assertIsString($stored);
+        self::assertStringNotContainsString('Camille', $stored);
+        self::assertStringNotContainsString('Avant public', $stored);
+        $settings->set('plugin.prime-builder.theme_partials', []);
+        self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/blog/article-publie')));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        foreach ($types as $type) {
+            self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $assets->renderStyles());
+        }
+    }
+
     public function testEntryWidgetsUseCoreMetadataRefreshAndLoadConditionalAssets(): void
     {
         $app = $this->activated(null);
@@ -1107,8 +1243,9 @@ final class IntegrationTest extends TestCase
         self::assertNotNull($entry);
         self::assertStringContainsString('data-pb-live="/api/prime-builder/v1/documents/1/live"', $entry->contentHtml);
         self::assertStringContainsString('Article publié', $entry->contentHtml);
-        // A taxonomy can cease being public after this HTML has been stored.
+        // Taxonomy visibility and the author's account can change after saving.
         self::assertStringNotContainsString('Nature &amp; idées', $entry->contentHtml);
+        self::assertStringNotContainsString('Admin Prime', $entry->contentHtml);
         $assets = new ThemeAssetRegistry();
         $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
         foreach (['entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info'] as $type) {
@@ -1234,6 +1371,16 @@ final class IntegrationTest extends TestCase
         $author = json_decode($collision->body(), true)['data']['widgets']['author'];
         self::assertStringContainsString('Camille', $author);
         self::assertStringNotContainsString('href=', $author);
+        $current = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($current);
+        $info = $app->get(Content::class)->entryWidget('entry_info', ['date' => 'hide', 'categories' => 'hide'], $current, true);
+        self::assertStringContainsString('Camille', $info);
+        self::assertStringNotContainsString('href=', $info);
+        self::assertSame('', $app->get(Content::class)->current(['source' => 'author'], $current));
+        self::assertStringContainsString('Camille', $app->get(Content::class)->current(['source' => 'author'], $current, true));
+        $pdo->exec("UPDATE pc_users SET status = 'disabled' WHERE id = 1");
+        self::assertSame('', $app->get(Content::class)->current(['source' => 'author'], $current, true));
+        self::assertSame('', $app->get(Content::class)->entryWidget('entry_info', ['date' => 'hide', 'categories' => 'hide'], $current, true));
     }
 
     public function testEntryNavigationSkipsPublishedPagesWithPrivateOrCyclicAncestors(): void
@@ -1281,6 +1428,8 @@ final class IntegrationTest extends TestCase
             ['id' => 'excerpt', 'type' => 'entry_excerpt', 'settings' => [], 'styles' => [], 'children' => []],
             ['id' => 'image', 'type' => 'entry_featured_image', 'settings' => [], 'styles' => [], 'children' => []],
             ['id' => 'info', 'type' => 'entry_info', 'settings' => [], 'styles' => [], 'children' => []],
+            ['id' => 'legacy_title', 'type' => 'current_content', 'settings' => ['source' => 'title'], 'styles' => [], 'children' => []],
+            ['id' => 'legacy_excerpt', 'type' => 'current_content', 'settings' => ['source' => 'excerpt'], 'styles' => [], 'children' => []],
         ];
         $initial = $this->send($app, 'PATCH', '/api/v1/content/post/2', [
             'status' => 'published', 'title' => 'Titre public', 'excerpt' => 'Résumé public', 'featured_media_id' => $public->id, 'content' => $document,
@@ -1297,6 +1446,8 @@ final class IntegrationTest extends TestCase
         $widgets = json_decode($live->body(), true)['data']['widgets'];
         self::assertStringContainsString('Titre public', $widgets['title']);
         self::assertStringContainsString('Résumé public', $widgets['excerpt']);
+        self::assertStringContainsString('Titre public', $widgets['legacy_title']);
+        self::assertStringContainsString('Résumé public', $widgets['legacy_excerpt']);
         self::assertStringContainsString('public.png', $widgets['image']);
         self::assertStringNotContainsString('secret.png', $widgets['image']);
 
@@ -1306,6 +1457,7 @@ final class IntegrationTest extends TestCase
         $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/2/render', ['data' => $document['blocks'][0]['data']], $token);
         self::assertSame(200, $preview->status());
         self::assertStringContainsString('Titre privé', $preview->body());
+        self::assertStringContainsString('Résumé privé', $preview->body());
         $republished = $this->send($app, 'PATCH', '/api/v1/content/post/2', ['status' => 'published', 'title' => 'Titre republié', 'excerpt' => 'Résumé republié', 'featured_media_id' => $public->id], $token);
         self::assertSame(200, $republished->status(), $republished->body());
         $entry = $entries->find(2);
@@ -1318,14 +1470,19 @@ final class IntegrationTest extends TestCase
         $widgets = json_decode($live->body(), true)['data']['widgets'];
         self::assertStringContainsString('Titre republié', $widgets['title']);
         self::assertStringContainsString('Résumé republié', $widgets['excerpt']);
+        self::assertStringContainsString('Titre republié', $widgets['legacy_title']);
+        self::assertStringContainsString('Résumé republié', $widgets['legacy_excerpt']);
         self::assertStringContainsString('public.png', $widgets['image']);
         $future = \Prime\Content\Entry::fromRow(['id' => 10, 'type' => 'post', 'status' => 'published', 'title' => 'À venir', 'published_at' => '2999-01-01 00:00:00']);
         $provider = $app->get(Content::class);
         self::assertSame('', $provider->entryWidget('entry_title', [], $future, false));
         self::assertStringContainsString('À venir', $provider->entryWidget('entry_title', [], $future, true));
+        self::assertSame('', $provider->current(['source' => 'title'], $future));
+        self::assertStringContainsString('À venir', $provider->current(['source' => 'title'], $future, true));
         $app->get(ContentTypeRegistry::class)->register(new ContentType(name: 'vault', labels: ['singular' => 'Privé'], public: false));
         $privateType = \Prime\Content\Entry::fromRow(['id' => 11, 'type' => 'vault', 'status' => 'published', 'title' => 'Type privé']);
         self::assertSame('', $provider->entryWidget('entry_title', [], $privateType, false));
+        self::assertSame('', $provider->current(['source' => 'title'], $privateType));
     }
 
     public function testEntryExcerptFallsBackToBuilderTextWithoutRecursionAcrossSaves(): void
@@ -2480,7 +2637,7 @@ final class IntegrationTest extends TestCase
         $fields['header'] = json_decode($dynamicTemplate->body(), true)['data']['id'];
         self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
-        foreach (['navigation', 'share_buttons', 'breadcrumbs', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author'] as $type) {
+        foreach (['navigation', 'share_buttons', 'breadcrumbs'] as $type) {
             $unsupported = ['version' => 1, 'elements' => [['id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
                 ['id' => 'dynamic', 'type' => $type, 'settings' => [], 'styles' => [], 'children' => []],
             ]]]];
