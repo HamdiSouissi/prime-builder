@@ -1334,6 +1334,11 @@ final class DocumentTest extends TestCase
         $node['settings'] = ['message' => str_repeat('a', 201)];
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
         self::assertStringContainsString(Renderer::escape(t('plugin::prime-builder.ui.share_none')), ShareButtons::render(['facebook' => 'hide', 'linkedin' => 'hide', 'x' => 'hide', 'email' => 'hide'], 'https://example.test/'));
+        $server = ShareButtons::render([], 'https://example.test/canonical?secret=token#fragment', false);
+        self::assertStringContainsString('u=https%3A%2F%2Fexample.test%2Fcanonical', $server);
+        self::assertStringNotContainsString('data-pb-share ', $server);
+        self::assertStringNotContainsString('data-pb-share-message=', $server);
+        self::assertStringNotContainsString('secret', $server);
         $definition = (new Registry())->all()['share_buttons'];
         self::assertSame('pro', $definition['category']);
         self::assertSame('/assets/plugins/prime-builder/css/widgets/share_buttons.css', $definition['style']);

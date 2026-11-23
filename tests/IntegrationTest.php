@@ -1994,6 +1994,123 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/share_buttons.js', $assets->renderScripts());
     }
 
+    public function testShareButtonsInThemePartsUsePublicCanonicalContextWithoutClientRewrite(): void
+    {
+        $app = $this->activated('admin');
+        $hooks = $app->get(Hooks::class);
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $request = Request::create('GET', '/autre-page');
+        self::assertSame(true, $cache->isCacheableRequest($request));
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'theme share', ['*'])['token'];
+        $layout = ['version' => 1, 'elements' => [[
+            'id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                ['id' => 'share1', 'type' => 'share_buttons', 'settings' => ['label' => 'Partager le thème', 'message' => 'Bonjour & merci', 'linkedin' => 'hide'], 'styles' => [], 'children' => []],
+            ],
+        ]]];
+        $created = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Partage du thème', 'kind' => 'section', 'data' => $layout], $token);
+        self::assertSame(201, $created->status(), $created->body());
+        $template = json_decode($created->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $template, 'footer' => $template, 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        self::assertSame(false, $cache->isCacheableRequest($request));
+
+        // Archive/search contexts have no entry. Their paths are resolved by the
+        // CMS, but query strings and fragments must not be shared.
+        $page = new PageContext(type: PageContext::TYPE_SEARCH, path: '/recherche?secret=token#fragment', searchQuery: 'secret');
+        $expected = rawurlencode($app->get(UrlGenerator::class)->absolute('/recherche'));
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        $footer = $hooks->apply('site.partial', null, 'footer', $page, []);
+        self::assertIsString($header);
+        self::assertIsString($footer);
+        foreach ([$header, $footer] as $html) {
+            self::assertStringContainsString('aria-label="Partager le thème"', $html);
+            self::assertStringContainsString('facebook.com/sharer/sharer.php?u=' . $expected, $html);
+            self::assertStringContainsString('subject=Bonjour%20%26%20merci', $html);
+            self::assertStringNotContainsString('linkedin.com', $html);
+            self::assertStringNotContainsString('secret', $html);
+            self::assertStringNotContainsString('fragment', $html);
+            self::assertStringNotContainsString('data-pb-share ', $html);
+            self::assertStringNotContainsString('data-pb-live=', $html);
+        }
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/share_buttons.css'));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/share_buttons.js', $assets->renderScripts());
+
+        $service = $app->get(\Prime\Content\EntryService::class);
+        $repository = $app->get(EntryRepository::class);
+        $service->update(1, ['seo' => ['canonical' => 'https://canonical.example/original?private_token=secret#fragment']], $this->user($app, 1));
+        $entry = $repository->find(1);
+        self::assertNotNull($entry);
+        $context = new PageContext(type: PageContext::TYPE_ENTRY, path: '/blog/article-publie', entry: $entry);
+        $rendered = $hooks->apply('site.partial', null, 'header', $context, []);
+        self::assertIsString($rendered);
+        self::assertStringContainsString('u=https%3A%2F%2Fcanonical.example%2Foriginal', $rendered);
+        self::assertStringNotContainsString('secret', $rendered);
+        self::assertStringNotContainsString('fragment', $rendered);
+        $service->update(1, ['seo' => ['canonical' => 'https://canonical.example/updated']], $this->user($app, 1));
+        $updated = $repository->find(1);
+        self::assertNotNull($updated);
+        $changed = $hooks->apply('site.partial', null, 'footer', new PageContext(type: PageContext::TYPE_ENTRY, entry: $updated), []);
+        self::assertIsString($changed);
+        self::assertStringContainsString('u=https%3A%2F%2Fcanonical.example%2Fupdated', $changed);
+        self::assertStringNotContainsString('original', $changed);
+        $service->update(1, ['seo' => ['canonical' => 'https://user:password@canonical.example/hidden']], $this->user($app, 1));
+        $unsafe = $repository->find(1);
+        self::assertNotNull($unsafe);
+        $unsafeOutput = $hooks->apply('site.partial', null, 'header', new PageContext(type: PageContext::TYPE_ENTRY, entry: $unsafe), []);
+        self::assertIsString($unsafeOutput);
+        self::assertStringNotContainsString('<a ', $unsafeOutput);
+        self::assertStringNotContainsString('password', $unsafeOutput);
+
+        // No sharing from previews, drafts, errors, plugin contexts, or children
+        // beneath a private ancestor, even if a caller constructs such a context.
+        $draft = $repository->find(2);
+        self::assertNotNull($draft);
+        $pdo = $this->db($app)->pdo();
+        $parentId = $this->insertGridEntry($pdo, 'page', 'draft', 'Parent caché', 'parent-cache', 1);
+        $childId = $this->insertGridEntry($pdo, 'page', 'published', 'Enfant', 'enfant', 1, $parentId);
+        $child = $repository->find($childId);
+        self::assertNotNull($child);
+        $contexts = [
+            $context->withPreview(),
+            $context->withPreview(false, true),
+            new PageContext(type: PageContext::TYPE_ENTRY, entry: $draft),
+            new PageContext(type: PageContext::TYPE_ENTRY, entry: $child),
+            PageContext::notFound('/introuvable'),
+            PageContext::plugin('/plugin-prive', 'Privé', ''),
+        ];
+        foreach ($contexts as $invalid) {
+            $html = $hooks->apply('site.partial', null, 'header', $invalid, []);
+            self::assertIsString($html);
+            self::assertStringNotContainsString('<a ', $html);
+            self::assertStringNotContainsString('parent-cache', $html);
+            self::assertStringContainsString('pb-share-message', $html);
+        }
+
+        // A saved-entry share still loads its own refresh script, but the theme
+        // markup lacks the opt-in attribute and must not be rewritten by it.
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'share1', 'type' => 'share_buttons', 'settings' => [], 'styles' => [], 'children' => [],
+        ]];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $repository->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('data-pb-share data-pb-share-message=', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/share_buttons.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/share_buttons.js'));
+        $app->get(Settings::class)->set('plugin.prime-builder.theme_partials', []);
+        self::assertSame(true, $cache->isCacheableRequest($request));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/share_buttons.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/share_buttons.js', $assets->renderScripts());
+    }
+
     public function testTableOfContentsPersistsItsTargetsAndOnlyLoadsItsStyles(): void
     {
         $app = $this->activated('admin');
@@ -3174,7 +3291,7 @@ final class IntegrationTest extends TestCase
         $fields['header'] = json_decode($dynamicTemplate->body(), true)['data']['id'];
         self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
-        foreach (['share_buttons'] as $type) {
+        foreach (['theme_zone', 'current_content'] as $type) {
             $unsupported = ['version' => 1, 'elements' => [['id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
                 ['id' => 'dynamic', 'type' => $type, 'settings' => [], 'styles' => [], 'children' => []],
             ]]]];

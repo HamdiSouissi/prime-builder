@@ -209,7 +209,7 @@ final class Plugin extends AbstractPlugin
         $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable) use ($partials): mixed {
             if ($cacheable === true && $partials->usesAnyWidget([
                 'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image',
-                'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'navigation',
+                'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'navigation', 'share_buttons',
             ])) {
                 return false;
             }
@@ -370,6 +370,9 @@ final class Plugin extends AbstractPlugin
                 if (($definitions[$type]['script'] ?? null) === '/assets/plugins/prime-builder/js/content.js') {
                     unset($definitions[$type]['script']);
                 }
+            }
+            if (($definitions['share_buttons']['script'] ?? null) === '/assets/plugins/prime-builder/js/share_buttons.js') {
+                unset($definitions['share_buttons']['script']);
             }
             Assets::register($assets, $types, $definitions);
         });

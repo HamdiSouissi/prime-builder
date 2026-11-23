@@ -8,7 +8,7 @@ namespace PrimeBuilder\Widgets;
 final class ShareButtons
 {
     /** @param array<string, mixed> $settings */
-    public static function render(array $settings, string $url): string
+    public static function render(array $settings, string $url, bool $refresh = true): string
     {
         $parts = parse_url($url);
         if (filter_var($url, FILTER_VALIDATE_URL) === false || !is_array($parts)
@@ -43,8 +43,11 @@ final class ShareButtons
         if ($items === '') {
             return '<p class="pb-share-message">' . Renderer::escape(t('plugin::prime-builder.ui.share_none')) . '</p>';
         }
-        return '<nav class="pb-share" aria-label="' . Renderer::escape($label) . '" data-pb-share data-pb-share-message="'
-            . Renderer::escape($message) . '"><ul class="pb-share__list">' . $items . '</ul></nav>';
+        // Theme parts use a current server-resolved URL and must not be rewritten
+        // by the client script that refreshes a saved entry's fallback.
+        $refreshAttributes = $refresh ? ' data-pb-share data-pb-share-message="' . Renderer::escape($message) . '"' : '';
+        return '<nav class="pb-share" aria-label="' . Renderer::escape($label) . '"' . $refreshAttributes
+            . '><ul class="pb-share__list">' . $items . '</ul></nav>';
     }
 
     private static function plain(mixed $value): string

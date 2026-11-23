@@ -739,6 +739,23 @@ final class Content
         return ShareButtons::render($settings, $url);
     }
 
+    /**
+     * Theme parts have the real request context. Use the CMS canonical URL but
+     * never expose a preview, an inaccessible entry, or an unsupported context.
+     * Query strings and fragments are stripped by ShareButtons::render().
+     *
+     * @param array<string, mixed> $settings
+     */
+    public function shareButtonsInPage(array $settings, PageContext $page): string
+    {
+        $available = !$page->isPreview && !$page->isCustomizerPreview && $page->httpStatus === 200 && !$page->isRedirect();
+        if ($available) {
+            $available = $page->entry !== null ? $this->publicPageEntry($page) !== null : Archive::supports($page);
+        }
+        $url = $available && $this->seo !== null ? $this->seo->canonicalUrl($page) : '';
+        return ShareButtons::render($settings, $url, false);
+    }
+
     /** @param array<string, mixed> $settings */
     public function themeZone(array $settings, bool $live): string
     {

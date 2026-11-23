@@ -257,7 +257,9 @@ final class Renderer
             'archive_title', 'archive_list' => $this->pageContext !== null
                 ? ($this->content?->archiveWidget($type, $settings, $this->pageContext) ?? '')
                 : ($this->live && $this->trustedPreview ? '<p class="pb-archive-preview">' . self::escape(t('plugin::prime-builder.ui.archive_preview')) . '</p>' : ''),
-            'share_buttons' => $this->content?->shareButtons($settings, $this->entry) ?? ShareButtons::render($settings, ''),
+            'share_buttons' => $this->pageContext !== null
+                ? ($this->content?->shareButtonsInPage($settings, $this->pageContext) ?? ShareButtons::render($settings, '', false))
+                : ($this->content?->shareButtons($settings, $this->entry) ?? ShareButtons::render($settings, '')),
             'table_of_contents' => ($this->tableOfContents ?? new TableOfContents([]))->render($settings),
             'theme_zone' => $this->content?->themeZone($settings, $this->live) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>',
             'form' => $this->renderForm($settings, $id),

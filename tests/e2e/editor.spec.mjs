@@ -3796,6 +3796,183 @@ test('share buttons use ordinary private-by-default links on desktop and mobile'
   expect(externalRequests).toHaveLength(1);
 });
 
+test('theme share buttons use the public canonical context without scripts or tracking requests', async ({ page, browser }) => {
+  test.setTimeout(150_000);
+  page.setDefaultTimeout(12_000);
+  await login(page);
+  let csrf = null, templateId = null, entryId = null, originalTheme = null, originalCache = null;
+  const externalRequests = [];
+  const recordExternal = request => {
+    if (/^https:\/\/(?:www\.)?(?:facebook\.com|linkedin\.com|twitter\.com)\//.test(request.url())) externalRequests.push(request.url());
+  };
+  page.on('request', recordExternal);
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, 'X-CSRF-Token': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  const target = async link => new URL(await link.getAttribute('href')).searchParams.get('u');
+  try {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    const currentSettings = await api('/api/v1/settings', 'GET');
+    expect(currentSettings.status, currentSettings.body).toBe(200);
+    originalCache = JSON.parse(currentSettings.body).data['cache.page_enabled'];
+    const entryLayout = { version: 1, elements: [
+      { id: 'share1', type: 'share_buttons', settings: { label: 'Partage de la page' }, styles: {}, children: [] },
+    ] };
+    const content = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: entryLayout }] };
+    const entry = await api('/api/v1/content/page', 'POST', {
+      title: 'Partage du thème', slug: 'pb-partage-theme', status: 'published', published_at: '2021-01-01 10:00:00',
+      seo: { canonical: 'https://example.test/canonique?private_token=secret#fragment' }, content,
+    });
+    expect(entry.status, entry.body).toBe(201);
+    entryId = JSON.parse(entry.body).data.id;
+    // Core creates without an existing Entry in the renderer; a subsequent save
+    // creates the normal static, refreshable entry fallback.
+    let result = await api(`/api/v1/content/page/${entryId}`, 'PATCH', { content });
+    expect(result.status, result.body).toBe(200);
+    const layout = { version: 1, elements: [
+      { id: 'share1', type: 'share_buttons', settings: { label: 'Partager le thème', message: 'Bonjour & merci', linkedin: 'hide' }, styles: {}, children: [] },
+    ] };
+    const template = await api('/api/prime-builder/v1/templates', 'POST', { name: 'Partage du thème', kind: 'section', data: layout });
+    expect(template.status, template.body).toBe(201);
+    templateId = JSON.parse(template.body).data.id;
+    await page.goto('/admin/prime-builder/theme');
+    originalTheme = {
+      header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
+      footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
+      exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
+    };
+    await page.getByLabel('En-tête', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Contenus exclus', { exact: true }).fill('');
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await expect(page.getByLabel('En-tête', { exact: true })).toHaveValue(templateId);
+    result = await api('/api/v1/settings', 'PATCH', { 'cache.page_enabled': true });
+    expect(result.status, result.body).toBe(200);
+
+    await page.goto('/blog/actualite-publique');
+    const header = page.locator('header.pb-theme-header');
+    const footer = page.locator('footer.pb-theme-footer');
+    const headerShare = header.getByRole('navigation', { name: 'Partager le thème' });
+    const facebook = headerShare.getByRole('link', { name: 'Partager sur Facebook' });
+    const x = headerShare.getByRole('link', { name: 'Partager sur X' });
+    const email = headerShare.getByRole('link', { name: 'Partager par e-mail' });
+    expect(await target(facebook)).toBe(new URL('/blog/actualite-publique', page.url()).href);
+    await expect(headerShare.getByRole('link', { name: 'Partager sur LinkedIn' })).toHaveCount(0);
+    await expect(footer.getByRole('navigation', { name: 'Partager le thème' })).toBeVisible();
+    await expect(page.locator('link[href*="/css/widgets/share_buttons.css"]')).toHaveCount(1);
+    await expect(page.locator('script[src*="/js/share_buttons.js"]')).toHaveCount(0);
+    await facebook.focus();
+    await page.keyboard.press('Tab');
+    await expect(x).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(email).toBeFocused();
+    await expect(facebook).toHaveAttribute('rel', 'noreferrer');
+    await expectAccessible(page);
+    await header.screenshot({ path: test.info().outputPath('share-partial-desktop.jpg'), quality: 20 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await header.screenshot({ path: test.info().outputPath('share-partial-mobile.jpg'), quality: 20 });
+    expect(externalRequests).toEqual([]);
+
+    // When an entry also loads the refresh script, it must not replace the
+    // canonical URL already resolved by the server in the two theme slots.
+    await page.goto('/pb-partage-theme?private_token=browser-secret');
+    const entryFacebook = page.getByRole('navigation', { name: 'Partage de la page' }).getByRole('link', { name: 'Partager sur Facebook' });
+    await expect(page.locator('script[src*="/js/share_buttons.js"]')).toHaveCount(1);
+    await expect.poll(() => target(entryFacebook)).toBe(new URL('/pb-partage-theme', page.url()).href);
+    expect(await target(facebook)).toBe('https://example.test/canonique');
+    expect(await target(footer.getByRole('link', { name: 'Partager sur Facebook' }))).toBe('https://example.test/canonique');
+    expect(externalRequests).toEqual([]);
+
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    noJs.on('request', recordExternal);
+    try {
+      const publicPage = await noJs.newPage();
+      let response = await publicPage.goto('/pb-partage-theme?private_token=secret');
+      expect(response.headers()['x-prime-cache']).toBeUndefined();
+      response = await publicPage.reload();
+      expect(response.headers()['x-prime-cache']).toBeUndefined();
+      const publicHeader = publicPage.locator('header.pb-theme-header');
+      const publicFooter = publicPage.locator('footer.pb-theme-footer');
+      const publicFacebook = publicHeader.getByRole('link', { name: 'Partager sur Facebook' });
+      expect(await target(publicFacebook)).toBe('https://example.test/canonique');
+      expect(await target(publicFooter.getByRole('link', { name: 'Partager sur Facebook' }))).toBe('https://example.test/canonique');
+      expect(await publicFacebook.getAttribute('href')).not.toMatch(/secret|private_token|fragment/);
+      await publicFacebook.focus();
+      await publicPage.keyboard.press('Tab');
+      await expect(publicHeader.getByRole('link', { name: 'Partager sur X' })).toBeFocused();
+      result = await api(`/api/v1/content/page/${entryId}`, 'PATCH', { seo: { canonical: 'https://example.test/nouveau?secret=token' } });
+      expect(result.status, result.body).toBe(200);
+      await publicPage.reload();
+      expect(await target(publicFacebook)).toBe('https://example.test/nouveau');
+      expect(await target(publicFooter.getByRole('link', { name: 'Partager sur Facebook' }))).toBe('https://example.test/nouveau');
+      result = await api(`/api/v1/content/page/${entryId}`, 'PATCH', { slug: 'pb-partage-renomme', seo: { canonical: '' } });
+      expect(result.status, result.body).toBe(200);
+      await publicPage.goto('/pb-partage-renomme?private_token=secret');
+      expect(await target(publicFacebook)).toBe(new URL('/pb-partage-renomme', publicPage.url()).href);
+      await publicPage.goto('/recherche?q=terme-confidentiel');
+      expect(await target(publicFacebook)).toBe(new URL('/recherche', publicPage.url()).href);
+      expect(await publicFacebook.getAttribute('href')).not.toContain('terme-confidentiel');
+      await publicPage.goto('/page-introuvable-partage');
+      await expect(publicHeader.locator('.pb-share-message')).toBeVisible();
+      await expect(publicHeader.getByRole('link', { name: 'Partager sur Facebook' })).toHaveCount(0);
+      expect(externalRequests).toEqual([]);
+      await publicPage.goto('/pb-partage-renomme?private_token=secret');
+      await publicPage.route('https://www.facebook.com/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: 'Partage intercepté' }));
+      await publicFacebook.focus();
+      await Promise.all([
+        publicPage.waitForURL(/^https:\/\/www\.facebook\.com\/sharer\//),
+        publicPage.keyboard.press('Enter'),
+      ]);
+      expect(externalRequests).toHaveLength(1);
+      expect(new URL(externalRequests[0]).searchParams.get('u')).toBe(new URL('/pb-partage-renomme', page.url()).href);
+    } finally { await noJs.close(); }
+    expect(externalRequests).toHaveLength(1);
+    result = await api(`/api/v1/content/page/${entryId}`, 'PATCH', { status: 'draft' });
+    expect(result.status, result.body).toBe(200);
+    for (const preview of [`/admin/content/page/${entryId}/preview?private_token=secret`, `/?preview=1&entry_id=${entryId}&private_token=secret`]) {
+      await page.goto(preview);
+      await expect(header.locator('.pb-share-message')).toBeVisible();
+      await expect(footer.locator('.pb-share-message')).toBeVisible();
+      await expect(header.getByRole('link', { name: 'Partager sur Facebook' })).toHaveCount(0);
+      await expect(footer.getByRole('link', { name: 'Partager sur Facebook' })).toHaveCount(0);
+    }
+    expect(externalRequests).toHaveLength(1);
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (originalCache !== null) {
+        const restored = await api('/api/v1/settings', 'PATCH', { 'cache.page_enabled': originalCache });
+        expect(restored.status, restored.body).toBe(200);
+      }
+      if (originalTheme) {
+        await page.goto('/admin/prime-builder/theme');
+        await page.getByLabel('En-tête', { exact: true }).selectOption(originalTheme.header);
+        await page.getByLabel('Pied de page', { exact: true }).selectOption(originalTheme.footer);
+        await page.getByLabel('Contenus exclus', { exact: true }).fill(originalTheme.exclude);
+        await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+      }
+      if (templateId) {
+        const deleted = await api(`/api/prime-builder/v1/templates/${templateId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(200);
+      }
+      if (entryId) {
+        const trashed = await api(`/api/v1/content/page/${entryId}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/page/${entryId}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+    } finally { page.off('dialog', leave); page.off('request', recordExternal); }
+  }
+});
+
 test('navigation uses CMS menus with keyboard disclosures on desktop and mobile', async ({ page, browser }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
