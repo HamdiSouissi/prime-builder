@@ -416,8 +416,10 @@ final class Documents
         if (!$entry instanceof Entry) {
             return ApiError::response('not_found', 404, $request);
         }
-        $type = $this->plugin->app()->get(ContentTypeRegistry::class)->get($entry->type);
-        $public = $type !== null && $type->public && \Prime\Site\UrlResolver::isPubliclyVisible($entry);
+        $content = $this->plugin->app()->get(Content::class);
+        // An individually published page may still be unreachable because a
+        // parent is private, missing or cyclic. Treat it like a private entry.
+        $public = $content->publiclyAccessibleEntry($entry);
         $apiUser = $request->attribute('api.user');
         $user = $apiUser instanceof User ? $apiUser : $this->plugin->app()->get(Auth::class)->user($request);
         if (!$public && $this->entry($entry->id, $user) === null) {
@@ -434,7 +436,7 @@ final class Documents
         if ($result['errors'] !== []) {
             return ApiError::response('not_found', 404, $request);
         }
-        $renderer = new Renderer($registry, $sanitizer, $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals);
+        $renderer = new Renderer($registry, $sanitizer, $this->plugin->logger(), $content, $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals);
         $query = $request->query();
         return Response::json(['data' => ['widgets' => $renderer->liveWidgets($result['data'], is_array($query) ? $query : [])]])
             ->withHeader('Cache-Control', 'no-store, private')

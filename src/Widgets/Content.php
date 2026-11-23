@@ -264,10 +264,19 @@ final class Content
      *
      * @param array<string, mixed> $settings
      */
-    public function breadcrumbs(array $settings, ?Entry $entry, bool $live, HtmlSanitizer $sanitizer): string
+    public function breadcrumbs(array $settings, ?Entry $entry, bool $live, HtmlSanitizer $sanitizer, bool $trustedPreview = false): string
     {
         if (!$live || $this->seo === null || $entry === null) {
             return Breadcrumbs::fallback($settings);
+        }
+        // An authenticated editor may preview its own draft, but the public live
+        // endpoint must not expose a published child beneath a private ancestor.
+        if (!$trustedPreview && ($this->types->get($entry->type)?->public !== true || !UrlResolver::isPubliclyVisible($entry))) {
+            return '';
+        }
+        $parents = $entry->type === 'page' ? $this->breadcrumbParents($entry) : [];
+        if ($parents === null) {
+            return '';
         }
         $path = $this->urls->entryUrl($entry);
         $type = PageContext::TYPE_ENTRY;
@@ -277,12 +286,94 @@ final class Content
             $type = PageContext::TYPE_BLOG;
         }
         $page = new PageContext(type: $type, path: $path, entry: $entry, contentType: $this->types->get($entry->type));
+        return $this->breadcrumbMarkup($settings, $page, $parents, $sanitizer);
+    }
+
+    /**
+     * Render against the actual public page in a theme part, without JavaScript.
+     *
+     * @param array<string, mixed> $settings
+     */
+    public function breadcrumbsInPage(array $settings, ?PageContext $page, HtmlSanitizer $sanitizer): string
+    {
+        if ($this->seo === null || $page === null || $page->httpStatus !== 200 || $page->isRedirect()) {
+            return '';
+        }
+        $entry = $page->entry;
+        if ($entry !== null) {
+            if (!in_array($page->type, [PageContext::TYPE_ENTRY, PageContext::TYPE_FRONT, PageContext::TYPE_BLOG], true)
+                || $this->types->get($entry->type)?->public !== true || !UrlResolver::isPubliclyVisible($entry)) {
+                return '';
+            }
+        } elseif (!Archive::supports($page)) {
+            return '';
+        }
+        $parents = $entry?->type === 'page' ? $this->breadcrumbParents($entry) : [];
+        if ($parents === null) {
+            return '';
+        }
+        return $this->breadcrumbMarkup($settings, $page, $parents, $sanitizer);
+    }
+
+    /**
+     * Follow at most the same 11 ancestors as the public 12-segment page route.
+     * A missing, private, cyclic or too-deep chain must not disclose any slug.
+     *
+     * @return list<Entry>|null Root-first parents, or null for an unsafe chain.
+     */
+    private function breadcrumbParents(Entry $entry): ?array
+    {
+        $parents = [];
+        $seen = [$entry->id => true];
+        $id = $entry->parentId;
+        while ($id > 0 && count($parents) < 11 && !isset($seen[$id])) {
+            $seen[$id] = true;
+            $parent = $this->entries?->find($id, withRelations: false);
+            if ($parent === null || $parent->type !== 'page' || !UrlResolver::isPubliclyVisible($parent)) {
+                return null;
+            }
+            $parents[] = $parent;
+            $id = $parent->parentId;
+        }
+        if ($id !== 0) {
+            return null;
+        }
+        // UrlGenerator keeps an in-request path cache: replace old ancestor data
+        // after checking visibility, including after an edit in the same request.
+        $this->urls->primePageCache(array_merge([$entry], $parents));
+        return array_reverse($parents);
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     * @param list<Entry> $parents
+     */
+    private function breadcrumbMarkup(array $settings, PageContext $page, array $parents, HtmlSanitizer $sanitizer): string
+    {
+        if ($this->seo === null) {
+            return '';
+        }
+        // Validate and prime the blog path before the core generates its trail.
+        // Otherwise UrlGenerator's in-request cache can retain an old slug.
+        $isPost = $page->isEntry() && $page->entry?->type === 'post';
+        $publicBlog = !$isPost || $this->publicPostsPage();
         $crumbs = $this->seo->breadcrumbs($page);
         // Core's blogUrl() does not check whether the configured posts page (or a
         // parent in its path) is still public. Never expose that path in a live
         // widget when it is private: /blog is the core's public listing route.
-        if ($page->isEntry() && $page->entry?->type === 'post' && isset($crumbs[1]) && !$this->publicPostsPage()) {
+        if ($isPost && isset($crumbs[1]) && !$publicBlog) {
             $crumbs[1]['url'] = '/blog';
+        }
+        if ($parents !== [] && ($page->isEntry() || $page->isBlog()) && count($crumbs) >= 2) {
+            $ancestors = [];
+            foreach ($parents as $parent) {
+                $url = $this->urls->entryUrl($parent);
+                // The core already starts the trail with the home page.
+                if ($url !== '/') {
+                    $ancestors[] = ['label' => $parent->title, 'url' => $url];
+                }
+            }
+            array_splice($crumbs, 1, 0, $ancestors);
         }
         return Breadcrumbs::render($settings, $crumbs, $sanitizer);
     }
@@ -303,6 +394,7 @@ final class Content
             return false;
         }
         $seen = [];
+        $pages = [];
         for ($depth = 0; $id > 0 && $depth < 12; $depth++) {
             if (isset($seen[$id])) {
                 return false;
@@ -312,9 +404,14 @@ final class Content
             if ($page === null || $page->type !== 'page' || !UrlResolver::isPubliclyVisible($page)) {
                 return false;
             }
+            $pages[] = $page;
             $id = $page->parentId;
         }
-        return $id === 0;
+        if ($id !== 0) {
+            return false;
+        }
+        $this->urls->primePageCache($pages);
+        return true;
     }
 
     /** @param array<string, mixed> $settings */
@@ -384,6 +481,12 @@ final class Content
         } finally {
             unset($this->renderingEntryContent[$entry->id]);
         }
+    }
+
+    /** A public live endpoint must not reveal data for a page below a private ancestor. */
+    public function publiclyAccessibleEntry(Entry $entry): bool
+    {
+        return $this->publicPageEntry(new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry)) !== null;
     }
 
     private function publicPageEntry(?PageContext $page): ?Entry

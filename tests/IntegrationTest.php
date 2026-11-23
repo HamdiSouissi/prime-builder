@@ -692,6 +692,11 @@ final class IntegrationTest extends TestCase
         $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
         $html = json_decode($live->body(), true)['data']['widgets']['trail'];
         self::assertStringContainsString('href="/parent-secret/blog-secret">Blog</a>', $html);
+        $pdo->exec('UPDATE pc_entries SET slug = \'blog-renomme\' WHERE id = ' . $postsPage);
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        $html = json_decode($live->body(), true)['data']['widgets']['trail'];
+        self::assertStringContainsString('href="/parent-secret/blog-renomme">Blog</a>', $html);
+        self::assertStringNotContainsString('blog-secret', $html);
         $pdo->exec('UPDATE pc_entries SET status = \'draft\' WHERE id = ' . $postsPage);
         $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
         $html = json_decode($live->body(), true)['data']['widgets']['trail'];
@@ -705,6 +710,156 @@ final class IntegrationTest extends TestCase
         self::assertSame('', json_decode($live->body(), true)['data']['widgets']['trail']);
         $pdo->exec("UPDATE pc_entries SET status = 'draft' WHERE id = 1");
         self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live')->status());
+    }
+
+    public function testBreadcrumbsInThemePartsUseResolvedPublicContextsAndSafeAncestors(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $root = $this->insertGridEntry($pdo, 'page', 'published', 'Racine & idées', 'racine', 1);
+        $parent = $this->insertGridEntry($pdo, 'page', 'published', 'Parent <utile>', 'parent', 1, $root);
+        $child = $this->insertGridEntry($pdo, 'page', 'published', 'Enfant', 'enfant', 1, $parent);
+        $pdo->exec("INSERT INTO pc_terms (id, taxonomy, name, slug, parent_id, menu_order, `count`) VALUES (11, 'category', 'Arts & idées', 'arts', 0, 0, 0)");
+        $app->get(ContentTypeRegistry::class)->register(new ContentType(name: 'book', labels: ['singular' => 'Livre', 'plural' => 'Livres'], rewriteBase: 'livres'));
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'breadcrumbs in parts', ['*'])['token'];
+        $layout = ['version' => 1, 'elements' => [[
+            'id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                ['id' => 'trail', 'type' => 'breadcrumbs', 'settings' => ['label' => 'Votre parcours'], 'styles' => [], 'children' => []],
+            ],
+        ]]];
+        $created = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Fil du thème', 'kind' => 'section', 'data' => $layout], $token);
+        self::assertSame(201, $created->status(), $created->body());
+        $templateId = json_decode($created->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $templateId, 'footer' => $templateId, 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $hooks = $app->get(Hooks::class);
+        $resolver = $app->get(UrlResolver::class);
+        $page = $resolver->resolve(Request::create('GET', '/racine/parent/enfant'));
+        self::assertSame(PageContext::TYPE_ENTRY, $page->type);
+        foreach (['header', 'footer'] as $slot) {
+            $html = $hooks->apply('site.partial', null, $slot, $page, []);
+            self::assertIsString($html);
+            self::assertStringContainsString('aria-label="Votre parcours"', $html);
+            self::assertStringContainsString('<a href="/">Accueil</a>', $html);
+            self::assertStringContainsString('<a href="/racine">Racine &amp; idées</a>', $html);
+            self::assertStringContainsString('<a href="/racine/parent">Parent &lt;utile&gt;</a>', $html);
+            self::assertStringContainsString('<span aria-current="page">Enfant</span>', $html);
+            self::assertStringNotContainsString('data-pb-live=', $html);
+            self::assertStringNotContainsString('href="/racine/parent/enfant"', $html);
+        }
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/breadcrumbs.css'));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        self::assertSame(false, $cache->isCacheableRequest(Request::create('GET', '/racine/parent/enfant')));
+
+        foreach ([
+            ['/blog', PageContext::TYPE_BLOG, 'Blog'],
+            ['/categorie/arts', PageContext::TYPE_TERM, 'Arts &amp; idées'],
+            ['/auteur/admin', PageContext::TYPE_AUTHOR, 'Admin Prime'],
+            ['/recherche', PageContext::TYPE_SEARCH, 'Recherche'],
+            ['/livres', PageContext::TYPE_ARCHIVE, 'Livres'],
+            ['/blog/article-publie', PageContext::TYPE_ENTRY, 'Article publié'],
+        ] as [$path, $type, $label]) {
+            $context = $resolver->resolve(Request::create('GET', $path));
+            self::assertSame($type, $context->type, $path);
+            $html = $hooks->apply('site.partial', null, 'footer', $context, []);
+            self::assertIsString($html);
+            self::assertStringContainsString('<span aria-current="page">' . $label . '</span>', $html);
+        }
+        $home = $resolver->resolve(Request::create('GET', '/'));
+        $homeHtml = $hooks->apply('site.partial', null, 'footer', $home, []);
+        self::assertIsString($homeHtml);
+        self::assertStringNotContainsString('pb-breadcrumb"', $homeHtml);
+
+        // The same provider and URL generator are reused: changes must not retain
+        // cached ancestor titles or slugs within the request.
+        $pdo->exec("UPDATE pc_entries SET title = 'Parent nouveau', slug = 'parent-nouveau' WHERE id = " . $parent);
+        $entries = $app->get(EntryRepository::class);
+        $childEntry = $entries->find($child);
+        self::assertNotNull($childEntry);
+        $changed = new PageContext(type: PageContext::TYPE_ENTRY, path: '/racine/parent-nouveau/enfant', entry: $childEntry);
+        $html = $hooks->apply('site.partial', null, 'header', $changed, []);
+        self::assertIsString($html);
+        self::assertStringContainsString('<a href="/racine/parent-nouveau">Parent nouveau</a>', $html);
+        self::assertStringNotContainsString('Parent &lt;utile&gt;', $html);
+        self::assertStringNotContainsString('href="/racine/parent"', $html);
+
+        // Also test the public live endpoint for a child that is individually
+        // published but no longer reachable because an ancestor is private.
+        $document = $this->document();
+        $document['blocks'][0]['data'] = $layout;
+        $document['blocks'][0]['data']['elements'][0]['children'][] = [
+            'id' => 'title', 'type' => 'entry_title', 'settings' => [], 'styles' => [], 'children' => [],
+        ];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/' . $child, ['content' => $document], $token)->status());
+        $savedChild = $entries->find($child);
+        self::assertNotNull($savedChild);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $savedChild));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/breadcrumbs.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/' . $child . '/live');
+        self::assertSame(200, $live->status(), $live->body());
+        self::assertStringContainsString('Parent nouveau', json_decode($live->body(), true)['data']['widgets']['trail']);
+        self::assertStringContainsString('Enfant', json_decode($live->body(), true)['data']['widgets']['title']);
+        $pdo->exec("UPDATE pc_entries SET status = 'draft' WHERE id = " . $parent);
+        $app->get(\Prime\Auth\Auth::class)->logout();
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/' . $child . '/live');
+        self::assertSame(404, $live->status());
+        self::assertStringNotContainsString('Enfant', $live->body());
+        $unprivileged = $this->tokens($app)->issue($this->user($app, 2), 'unprivileged breadcrumbs', ['*'])['token'];
+        self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/' . $child . '/live', token: $unprivileged)->status());
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/' . $child . '/live', token: $token);
+        self::assertSame(200, $live->status());
+        self::assertSame('', json_decode($live->body(), true)['data']['widgets']['trail']);
+        self::assertStringContainsString('Enfant', json_decode($live->body(), true)['data']['widgets']['title']);
+        $provider = $app->get(Content::class);
+        $sanitizer = $app->get(\Prime\Security\HtmlSanitizer::class);
+        self::assertSame('', $provider->breadcrumbsInPage([], $changed, $sanitizer));
+        self::assertSame('', $provider->breadcrumbsInPage([], new PageContext(type: PageContext::TYPE_ENTRY, entry: $childEntry, httpStatus: 404), $sanitizer));
+        self::assertSame('', $provider->breadcrumbsInPage([], PageContext::redirect('/x', '/y'), $sanitizer));
+        $draft = $entries->find(2);
+        self::assertNotNull($draft);
+        self::assertSame('', $provider->breadcrumbsInPage([], new PageContext(type: PageContext::TYPE_ENTRY, entry: $draft), $sanitizer));
+        $orphanId = $this->insertGridEntry($pdo, 'page', 'published', 'Orphelin secret', 'orphelin', 1, 999999);
+        $orphan = $entries->find($orphanId);
+        self::assertNotNull($orphan);
+        self::assertSame('', $provider->breadcrumbsInPage([], new PageContext(type: PageContext::TYPE_ENTRY, entry: $orphan), $sanitizer));
+        $pdo->exec('UPDATE pc_entries SET parent_id = ' . $child . ', status = \'published\' WHERE id = ' . $parent);
+        self::assertSame('', $provider->breadcrumbsInPage([], $changed, $sanitizer));
+        $futureId = $this->insertGridEntry($pdo, 'page', 'published', 'Parent futur', 'parent-futur', 1, published: '2999-01-01 00:00:00');
+        $futureChildId = $this->insertGridEntry($pdo, 'page', 'published', 'Enfant futur', 'enfant-futur', 1, $futureId);
+        $futureChild = $entries->find($futureChildId);
+        self::assertNotNull($futureChild);
+        self::assertSame('', $provider->breadcrumbsInPage([], new PageContext(type: PageContext::TYPE_ENTRY, entry: $futureChild), $sanitizer));
+        $wrongParentId = $this->insertGridEntry($pdo, 'post', 'published', 'Parent de mauvais type', 'parent-post', 1);
+        $wrongChildId = $this->insertGridEntry($pdo, 'page', 'published', 'Enfant du post', 'enfant-post', 1, $wrongParentId);
+        $wrongChild = $entries->find($wrongChildId);
+        self::assertNotNull($wrongChild);
+        self::assertSame('', $provider->breadcrumbsInPage([], new PageContext(type: PageContext::TYPE_ENTRY, entry: $wrongChild), $sanitizer));
+        $deepParent = 0;
+        for ($i = 0; $i < 12; $i++) {
+            $deepParent = $this->insertGridEntry($pdo, 'page', 'published', 'Profondeur ' . $i, 'profondeur-' . $i, 1, $deepParent);
+        }
+        $withinLimit = $entries->find($deepParent);
+        self::assertNotNull($withinLimit);
+        $longTrail = $provider->breadcrumbsInPage([], new PageContext(type: PageContext::TYPE_ENTRY, entry: $withinLimit), $sanitizer);
+        self::assertStringContainsString('Profondeur 0</a>', $longTrail);
+        self::assertStringContainsString('aria-current="page">Profondeur 11</span>', $longTrail);
+        $deepChildId = $this->insertGridEntry($pdo, 'page', 'published', 'Trop profond', 'trop-profond', 1, $deepParent);
+        $deepChild = $entries->find($deepChildId);
+        self::assertNotNull($deepChild);
+        self::assertSame('', $provider->breadcrumbsInPage([], new PageContext(type: PageContext::TYPE_ENTRY, entry: $deepChild), $sanitizer));
+        $settings = $app->get(Settings::class);
+        $settings->set('plugin.prime-builder.theme_partials', []);
+        self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/racine/parent/enfant')));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $home);
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/breadcrumbs.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
     }
 
     public function testSiteIdentityUsesCoreSettingsMediaAndRefreshesSavedDocuments(): void
@@ -2742,7 +2897,7 @@ final class IntegrationTest extends TestCase
         $fields['header'] = json_decode($dynamicTemplate->body(), true)['data']['id'];
         self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
-        foreach (['navigation', 'share_buttons', 'breadcrumbs'] as $type) {
+        foreach (['navigation', 'share_buttons'] as $type) {
             $unsupported = ['version' => 1, 'elements' => [['id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
                 ['id' => 'dynamic', 'type' => $type, 'settings' => [], 'styles' => [], 'children' => []],
             ]]]];

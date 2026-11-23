@@ -241,7 +241,9 @@ final class Renderer
             'current_content' => $this->content?->current($settings, $this->entry, $this->live) ?? '',
             'search_form' => $this->content?->searchForm($settings, $id) ?? '',
             'navigation' => $this->content?->navigation($settings, $this->entry, $this->live) ?? Navigation::render($settings, null, false),
-            'breadcrumbs' => $this->content?->breadcrumbs($settings, $this->entry, $this->live, $this->sanitizer) ?? Breadcrumbs::fallback($settings),
+            'breadcrumbs' => $this->pageContext !== null
+                ? ($this->content?->breadcrumbsInPage($settings, $this->pageContext, $this->sanitizer) ?? '')
+                : ($this->content?->breadcrumbs($settings, $this->entry, $this->live, $this->sanitizer, $this->trustedPreview) ?? Breadcrumbs::fallback($settings)),
             'site_title' => $this->content?->siteTitle($settings) ?? '',
             'site_logo' => $this->content?->siteLogo($settings) ?? '',
             'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author' => $this->pageContext !== null

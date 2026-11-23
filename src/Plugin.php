@@ -206,7 +206,7 @@ final class Plugin extends AbstractPlugin
         $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable) use ($partials): mixed {
             if ($cacheable === true && $partials->usesAnyWidget([
                 'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image',
-                'entry_info', 'entry_navigation', 'entry_author',
+                'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs',
             ])) {
                 return false;
             }
@@ -363,7 +363,7 @@ final class Plugin extends AbstractPlugin
             $definitions = $registry->all();
             // These widgets are fully resolved in a theme partial; there is no
             // data-pb-live endpoint for the snapshot and no refresh script needed.
-            foreach (['site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author'] as $type) {
+            foreach (['site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs'] as $type) {
                 if (($definitions[$type]['script'] ?? null) === '/assets/plugins/prime-builder/js/content.js') {
                     unset($definitions[$type]['script']);
                 }

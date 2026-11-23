@@ -51,7 +51,7 @@ final class Partials
     /**
      * Revalidate even stored data. Some route-dependent widgets lack a suitable
      * theme context and are not accepted in this first slice. Site identity,
-     * entry metadata and archive widgets are resolved server-side and permitted.
+     * entry metadata, breadcrumbs and archive widgets are resolved server-side.
      *
      * @param array<mixed> $elements
      * @return array<string, mixed>|null
@@ -105,7 +105,7 @@ final class Partials
                 continue;
             }
             $type = $element['type'] ?? null;
-            if (in_array($type, ['posts', 'current_content', 'theme_zone', 'form', 'search_form', 'navigation', 'share_buttons', 'breadcrumbs'], true)) {
+            if (in_array($type, ['posts', 'current_content', 'theme_zone', 'form', 'search_form', 'navigation', 'share_buttons'], true)) {
                 return true;
             }
             $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];

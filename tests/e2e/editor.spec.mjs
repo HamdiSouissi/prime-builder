@@ -3911,6 +3911,190 @@ test('navigation uses CMS menus with keyboard disclosures on desktop and mobile'
 });
 
 // Keep the saved page intact: the CI workflow disables the plugin after the suite.
+test('theme breadcrumbs follow public ancestors and real archive contexts without JavaScript', async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  page.setDefaultTimeout(12_000);
+  await login(page);
+  let csrf = null, termId = null, templateId = null, originalTheme = null;
+  const pages = [];
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  try {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    for (const [title, slug] of [['Racine utile', 'pb-racine-fil'], ['Page parente', 'pb-parent-fil'], ['Page enfant', 'pb-enfant-fil']]) {
+      const result = await api('/api/v1/content/page', 'POST', {
+        title, slug, status: 'published', published_at: '2021-01-01 10:00:00',
+        parent_id: pages.length ? pages[pages.length - 1].id : 0, content: { version: 1, blocks: [] },
+      });
+      expect(result.status, result.body).toBe(201);
+      pages.push(JSON.parse(result.body).data);
+    }
+    const category = await api('/api/v1/terms/category', 'POST', { name: 'Arts & idées', slug: 'pb-arts-fil' });
+    expect(category.status, category.body).toBe(201);
+    termId = JSON.parse(category.body).data.id;
+    const layout = { version: 1, elements: [
+      { id: 'trail', type: 'breadcrumbs', settings: { label: 'Votre parcours' }, styles: {}, children: [] },
+    ] };
+    const template = await api('/api/prime-builder/v1/templates', 'POST', { name: 'Fil du thème', kind: 'section', data: layout });
+    expect(template.status, template.body).toBe(201);
+    templateId = JSON.parse(template.body).data.id;
+    await page.goto('/admin/prime-builder/theme');
+    originalTheme = {
+      header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
+      footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
+      exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
+    };
+    await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Contenus exclus', { exact: true }).fill('');
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await expect(page.getByLabel('Pied de page', { exact: true })).toHaveValue(templateId);
+    const childPath = '/pb-racine-fil/pb-parent-fil/pb-enfant-fil';
+    await page.goto(childPath);
+    const footer = page.locator('footer.pb-theme-footer');
+    const trail = footer.getByRole('navigation', { name: 'Votre parcours' });
+    await expect(trail.getByRole('link', { name: 'Accueil' })).toHaveAttribute('href', '/');
+    await expect(trail.getByRole('link', { name: 'Racine utile' })).toHaveAttribute('href', '/pb-racine-fil');
+    await expect(trail.getByRole('link', { name: 'Page parente' })).toHaveAttribute('href', '/pb-racine-fil/pb-parent-fil');
+    await expect(trail.locator('[aria-current="page"]')).toHaveText('Page enfant');
+    await expect(page.locator('link[href*="/css/widgets/breadcrumbs.css"]')).toHaveCount(1);
+    await expect(page.locator('script[src*="/js/content.js"]')).toHaveCount(0);
+    await expectAccessible(page);
+    await footer.screenshot({ path: test.info().outputPath('trail-screen-public-desktop.jpg'), quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await footer.screenshot({ path: test.info().outputPath('trail-screen-public-mobile.jpg'), quality: 15 });
+    await trail.getByRole('link', { name: 'Page parente' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/pb-racine-fil\/pb-parent-fil$/);
+    await expect(page.locator('footer.pb-theme-footer [aria-current="page"]')).toHaveText('Page parente');
+
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const publicPage = await noJs.newPage();
+      await publicPage.goto(childPath);
+      const publicTrail = publicPage.locator('footer.pb-theme-footer').getByRole('navigation', { name: 'Votre parcours' });
+      await expect(publicTrail.getByRole('link', { name: 'Page parente' })).toBeVisible();
+      await expect(publicTrail.locator('[aria-current="page"]')).toHaveText('Page enfant');
+      let result = await api(`/api/v1/content/page/${pages[1].id}`, 'PATCH', { title: 'Parent actualisé', slug: 'pb-parent-nouveau' });
+      expect(result.status, result.body).toBe(200);
+      const changedPath = '/pb-racine-fil/pb-parent-nouveau/pb-enfant-fil';
+      await publicPage.goto(changedPath);
+      await expect(publicTrail.getByRole('link', { name: 'Parent actualisé' })).toHaveAttribute('href', '/pb-racine-fil/pb-parent-nouveau');
+      await expect(publicTrail).not.toContainText('Page parente');
+      await publicTrail.getByRole('link', { name: 'Parent actualisé' }).focus();
+      await publicPage.keyboard.press('Enter');
+      await expect(publicPage).toHaveURL(/\/pb-racine-fil\/pb-parent-nouveau$/);
+      // The public live endpoint must not expose other entry widgets either
+      // when this published child becomes unreachable under a draft parent.
+      result = await api(`/api/prime-builder/v1/documents/${pages[2].id}`, 'PATCH', {
+        content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [
+          { id: 'title', type: 'entry_title', settings: {}, styles: {}, children: [] },
+        ] } }] },
+      });
+      expect(result.status, result.body).toBe(200);
+      let live = await noJs.request.get(`/api/prime-builder/v1/documents/${pages[2].id}/live`);
+      expect(live.status()).toBe(200);
+      expect(await live.text()).toContain('Page enfant');
+      result = await api(`/api/v1/content/page/${pages[1].id}`, 'PATCH', { status: 'draft', title: 'Parent confidentiel' });
+      expect(result.status, result.body).toBe(200);
+      live = await noJs.request.get(`/api/prime-builder/v1/documents/${pages[2].id}/live`);
+      expect(live.status()).toBe(404);
+      expect(await live.text()).not.toContain('Page enfant');
+      const missing = await publicPage.goto(changedPath);
+      expect(missing.status()).toBe(404);
+      await expect(publicPage.locator('footer.pb-theme-footer .pb-breadcrumbs nav')).toHaveCount(0);
+      await expect(publicPage.locator('footer.pb-theme-footer')).not.toContainText('Parent confidentiel');
+      await publicPage.goto('/categorie/pb-arts-fil');
+      await expect(publicPage.locator('footer.pb-theme-footer [aria-current="page"]')).toHaveText('Arts & idées');
+      await publicPage.goto('/recherche');
+      await expect(publicPage.locator('footer.pb-theme-footer [aria-current="page"]')).toHaveText('Recherche');
+      await publicPage.goto('/blog');
+      await expect(publicPage.locator('footer.pb-theme-footer [aria-current="page"]')).toHaveText('Blog');
+      await publicPage.goto('/');
+      await expect(publicPage.locator('footer.pb-theme-footer .pb-breadcrumbs nav')).toHaveCount(0);
+    } finally { await noJs.close(); }
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (originalTheme) {
+        await page.goto('/admin/prime-builder/theme');
+        await page.getByLabel('En-tête', { exact: true }).selectOption(originalTheme.header);
+        await page.getByLabel('Pied de page', { exact: true }).selectOption(originalTheme.footer);
+        await page.getByLabel('Contenus exclus', { exact: true }).fill(originalTheme.exclude);
+        await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+      }
+      for (const item of pages.reverse()) {
+        const trashed = await api(`/api/v1/content/page/${item.id}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/page/${item.id}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (termId) {
+        const deleted = await api(`/api/v1/terms/category/${termId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (templateId) {
+        const deleted = await api(`/api/prime-builder/v1/templates/${templateId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(200);
+      }
+    } finally { page.off('dialog', leave); }
+  }
+});
+
+test('editor top bar stays legible and operable on narrow screens', async ({ page }) => {
+  await login(page);
+  await page.goto(`/admin/prime-builder/edit/${id}`);
+  await page.getByRole('button', { name: 'Ajouter Titre', exact: true }).click();
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Non enregistré');
+  for (const width of [320, 375, 390, 700, 701]) {
+    await page.setViewportSize({ width, height: 812 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    const metrics = await page.evaluate(() => {
+      const selectors = ['.pb-brand strong', '[data-pb-command-open]', '[data-pb-save-state]', '[data-pb-save]'];
+      const nodes = selectors.map(selector => document.querySelector(selector));
+      return nodes.map(node => {
+        const rect = node.getBoundingClientRect();
+        return { text: node.textContent.trim(), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth, visible: getComputedStyle(node).display !== 'none' && getComputedStyle(node).visibility === 'visible' };
+      });
+    });
+    expect(metrics[0].text).toBe('Prime Builder');
+    for (const item of metrics) {
+      expect(item.visible).toBe(true);
+      expect(item.left).toBeGreaterThanOrEqual(0);
+      expect(item.right).toBeLessThanOrEqual(width);
+      expect(item.width).toBeGreaterThan(0);
+      expect(item.scrollWidth).toBeLessThanOrEqual(item.clientWidth + 1);
+    }
+    for (let i = 0; i < metrics.length; i++) for (let j = i + 1; j < metrics.length; j++) {
+      const a = metrics[i], b = metrics[j];
+      const overlap = a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      expect(overlap, `top bar items ${i} and ${j} overlap at ${width}px`).toBe(false);
+    }
+    if (width === 320 || width === 375) {
+      await expectAccessible(page);
+      await page.screenshot({ path: test.info().outputPath(`topbar-screen-editor-${width}.jpg`), fullPage: true, quality: 15 });
+    }
+  }
+  await page.setViewportSize({ width: 320, height: 812 });
+  await page.locator('[data-pb-command-open]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toBeHidden();
+  await expect(page.locator('[data-pb-command-open]')).toBeFocused();
+  await page.locator('[data-pb-save]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+});
+
 test('save a page for the deactivation check', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
