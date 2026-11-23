@@ -44,6 +44,7 @@ use PrimeBuilder\Controller\Templates;
 use PrimeBuilder\Controller\ThemeBuilder;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
+use PrimeBuilder\Document\MediaReferences;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
@@ -101,6 +102,11 @@ final class Plugin extends AbstractPlugin
         $blocks = $context->app()->get(BlockRegistry::class);
         $originals = OriginalContent::fromAppKey($context->app()->config()->get('app.key'));
         $htmlContent = HtmlContent::fromAppKey($context->app()->config()->get('app.key'));
+        $mediaReferences = new MediaReferences(
+            $context->db(),
+            $context->app()->get(\Prime\Media\MediaConfig::class)->urlPrefix(),
+            $context->app()->get(UrlGenerator::class)->absolute('/'),
+        );
         $partials = new Partials($context);
         $identity = new SiteIdentity($context->app());
         $content = new Content(
@@ -150,7 +156,7 @@ final class Plugin extends AbstractPlugin
             description: 'plugin::prime-builder.block.description',
             icon: 'layout-dashboard',
             category: 'plugins',
-            validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer, $blocks, $originals, html: $htmlContent, requireSealedHtml: true))->validate($data),
+            validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer, $blocks, $originals, html: $htmlContent, requireSealedHtml: true, mediaReferences: $mediaReferences))->validate($data),
             renderer: static fn (array $data, HtmlSanitizer $sanitizer, array $renderContext): string => (new Renderer($registry, $sanitizer, $context->logger(), $content, ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null, false, $blocks, $originals, $htmlContent))->render($data),
             // Text extraction has no entry context; it never emits HTML and still sanitizes markup.
             textExtractor: static fn (array $data): string => Str::plainText((new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, true))->render($data)),

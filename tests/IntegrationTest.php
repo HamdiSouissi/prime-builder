@@ -3998,12 +3998,22 @@ final class IntegrationTest extends TestCase
         self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $first->id, token: $token)->status());
         self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $second->id, token: $token)->status());
 
+        // Native widget URLs and authenticated original references are merged, not replaced.
+        $mixed = $entry->decodedContent();
+        $mixed['blocks'][0]['data']['elements'][0]['children'][] = ['id' => 'native', 'type' => 'image', 'settings' => ['url' => $unrelated->url(), 'alt' => 'Autre image'], 'styles' => [], 'children' => []];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $mixed], $token)->status());
+        $mixedEntry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($mixedEntry);
+        self::assertSame([['mediaId' => $first->id], ['mediaId' => $second->id], ['mediaId' => $unrelated->id]], $mixedEntry->decodedContent()['blocks'][0]['data']['items']);
+        self::assertCount(1, $usage->findByMedia($unrelated->id));
+
         // Removing the gallery still keeps the first image's usage, but frees the second.
         $layout = $entry->decodedContent();
         array_pop($layout['blocks'][0]['data']['elements'][0]['children']);
         self::assertSame(200, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $layout], $token)->status());
         self::assertCount(1, $usage->findByMedia($first->id));
         self::assertSame([], $usage->findByMedia($second->id));
+        self::assertSame([], $usage->findByMedia($unrelated->id));
         self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $first->id, token: $token)->status());
         self::assertSame(204, $this->send($app, 'DELETE', '/api/v1/media/' . $second->id, token: $token)->status());
         // Finally removing the image releases its reference as well.
@@ -4085,6 +4095,191 @@ final class IntegrationTest extends TestCase
         $app->get(PluginManager::class)->deactivate('prime-builder');
         self::assertCount(1, $usage->findByMedia($second->id));
         self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $second->id, token: $token)->status());
+    }
+
+    public function testBuilderTracksCanonicalMediaUrlsAcrossWidgetsAndCoreSaves(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $media = $app->get(\Prime\Media\MediaRepository::class);
+        $image = $media->create([
+            'disk_path' => 'references/image.jpg', 'filename' => 'image.jpg', 'original_name' => 'image.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image', 'alt' => 'Image test',
+        ]);
+        $video = $media->create([
+            'disk_path' => 'references/video.mp4', 'filename' => 'video.mp4', 'original_name' => 'video.mp4',
+            'extension' => 'mp4', 'mime_type' => 'video/mp4', 'kind' => 'video',
+        ]);
+        $captions = $media->create([
+            'disk_path' => 'references/captions.vtt', 'filename' => 'captions.vtt', 'original_name' => 'captions.vtt',
+            'extension' => 'vtt', 'mime_type' => 'text/vtt', 'kind' => 'other',
+        ]);
+        $other = $media->create([
+            'disk_path' => 'references/unrelated.jpg', 'filename' => 'unrelated.jpg', 'original_name' => 'unrelated.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image', 'alt' => 'Autre image',
+        ]);
+        $imageUrl = $image->url();
+        $videoUrl = $video->url();
+        $captionUrl = $captions->url();
+        $cases = [
+            'image' => [['url' => $imageUrl . '?version=2#image', 'alt' => 'Image'], [$image->id]],
+            'image_box' => [['image_url' => $imageUrl, 'title' => 'Image'], [$image->id]],
+            'card' => [['image_url' => $imageUrl, 'title' => 'Carte'], [$image->id]],
+            'testimonial' => [['image_url' => $imageUrl, 'author' => 'Auteur'], [$image->id]],
+            'review' => [['image_url' => $imageUrl, 'author' => 'Auteur'], [$image->id]],
+            'call_to_action' => [['image_url' => $imageUrl, 'title' => 'Action'], [$image->id]],
+            'gallery' => [['images' => $imageUrl . '|Image'], [$image->id]],
+            'image_carousel' => [['images' => $imageUrl . '|Image'], [$image->id]],
+            'slideshow' => [['items' => $imageUrl . '|Image|Titre'], [$image->id]],
+            'portfolio' => [['items' => $imageUrl . '|Image|Projet|Art'], [$image->id]],
+            'testimonial_carousel' => [['items' => 'Citation|Auteur|Fonction|' . $imageUrl], [$image->id]],
+            'video' => [['url' => $videoUrl, 'video_title' => 'Vidéo', 'captions' => $captionUrl], [$video->id, $captions->id]],
+            'audio' => [['url' => $videoUrl], [$video->id]],
+            'media_carousel' => [['items' => 'image|' . $imageUrl . '|Image' . "\n" . 'video|' . $videoUrl . '|Vidéo|' . $captionUrl], [$image->id, $video->id, $captions->id]],
+            'button' => [['url' => $videoUrl, 'text' => 'Télécharger'], [$video->id]],
+            'text' => [['text' => '<p><a href="' . $imageUrl . '">Télécharger</a></p>'], [$image->id]],
+        ];
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'widget media', ['*'])['token'];
+        $usage = $app->get(\Prime\Media\MediaUsageRepository::class);
+        foreach ($cases as $type => [$settings, $expected]) {
+            $document = $this->document();
+            $document['blocks'][0]['data']['elements'] = [['id' => 'widget', 'type' => $type, 'settings' => $settings, 'styles' => [], 'children' => []]];
+            $document['blocks'][0]['data']['items'] = [['mediaId' => $other->id]];
+            $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+            self::assertSame(200, $response->status(), $type . ': ' . $response->body());
+            $entry = $app->get(EntryRepository::class)->find(1);
+            self::assertNotNull($entry);
+            $items = $entry->decodedContent()['blocks'][0]['data']['items'] ?? [];
+            $actual = array_column($items, 'mediaId');
+            sort($actual);
+            sort($expected);
+            self::assertSame($expected, $actual, $type);
+            self::assertSame([], $usage->findByMedia($other->id), $type . ': client index must be ignored');
+        }
+        // A matching relative URL protects the file; changing it through the core API releases it.
+        $document['blocks'][0]['data']['elements'] = [['id' => 'widget', 'type' => 'image', 'settings' => ['url' => $imageUrl, 'alt' => 'Image'], 'styles' => [], 'children' => []]];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        self::assertCount(1, $usage->findByMedia($image->id));
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $image->id, token: $token)->status());
+        $revisions = $app->get(\Prime\Content\RevisionRepository::class)->forEntry(1);
+        self::assertNotEmpty($revisions);
+        $imageRevision = $revisions[0]->id;
+        $document['blocks'][0]['data']['elements'][0]['settings']['url'] = 'https://external.test' . $imageUrl;
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token)->status());
+        self::assertSame([], $usage->findByMedia($image->id));
+        $app->get(\Prime\Content\EntryService::class)->restoreRevision(1, $imageRevision, $this->user($app, 1));
+        self::assertCount(1, $usage->findByMedia($image->id));
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $image->id, token: $token)->status());
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token)->status());
+        self::assertSame([], $usage->findByMedia($image->id));
+        self::assertSame(204, $this->send($app, 'DELETE', '/api/v1/media/' . $image->id, token: $token)->status());
+        $document['blocks'][0]['data']['elements'][0] = ['id' => 'widget', 'type' => 'video', 'settings' => ['url' => $videoUrl, 'video_title' => 'Vidéo'], 'styles' => [], 'children' => []];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $app->get(PluginManager::class)->deactivate('prime-builder');
+        self::assertCount(1, $usage->findByMedia($video->id));
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $video->id, token: $token)->status());
+    }
+
+    public function testMediaReferenceResolutionIsBoundedAndRejectsForeignOrigins(): void
+    {
+        $app = $this->activated('admin');
+        $db = $this->db($app);
+        $db->pdo()->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $db->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $repository = $app->get(\Prime\Media\MediaRepository::class);
+        $first = $repository->create([
+            'disk_path' => 'folder/One photo.jpg', 'filename' => 'One photo.jpg', 'original_name' => 'One photo.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image',
+        ]);
+        $other = $repository->create([
+            'disk_path' => 'folder/unused.jpg', 'filename' => 'unused.jpg', 'original_name' => 'unused.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image',
+        ]);
+        $bridge = $repository->create([
+            'disk_path' => 'folder/bridge.jpg', 'filename' => 'bridge.jpg', 'original_name' => 'bridge.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image',
+        ]);
+        $references = new \PrimeBuilder\Document\MediaReferences($db, '/library', 'https://site.test/');
+        $registry = new \PrimeBuilder\Widgets\Registry();
+        $validator = new \PrimeBuilder\Document\Validator($registry, $app->get(\Prime\Security\HtmlSanitizer::class), $app->get(BlockRegistry::class), mediaReferences: $references);
+        $node = static fn (string $id, string $url): array => ['id' => $id, 'type' => 'image', 'settings' => ['url' => $url], 'styles' => [], 'children' => []];
+        $relative = '/library/folder/One%20photo.jpg?cache=2#image';
+        $data = ['version' => 1, 'elements' => [
+            ['id' => 'parent', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                $node('relative', $relative),
+                $node('absolute', 'https://SITE.TEST:443/library/folder/One%20photo.jpg'),
+                $node('foreign', 'https://evil.test/library/folder/unused.jpg'),
+                $node('wrong_port', 'https://site.test:444/library/folder/unused.jpg'),
+                $node('wrong_scheme', 'http://site.test/library/folder/unused.jpg'),
+                $node('userinfo', 'https://user@site.test/library/folder/unused.jpg'),
+                $node('wrong_prefix', '/library-extra/folder/unused.jpg'),
+                $node('traversal', '/library/folder/../folder/unused.jpg'),
+                $node('wrong_case', '/library/folder/one%20photo.jpg'),
+                ['id' => 'text', 'type' => 'text', 'settings' => ['text' => '<p><a href="/library/folder/One%20photo.jpg?a=1&amp;b=2">Lien</a></p>'], 'styles' => [], 'children' => []],
+                ['id' => 'bridge', 'type' => 'prime_block', 'settings' => ['block_type' => 'paragraph', 'block_data' => '{"text":"<a href=\"/library/folder/bridge.jpg\">Fichier</a>"}'], 'styles' => [], 'children' => []],
+                ['id' => 'code', 'type' => 'code', 'settings' => ['source' => '<a href="/library/folder/unused.jpg">code</a>'], 'styles' => [], 'children' => []],
+            ]],
+        ], 'items' => [['mediaId' => $other->id]]];
+        $db->enableQueryLog();
+        $db->clearQueryLog();
+        $validated = $validator->validate($data);
+        self::assertSame([], $validated['errors']);
+        $ids = array_column($validated['data']['items'], 'mediaId');
+        sort($ids);
+        self::assertSame([$first->id, $bridge->id], $ids);
+        self::assertCount(1, $db->queryLog(), 'A page of references is resolved in one query');
+        $db->clearQueryLog();
+        $wrongCase = $validator->validate(['version' => 1, 'elements' => [$node('case', '/library/folder/one%20photo.jpg')]]);
+        self::assertSame([], $wrongCase['errors']);
+        self::assertArrayNotHasKey('items', $wrongCase['data'], 'A case-insensitive SQL match must not count as the actual file');
+        self::assertCount(1, $db->queryLog());
+        $db->clearQueryLog();
+        $external = $validator->validate(['version' => 1, 'elements' => [$node('external', 'https://evil.test/library/folder/unused.jpg')]]);
+        self::assertSame([], $external['errors']);
+        self::assertArrayNotHasKey('items', $external['data']);
+        self::assertCount(0, $db->queryLog(), 'Unrelated origins never query the media table');
+
+        $many = [];
+        for ($i = 0; $i < 401; $i++) {
+            $many[] = $node('image' . $i, '/library/missing-' . $i . '.jpg');
+        }
+        $many[] = $node('real', $relative);
+        $db->clearQueryLog();
+        $validated = $validator->validate(['version' => 1, 'elements' => $many]);
+        self::assertSame([], $validated['errors']);
+        self::assertSame([['mediaId' => $first->id]], $validated['data']['items']);
+        self::assertCount(3, $db->queryLog(), '402 distinct paths use batches of 200, not one query per widget');
+        $db->enableQueryLog(false);
+    }
+
+    public function testBuilderMediaInsideCoreZoneUsesTheCoreZoneUsageIndex(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $pdo->exec('CREATE TABLE pc_zones (id ' . $idColumn . ', theme VARCHAR(80), slug VARCHAR(80), content LONGTEXT, content_html LONGTEXT, created_at DATETIME, updated_at DATETIME)');
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $image = $app->get(\Prime\Media\MediaRepository::class)->create([
+            'disk_path' => 'zone/image.jpg', 'filename' => 'image.jpg', 'original_name' => 'image.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image', 'alt' => 'Zone',
+        ]);
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [['id' => 'zoneimage', 'type' => 'image', 'settings' => ['url' => $image->url(), 'alt' => 'Zone'], 'styles' => [], 'children' => []]];
+        $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $zones->save('sidebar', $document);
+        $usage = $app->get(\Prime\Media\MediaUsageRepository::class)->findByMedia($image->id);
+        self::assertCount(1, $usage);
+        self::assertSame('zone', $usage[0]['type']);
+        self::assertSame('zone_block', $usage[0]['context']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'zone media', ['*'])['token'];
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $image->id, token: $token)->status());
+        $document['blocks'][0]['data']['elements'] = [];
+        $zones->save('sidebar', $document);
+        self::assertSame([], $app->get(\Prime\Media\MediaUsageRepository::class)->findByMedia($image->id));
+        self::assertSame(204, $this->send($app, 'DELETE', '/api/v1/media/' . $image->id, token: $token)->status());
     }
 
     public function testUnknownBlockBoundariesAreGroupedAndStaleDocumentIsRejected(): void

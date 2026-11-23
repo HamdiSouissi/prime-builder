@@ -33,6 +33,7 @@ final class Validator
         private readonly ?int $entryId = null,
         private readonly ?HtmlContent $html = null,
         private readonly bool $requireSealedHtml = false,
+        private readonly ?MediaReferences $mediaReferences = null,
     ) {
     }
 
@@ -58,10 +59,15 @@ final class Validator
             ? $this->elements($data['elements'], 0, $count, $seen, $errors, $definitions, $mediaIds)
             : [];
         $layout = ['version' => 1, 'elements' => $elements];
+        if ($errors === [] && $this->mediaReferences !== null) {
+            foreach ($this->mediaReferences->ids($elements, $definitions, $this->sanitizer) as $mediaId) {
+                $mediaIds[$mediaId] = $mediaId;
+            }
+        }
         if ($mediaIds !== []) {
             // Core's MediaUsageRepository recognizes item.mediaId on a block's
-            // data. Rebuild this index exclusively from authenticated fragments,
-            // never from a client-supplied top-level items list.
+            // data. Rebuild exclusively from authenticated fragments and resolved
+            // normalized settings, never from the client-supplied items list.
             $layout['items'] = array_map(static fn (int $id): array => ['mediaId' => $id], array_values($mediaIds));
         }
 

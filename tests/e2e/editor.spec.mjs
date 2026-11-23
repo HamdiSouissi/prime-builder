@@ -1430,6 +1430,137 @@ test('image selection uses the Prime media picker', async ({ page }) => {
 });
 
 
+test('native widget media selected in the real picker stays protected until removed', async ({ page, browser }) => {
+  test.setTimeout(150_000);
+  await login(page);
+  let csrf = null, entryId = null, mediaId = null;
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  try {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    const upload = await page.evaluate(async csrf => {
+      const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 200;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#e7f1eb'; ctx.fillRect(0, 0, 320, 200);
+      ctx.fillStyle = '#365c56'; ctx.beginPath(); ctx.moveTo(0, 170); ctx.lineTo(115, 65); ctx.lineTo(200, 160); ctx.lineTo(250, 110); ctx.lineTo(320, 175); ctx.lineTo(320, 200); ctx.lineTo(0, 200); ctx.fill();
+      ctx.fillStyle = '#f5bb70'; ctx.beginPath(); ctx.arc(250, 48, 24, 0, 2 * Math.PI); ctx.fill();
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const form = new FormData(); form.append('file', blob, 'paysage-widgets.png');
+      const response = await fetch('/api/v1/media', { method: 'POST', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' }, body: form });
+      return { status: response.status, body: await response.text() };
+    }, csrf);
+    expect(upload.status, upload.body).toBe(201);
+    mediaId = JSON.parse(upload.body).data.id;
+    const updated = await api(`/api/v1/media/${mediaId}`, 'PATCH', { alt: 'Paysage de la médiathèque' });
+    expect(updated.status, updated.body).toBe(200);
+    const created = await api('/api/v1/content/page', 'POST', {
+      title: 'Média des widgets suivi', slug: 'pb-widget-media', status: 'published', published_at: '2021-01-01 10:00:00',
+      content: { version: 1, blocks: [] },
+    });
+    expect(created.status, created.body).toBe(201);
+    entryId = JSON.parse(created.body).data.id;
+    await page.goto(`/admin/prime-builder/edit/${entryId}`);
+    const selectMedia = async capture => {
+      await page.getByRole('button', { name: 'Choisir dans la médiathèque' }).click();
+      const picker = page.getByRole('dialog', { name: 'Choisir dans la médiathèque' });
+      await expect(picker).toBeVisible();
+      await picker.locator(`[data-prime-picker-card="${mediaId}"]`).click();
+      if (capture) {
+        await expectAccessible(page);
+        await picker.screenshot({ path: test.info().outputPath('widget-media-editor.jpg'), quality: 15 });
+        await page.setViewportSize({ width: 375, height: 812 });
+        await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+        await expectAccessible(page);
+        await picker.screenshot({ path: test.info().outputPath('widget-media-editor-mobile.jpg'), quality: 15 });
+        await page.setViewportSize({ width: 1440, height: 900 });
+      }
+      await picker.locator('[data-prime-picker-confirm]').click();
+      await expect(picker).toBeHidden();
+      await expect(page.getByLabel('Texte alternatif', { exact: true })).toHaveValue('Paysage de la médiathèque');
+      await expect(page.getByLabel('Largeur', { exact: true })).toHaveValue('320');
+      await expect(page.getByLabel('Hauteur', { exact: true })).toHaveValue('200');
+    };
+    await page.getByRole('button', { name: 'Ajouter Image', exact: true }).click();
+    await selectMedia(false);
+    await page.locator('[data-pb-panel="widgets"]').click();
+    await page.getByRole('button', { name: 'Ajouter Appel à l’action', exact: true }).click();
+    await page.getByLabel('Titre', { exact: true }).fill('Explorer le paysage');
+    await selectMedia(true);
+    await page.locator('[data-pb-panel="widgets"]').click();
+    await page.getByRole('button', { name: 'Ajouter Avis', exact: true }).click();
+    await page.getByLabel('Titre', { exact: true }).fill('Un avis illustré');
+    await page.getByLabel('Auteur', { exact: true }).fill('Camille');
+    await selectMedia(false);
+    const saving = page.waitForResponse(response => response.url().endsWith(`/documents/${entryId}`) && response.request().method() === 'PATCH');
+    await page.locator('[data-pb-save]').click();
+    const response = await saving;
+    expect(response.status()).toBe(200);
+    expect((await response.json()).data.content.blocks[0].data.items).toEqual([{ mediaId }]);
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    let detail = await api(`/api/v1/media/${mediaId}`, 'GET');
+    expect(detail.status, detail.body).toBe(200);
+    expect(JSON.parse(detail.body).data.usages.some(item => item.entry_id === entryId && item.context === 'block')).toBe(true);
+    expect((await api(`/api/v1/media/${mediaId}`, 'DELETE')).status).toBe(409);
+
+    const publicPage = await page.context().newPage();
+    try {
+      await publicPage.goto('/pb-widget-media');
+      const pictures = publicPage.locator('.pb-layout img[alt="Paysage de la médiathèque"]');
+      await expect(pictures).toHaveCount(3);
+      for (const img of await pictures.all()) {
+        await img.scrollIntoViewIfNeeded();
+        await expect.poll(() => img.evaluate(node => node.naturalWidth)).toBe(320);
+      }
+      await expectAccessible(publicPage);
+      await publicPage.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+      await expect.poll(() => publicPage.evaluate(() => window.scrollY)).toBe(0);
+      await publicPage.screenshot({ path: test.info().outputPath('widget-media-public.jpg'), quality: 15, fullPage: true });
+      await publicPage.setViewportSize({ width: 375, height: 812 });
+      await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+      await expectAccessible(publicPage);
+      await publicPage.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+      await expect.poll(() => publicPage.evaluate(() => window.scrollY)).toBe(0);
+      await publicPage.screenshot({ path: test.info().outputPath('widget-media-public-mobile.jpg'), quality: 15, fullPage: true });
+    } finally { await publicPage.close(); }
+    const noJs = await browser.newContext({ javaScriptEnabled: false });
+    try {
+      const fallback = await noJs.newPage();
+      await fallback.goto('/pb-widget-media');
+      await expect(fallback.locator('.pb-layout img[alt="Paysage de la médiathèque"]')).toHaveCount(3);
+    } finally { await noJs.close(); }
+
+    // Removing one reference does not release the other two.
+    await page.getByLabel('Adresse de l’image', { exact: true }).fill('/assets/plugins/prime-builder/images/landscape.svg');
+    await page.locator('[data-pb-save]').click();
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    expect((await api(`/api/v1/media/${mediaId}`, 'DELETE')).status).toBe(409);
+    // After the last reference is removed, the real CMS can delete the file.
+    const empty = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] };
+    const cleared = await api(`/api/prime-builder/v1/documents/${entryId}`, 'PATCH', { content: empty });
+    expect(cleared.status, cleared.body).toBe(200);
+    detail = await api(`/api/v1/media/${mediaId}`, 'GET');
+    expect(JSON.parse(detail.body).data.usages.some(item => item.entry_id === entryId)).toBe(false);
+    expect((await api(`/api/v1/media/${mediaId}`, 'DELETE')).status).toBe(204);
+    mediaId = null;
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (entryId) {
+        await api(`/api/v1/content/page/${entryId}`, 'DELETE');
+        await api(`/api/v1/content/page/${entryId}?force=1`, 'DELETE');
+      }
+      if (mediaId) await api(`/api/v1/media/${mediaId}?force=1`, 'DELETE');
+    } finally { page.off('dialog', leave); }
+  }
+});
+
 test('responsive container controls and unsaved style reset update the preview', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
