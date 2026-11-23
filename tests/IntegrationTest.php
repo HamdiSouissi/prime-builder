@@ -1205,6 +1205,111 @@ final class IntegrationTest extends TestCase
         }
     }
 
+    public function testEntryContentCopiesThePublicEntryWithoutRecursionOrDuplicateIds(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $entries = $app->get(EntryRepository::class);
+        $hooks = $app->get(Hooks::class);
+        $initialEntry = $entries->find(1);
+        self::assertNotNull($initialEntry);
+        $assetsWithoutWidget = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assetsWithoutWidget, new PageContext(type: PageContext::TYPE_ENTRY, entry: $initialEntry));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/entry_content.css', $assetsWithoutWidget->renderStyles());
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'entry content', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'heading', 'type' => 'heading', 'settings' => ['text' => 'Texte publié'], 'styles' => [], 'children' => []],
+            ['id' => 'tabs', 'type' => 'tabs', 'settings' => ['label' => 'Choix', 'title_1' => 'Premier', 'text_1' => '<p>Un</p>', 'title_2' => 'Second', 'text_2' => '<p>Deux</p>'], 'styles' => [], 'children' => []],
+            ['id' => 'self', 'type' => 'entry_content', 'settings' => [], 'styles' => [], 'children' => []],
+        ];
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $entries->find(1);
+        self::assertNotNull($entry);
+        self::assertSame(1, substr_count($entry->contentHtml, 'Texte publié'));
+        self::assertStringNotContainsString('data-pb-content-copy', $entry->contentHtml);
+        $layout = ['version' => 1, 'elements' => [
+            ['id' => 'first', 'type' => 'entry_content', 'settings' => [], 'styles' => [], 'children' => []],
+            ['id' => 'second', 'type' => 'entry_content', 'settings' => [], 'styles' => [], 'children' => []],
+        ]];
+        $template = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Corps du contenu', 'kind' => 'section', 'data' => $layout], $token);
+        self::assertSame(201, $template->status(), $template->body());
+        $templateId = json_decode($template->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $templateId, 'footer' => $templateId, 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry);
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        $footer = $hooks->apply('site.partial', null, 'footer', $page, []);
+        self::assertIsString($header);
+        self::assertIsString($footer);
+        self::assertSame(2, substr_count($header, 'Texte publié'));
+        self::assertSame(2, substr_count($footer, 'Texte publié'));
+        self::assertSame(2, substr_count($header, 'data-pb-content-copy='));
+        self::assertSame(2, substr_count($footer, 'data-pb-content-copy='));
+        self::assertStringNotContainsString('pb-entry-content__preview', $header);
+        preg_match_all('/\sid="([^"]+)"/', $header . $entry->contentHtml . $footer, $matches);
+        self::assertNotEmpty($matches[1]);
+        self::assertSame(count($matches[1]), count(array_unique($matches[1])));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/entry_content.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/tabs.js'));
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        self::assertSame(false, $cache->isCacheableRequest(Request::create('GET', '/blog/article-publie')));
+
+        $provider = $app->get(Content::class);
+        $draft = $entries->find(2);
+        self::assertNotNull($draft);
+        self::assertSame('', $provider->entryContentInPage(new PageContext(type: PageContext::TYPE_ENTRY, entry: $draft)));
+        self::assertSame('', $provider->entryContentInPage(new PageContext(type: PageContext::TYPE_SEARCH, entry: $entry)));
+        self::assertSame('', $provider->entryContentInPage(new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry, httpStatus: 404)));
+        $parent = $this->insertGridEntry($pdo, 'page', 'draft', 'Parent privé', 'parent-contenu-prive', 1);
+        $child = $this->insertGridEntry($pdo, 'page', 'published', 'Enfant', 'enfant-contenu-prive', 1, $parent);
+        $unreachable = $entries->find($child);
+        self::assertNotNull($unreachable);
+        self::assertSame('', $provider->entryContentInPage(new PageContext(type: PageContext::TYPE_ENTRY, entry: $unreachable)));
+
+        // Registered CMS dynamic blocks are evaluated by EntryView::content().
+        // A block that re-enters this same provider cannot recurse indefinitely.
+        $recursivePage = null;
+        $hooks->filter('blocks.dynamic', static function (mixed $blocks) use ($provider, &$recursivePage): mixed {
+            if (is_array($blocks)) {
+                $blocks['recursion_probe'] = [
+                    'render' => static fn (array $attrs): string => $provider->entryContentInPage($recursivePage) . '<p id="dynamic">Dynamique public</p>',
+                ];
+            }
+            return $blocks;
+        });
+        $app->get(\Prime\Site\Zone\DynamicBlockRegistry::class)->resetCache();
+        $dynamicDocument = ['version' => 1, 'blocks' => [
+            ['id' => 'one', 'type' => 'dynamic', 'data' => ['name' => 'recursion_probe', 'attrs' => []]],
+            ['id' => 'two', 'type' => 'dynamic', 'data' => ['name' => 'search_form', 'attrs' => []]],
+        ]];
+        $stmt = $pdo->prepare('UPDATE pc_entries SET content = ?, content_html = ? WHERE id = 1');
+        $stmt->execute([json_encode($dynamicDocument), '<p>Repli périmé</p>']);
+        $dynamicEntry = $entries->find(1);
+        self::assertNotNull($dynamicEntry);
+        $recursivePage = new PageContext(type: PageContext::TYPE_ENTRY, entry: $dynamicEntry);
+        $dynamic = $provider->entryContentInPage($recursivePage);
+        self::assertSame(1, substr_count($dynamic, 'Dynamique public'));
+        self::assertStringNotContainsString('Repli périmé', $dynamic);
+        self::assertStringContainsString('<form', $dynamic);
+        self::assertStringContainsString('name="q"', $dynamic);
+        self::assertStringNotContainsString('id="dynamic"', $dynamic);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $recursivePage);
+        self::assertStringContainsString('/assets/plugins/prime-builder/css/widgets/entry_content.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/tabs.js', $assets->renderScripts());
+        $stored = json_encode($app->get(Settings::class)->get('plugin.prime-builder.theme_partials'));
+        self::assertIsString($stored);
+        self::assertStringNotContainsString('Dynamique public', $stored);
+        self::assertStringNotContainsString('Texte publié', $stored);
+    }
+
     public function testEntryWidgetsUseCoreMetadataRefreshAndLoadConditionalAssets(): void
     {
         $app = $this->activated(null);

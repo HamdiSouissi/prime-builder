@@ -35,6 +35,7 @@ require_once dirname(__DIR__) . '/src/Widgets/Archive.php';
 require_once dirname(__DIR__) . '/src/Widgets/Assets.php';
 require_once dirname(__DIR__) . '/src/Widgets/Breadcrumbs.php';
 require_once dirname(__DIR__) . '/src/Widgets/Content.php';
+require_once dirname(__DIR__) . '/src/Widgets/ContentFragment.php';
 require_once dirname(__DIR__) . '/src/Widgets/CodeHighlighter.php';
 require_once dirname(__DIR__) . '/src/Widgets/Countdown.php';
 require_once dirname(__DIR__) . '/src/Widgets/CurrentEntry.php';
@@ -1028,6 +1029,51 @@ final class DocumentTest extends TestCase
         self::assertSame('/assets/plugins/prime-builder/css/widgets/entry_excerpt.css', $definition['style']);
         self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/entry_excerpt.css');
+    }
+
+    public function testEntryContentPreviewsItsContextAndNamespacesCopiedFragmentReferences(): void
+    {
+        $node = $this->element('entry_content', 'body');
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $registry = new Registry();
+        $definition = $registry->all()['entry_content'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/entry_content.css', $definition['style']);
+        self::assertArrayNotHasKey('script', $definition);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/entry_content.css');
+        $preview = (new Renderer($registry, new HtmlSanitizer(), live: true, trustedPreview: true))->render($result['data']);
+        self::assertStringContainsString(Renderer::escape(t('plugin::prime-builder.ui.entry_content_preview')), $preview);
+        $saved = (new Renderer($registry, new HtmlSanitizer()))->render($result['data']);
+        self::assertStringNotContainsString('pb-entry-content__preview', $saved);
+
+        $source = '<section id="intro"><h3 id="intro">Titre &amp; idées</h3><a href="#intro">Retour</a>'
+            . '<label for="search">Chercher</label><input id="search" aria-describedby="intro outside">'
+            . '<svg><linearGradient id="paint"></linearGradient><path fill="url(#paint)"></path></svg>'
+            . '<script>alert(1)</script></section>';
+        $html = \PrimeBuilder\Widgets\ContentFragment::scope($source, 'pbc-test');
+        self::assertStringContainsString('id="pbc-test-1"', $html);
+        self::assertStringContainsString('id="pbc-test-2"', $html);
+        self::assertStringContainsString('href="#pbc-test-1"', $html);
+        self::assertStringContainsString('for="pbc-test-3"', $html);
+        self::assertStringContainsString('id="pbc-test-3" aria-describedby="pbc-test-1 outside"', $html);
+        self::assertStringContainsString('fill="url(#pbc-test-4)"', $html);
+        self::assertStringContainsString('Titre &amp; idées', $html);
+        self::assertStringNotContainsString('<script', $html);
+        $more = \PrimeBuilder\Widgets\ContentFragment::scope(
+            '<p id="café">Café</p><a href="#caf%C3%A9">Aller</a><img src="/carte.png" alt="Plan" usemap="#plan"><map name="plan"><area href="#caf%C3%A9" alt="Café"></map>'
+            . '<svg viewBox="0 0 10 10"><use xlink:href="#caf%C3%A9"></use><path style="fill:url(#caf%C3%A9)"></path></svg>',
+            'pbc-other',
+        );
+        self::assertStringContainsString('id="pbc-other-1"', $more);
+        self::assertStringContainsString('href="#pbc-other-1"', $more);
+        self::assertStringContainsString('xlink:href="#pbc-other-1"', $more);
+        self::assertStringContainsString('style="fill:url(#pbc-other-1)"', $more);
+        self::assertStringContainsString('usemap="#pbc-other-map-2"', $more);
+        self::assertStringContainsString('name="pbc-other-map-2"', $more);
+        self::assertSame('', \PrimeBuilder\Widgets\ContentFragment::scope($source, 'invalid prefix'));
+        self::assertSame('', \PrimeBuilder\Widgets\ContentFragment::scope('</div><p>Hors fragment</p>', 'pbc-test'));
+        self::assertSame('', \PrimeBuilder\Widgets\ContentFragment::scope(str_repeat('x', 2 * 1024 * 1024 + 1), 'pbc-test'));
     }
 
     public function testEntryFeaturedImageUsesTheCoreMediaViewAndValidatesItsSize(): void

@@ -116,6 +116,7 @@ final class Registry
             'entry_excerpt' => [
                 'length' => ['type' => 'integer', 'min' => 1, 'max' => 1000, 'label' => 'plugin::prime-builder.ui.entry_excerpt_length'],
             ],
+            'entry_content' => [],
             'entry_featured_image' => [
                 'size' => ['type' => 'enum', 'values' => ['thumbnail', 'medium', 'large', 'full'], 'label' => 'plugin::prime-builder.ui.entry_image_size', 'option_labels' => ['thumbnail' => 'plugin::prime-builder.ui.entry_image_thumbnail', 'medium' => 'plugin::prime-builder.ui.entry_image_medium', 'large' => 'plugin::prime-builder.ui.entry_image_large', 'full' => 'plugin::prime-builder.ui.entry_image_full']],
             ],
@@ -203,7 +204,7 @@ final class Registry
         foreach ($fields as $type => $schema) {
             $definitions[$type] = [
                 'label' => 'plugin::prime-builder.widgets.' . $type,
-                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation', 'breadcrumbs', 'site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author', 'archive_title', 'archive_list', 'share_buttons', 'table_of_contents'], true) ? 'pro' : 'base'),
+                'category' => $type === 'container' ? 'structure' : (in_array($type, ['posts', 'current_content', 'form', 'prime_block', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation', 'breadcrumbs', 'site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author', 'archive_title', 'archive_list', 'share_buttons', 'table_of_contents'], true) ? 'pro' : 'base'),
                 'fields' => $schema,
                 'container' => $type === 'container',
             ];
@@ -211,7 +212,7 @@ final class Registry
                 $definitions[$type]['hidden'] = true;
                 $definitions[$type]['read_only'] = true;
             }
-            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation', 'breadcrumbs', 'site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author', 'archive_title', 'archive_list', 'share_buttons', 'table_of_contents'], true)) {
+            if (in_array($type, ['container', 'button', 'spacer', 'quote', 'alert', 'progress', 'accordion', 'card', 'icon_box', 'image_box', 'counter', 'tabs', 'toggle', 'gallery', 'image_carousel', 'map', 'video', 'audio', 'posts', 'form', 'call_to_action', 'price_table', 'price_list', 'countdown', 'review', 'flip_box', 'animated_heading', 'code', 'testimonial_carousel', 'media_carousel', 'slideshow', 'portfolio', 'search_form', 'navigation', 'breadcrumbs', 'site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author', 'archive_title', 'archive_list', 'share_buttons', 'table_of_contents'], true)) {
                 $definitions[$type]['style'] = '/assets/plugins/prime-builder/css/widgets/' . $type . '.css';
             }
             if ($type === 'tabs') {

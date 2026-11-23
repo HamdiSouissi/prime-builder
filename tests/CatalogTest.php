@@ -47,6 +47,8 @@ final class CatalogTest extends TestCase
         self::assertSame('Content title', $en['widgets']['entry_title']);
         self::assertSame('Extrait du contenu', $fr['widgets']['entry_excerpt']);
         self::assertSame('Content excerpt', $en['widgets']['entry_excerpt']);
+        self::assertSame('Contenu de l’entrée', $fr['widgets']['entry_content']);
+        self::assertSame('Entry content', $en['widgets']['entry_content']);
         self::assertSame('Image à la une du contenu', $fr['widgets']['entry_featured_image']);
         self::assertSame('Content featured image', $en['widgets']['entry_featured_image']);
         self::assertSame('Informations du contenu', $fr['widgets']['entry_info']);

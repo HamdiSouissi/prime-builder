@@ -17,6 +17,19 @@
       if (!ids.has(old)) ids.set(old, next);
       element.id = next;
     }
+    const maps = new Map();
+    let mapNumber = 0;
+    for (const map of template.content.querySelectorAll('map[name]')) {
+      const old = map.getAttribute('name');
+      if (!old) continue;
+      const next = `pb-zone-${widgetId}-map-${++mapNumber}`;
+      if (!maps.has(old)) maps.set(old, next);
+      map.setAttribute('name', next);
+    }
+    const lookup = (targets, fragment) => {
+      if (targets.has(fragment)) return targets.get(fragment);
+      try { return targets.get(decodeURIComponent(fragment)); } catch { return undefined; }
+    };
     const idLists = ['for', 'list', 'form', 'headers', 'aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-owns', 'aria-activedescendant', 'aria-details', 'aria-errormessage'];
     for (const element of template.content.querySelectorAll('*')) {
       for (const attribute of idLists) {
@@ -24,9 +37,21 @@
         if (!value) continue;
         element.setAttribute(attribute, value.split(/\s+/).map(id => ids.get(id) || id).join(' '));
       }
-      for (const attribute of ['href', 'xlink:href']) {
+      for (const attribute of ['href', 'xlink:href', 'usemap']) {
         const value = element.getAttribute(attribute);
-        if (value?.startsWith('#') && ids.has(value.slice(1))) element.setAttribute(attribute, `#${ids.get(value.slice(1))}`);
+        if (!value?.startsWith('#')) continue;
+        const fragment = value.slice(1);
+        const target = (attribute === 'usemap' && lookup(maps, fragment)) || lookup(ids, fragment);
+        if (target) element.setAttribute(attribute, `#${target}`);
+      }
+      // Preserve local SVG masks, filters and gradients after scoping IDs.
+      for (const attribute of ['style', 'fill', 'stroke', 'filter', 'clip-path', 'mask', 'marker-start', 'marker-mid', 'marker-end']) {
+        const value = element.getAttribute(attribute);
+        if (!value) continue;
+        element.setAttribute(attribute, value.replace(/url\(\s*(["']?)#([^\s)"']+)\1\s*\)/g, (match, quote, fragment) => {
+          const target = lookup(ids, fragment);
+          return target ? `url(#${target})` : match;
+        }));
       }
     }
     return template.content;
@@ -149,7 +174,13 @@
         if (!deferred && !['pb-posts', 'pb-current_content', 'pb-theme_zone', 'pb-search_form', 'pb-navigation'].some(type => node.classList.contains(type))) continue;
         const html = widgets[node.dataset.pbId];
         if (typeof html !== 'string') continue;
-        if (node.classList.contains('pb-theme_zone')) node.replaceChildren(zoneFragment(html, node.dataset.pbId));
+        if (node.classList.contains('pb-theme_zone')) {
+          // A copied entry can contain the same zone widget as the original and
+          // other copies. Keep IDs introduced by this later refresh distinct too.
+          const copy = node.closest('[data-pb-content-copy]')?.dataset.pbContentCopy || '';
+          const scope = /^pbc-[a-f0-9]{24}$/.test(copy) ? `${copy}-${node.dataset.pbId}` : node.dataset.pbId;
+          node.replaceChildren(zoneFragment(html, scope));
+        }
         else if (node.classList.contains('pb-navigation')) replaceWhenUnfocused(node, () => { node.innerHTML = html; enhanceNavigation(node); });
         else if (deferred) replaceWhenUnfocused(node, () => { node.innerHTML = html; });
         else if (node.classList.contains('pb-search_form')) {

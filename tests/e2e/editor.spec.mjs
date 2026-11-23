@@ -1623,7 +1623,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
     return { status: result.status, count: elements.length };
   }, id);
   expect(status).toBe(200);
-  expect(count).toBe(62);
+  expect(count).toBe(63);
   await page.goto('/test-prime-builder');
   await expect(page.locator('.pb-element')).toHaveCount(count);
   await expectAccessible(page);
@@ -2858,6 +2858,277 @@ test('archive title and list use the real public context without JavaScript', as
         await page.goto('/admin/settings/reading');
         expect(await saveReading(readingPerPage)).toEqual({ status: 200, redirected: true });
       }
+    } finally { page.off('dialog', leave); }
+  }
+});
+
+test('entry content in theme partials preserves controls without duplicate IDs', async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  page.setDefaultTimeout(12_000);
+  await login(page);
+  let csrf = null, pageId = null, rawId = null, templateId = null, originalTheme = null, originalZone = null;
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  const saveZone = content => page.request.post('/admin/appearance/zones/sidebar/save', {
+    headers: { Accept: 'application/json', 'X-CSRF-Token': csrf }, data: { content },
+  });
+  try {
+    await page.goto('/admin/appearance/zones?zone=sidebar');
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    originalZone = JSON.parse(await page.locator('[data-prime-editor-input]').inputValue());
+    expect((await saveZone({ version: 1, blocks: [
+      { id: 'text', type: 'paragraph', data: { text: 'Zone actualisée' } },
+      { id: 'search', type: 'dynamic', data: { name: 'search_form', attrs: {} } },
+    ] })).status()).toBe(200);
+    const created = await api('/api/v1/content/page', 'POST', {
+      title: 'Page à copier', slug: 'pb-contenu-complet', status: 'published', content: { version: 1, blocks: [] },
+    });
+    expect(created.status, created.body).toBe(201);
+    const entry = JSON.parse(created.body).data;
+    pageId = entry.id;
+    await page.goto(`/admin/prime-builder/edit/${pageId}`);
+    await page.getByRole('button', { name: 'Ajouter Contenu de l’entrée', exact: true }).click();
+    const frame = page.frameLocator('[data-pb-frame]');
+    await expect(frame.locator('.pb-entry_content')).toContainText('pour éviter une boucle');
+    await expect(frame.locator('link[href*="/css/widgets/entry_content.css"]')).toHaveCount(1);
+    await page.getByRole('button', { name: 'Style', exact: true }).click();
+    await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('content-screen-editor-desktop.jpg'), fullPage: true, quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await showMobilePreview(page, frame, '.pb-entry_content');
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('content-screen-editor-mobile.jpg'), fullPage: true, quality: 15 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator('[data-pb-save]').click();
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    const elements = [
+      { id: 'body_heading', type: 'heading', settings: { text: 'Un contenu à lire', level: 2 }, styles: { desktop: { color: '#2468ac' } }, children: [] },
+      { id: 'body_tabs', type: 'tabs', settings: { label: 'Les chapitres', title_1: 'Début', text_1: '<p>Premier texte.</p>', title_2: 'Suite', text_2: '<p>Second texte.</p>' }, styles: {}, children: [] },
+      { id: 'body_anchor', type: 'anchor', settings: { anchor: 'detail-copie' }, styles: {}, children: [] },
+      { id: 'body_link', type: 'button', settings: { text: 'Aller au détail', url: '#detail-copie' }, styles: {}, children: [] },
+      { id: 'body_search', type: 'search_form', settings: { search_label: 'Chercher dans le site' }, styles: {}, children: [] },
+      { id: 'body_zone', type: 'theme_zone', settings: { zone: 'sidebar' }, styles: {}, children: [] },
+      { id: 'body_carousel', type: 'testimonial_carousel', settings: { label: 'Avis des lecteurs', items: 'Un texte utile. | Camille\nUne belle découverte. | Alex' }, styles: {}, children: [] },
+      { id: 'body_form', type: 'form', settings: { title: 'Nous écrire' }, styles: {}, children: [] },
+      { id: 'body_self', type: 'entry_content', settings: {}, styles: {}, children: [] },
+    ];
+    let result = await api(`/api/prime-builder/v1/documents/${pageId}`, 'PATCH', {
+      content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements } }] },
+    });
+    expect(result.status, result.body).toBe(200);
+    const template = { version: 1, elements: [
+      { id: 'copy_one', type: 'entry_content', settings: {}, styles: {}, children: [] },
+      { id: 'copy_two', type: 'entry_content', settings: {}, styles: {}, children: [] },
+    ] };
+    result = await api('/api/prime-builder/v1/templates', 'POST', { name: 'Copies du contenu', kind: 'section', data: template });
+    expect(result.status, result.body).toBe(201);
+    templateId = JSON.parse(result.body).data.id;
+    await page.goto('/admin/prime-builder/theme');
+    originalTheme = {
+      header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
+      footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
+      exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
+    };
+    await page.getByLabel('En-tête', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Contenus exclus', { exact: true }).fill('');
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await expect(page.getByLabel('En-tête', { exact: true })).toHaveValue(templateId);
+    await expect(page.getByLabel('Pied de page', { exact: true })).toHaveValue(templateId);
+    // Exercise additional reference types in a later zone refresh while keeping
+    // the actual CMS zone and its search form in the response.
+    let liveRequests = 0;
+    await page.route(`**/api/prime-builder/v1/documents/${pageId}/live*`, async route => {
+      liveRequests += 1;
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.widgets.body_zone += '<div hidden data-pb-zone-probe><p id="café">café</p><a href="#caf%C3%A9">café</a><img src="/assets/plugins/prime-builder/icon.svg" alt="Plan" usemap="#plan"><map name="plan"><area href="#caf%C3%A9" alt="Café"></map><svg viewBox="0 0 10 10"><defs><linearGradient id="paint"><stop offset="0%" stop-color="red"></stop><stop offset="100%" stop-color="blue"></stop></linearGradient></defs><rect width="10" height="10" fill="url(#paint)"></rect></svg></div>';
+      await route.fulfill({ response, json });
+    });
+    await page.goto(entry.url);
+    const header = page.locator('header.pb-theme-header');
+    const footer = page.locator('footer.pb-theme-footer');
+    for (const partial of [header, footer]) {
+      await expect(partial.locator('[data-pb-content-copy]')).toHaveCount(2);
+      await expect(partial.getByText('Un contenu à lire', { exact: true })).toHaveCount(2);
+      await expect(partial.locator('[data-pb-content-copy] .pb-entry_content')).toHaveCount(2);
+      for (const self of await partial.locator('[data-pb-content-copy] .pb-entry_content').all()) await expect(self).toBeEmpty();
+    }
+    await expect(page.locator('link[href*="/css/widgets/entry_content.css"]')).toHaveCount(1);
+    await expect(page.locator('script[src*="/js/tabs.js"]')).toHaveCount(1);
+    await expect(page.locator('script[src*="/js/content.js"]')).toHaveCount(1);
+    await expect(page.locator('script[src*="/js/image_carousel.js"]')).toHaveCount(1);
+    await expect(page.locator('script[src*="/js/forms.js"]')).toHaveCount(1);
+    const layouts = page.locator('.pb-layout[data-pb-live]');
+    await expect(layouts).toHaveCount(5);
+    for (const layout of await layouts.all()) {
+      // CSS remains targeted by the original data-pb-id in all copies.
+      await expect(layout.getByRole('heading', { name: 'Un contenu à lire' })).toHaveCSS('color', 'rgb(36, 104, 172)');
+      const tabs = layout.getByRole('tablist', { name: 'Les chapitres' });
+      const first = tabs.getByRole('tab', { name: 'Début' });
+      await expect(first).toHaveAttribute('aria-selected', 'true');
+      await first.focus(); await page.keyboard.press('ArrowRight');
+      await expect(tabs.getByRole('tab', { name: 'Suite' })).toHaveAttribute('aria-selected', 'true');
+      await expect(layout.getByText('Second texte.', { exact: true })).toBeVisible();
+      const link = layout.getByRole('link', { name: 'Aller au détail' });
+      const href = await link.getAttribute('href');
+      expect(href).toMatch(/^#/);
+      expect(await layout.locator(`[id="${href.slice(1)}"]`).count()).toBe(1);
+      const search = layout.getByRole('searchbox', { name: 'Chercher dans le site' });
+      const searchId = await search.getAttribute('id');
+      await expect(layout.locator('label').filter({ hasText: 'Chercher dans le site' })).toHaveAttribute('for', searchId);
+      await expect(layout.locator('.pb-theme_zone')).toContainText('Zone actualisée');
+      const zoneInput = layout.locator('.pb-theme_zone input[type="search"]');
+      const zoneId = await zoneInput.getAttribute('id');
+      expect(zoneId).toMatch(/^pb-zone-/);
+      await expect(layout.locator('.pb-theme_zone label')).toHaveAttribute('for', zoneId);
+      const probe = layout.locator('[data-pb-zone-probe]');
+      const targetId = await probe.locator('p').getAttribute('id');
+      await expect(probe.locator('a')).toHaveAttribute('href', `#${targetId}`);
+      const mapName = await probe.locator('map').getAttribute('name');
+      await expect(probe.locator('img')).toHaveAttribute('usemap', `#${mapName}`);
+      const gradientId = await probe.locator('linearGradient').getAttribute('id');
+      await expect(probe.locator('rect')).toHaveAttribute('fill', `url(#${gradientId})`);
+      const carousel = layout.getByRole('region', { name: 'Avis des lecteurs' });
+      await expect(carousel.locator('[data-pb-slide]').nth(1)).toBeHidden();
+      await carousel.getByRole('button', { name: 'Témoignage suivant' }).focus();
+      await page.keyboard.press('Enter');
+      await expect(carousel.locator('[data-pb-slide]').nth(1)).toBeVisible();
+      await expect(carousel.getByRole('status')).toHaveText('Témoignage 2 sur 2');
+      const form = layout.locator('[data-pb-form]');
+      const emailId = await form.getByLabel('Adresse e-mail').getAttribute('id');
+      await expect(form.locator('label').filter({ hasText: 'Adresse e-mail' })).toHaveAttribute('for', emailId);
+      await expect(form.getByRole('button', { name: 'Envoyer', exact: true })).toBeEnabled();
+    }
+    const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(node => node.id).filter(Boolean));
+    expect(ids.length).toBe(new Set(ids).size);
+    const zoneMaps = await page.locator('[data-pb-zone-probe] map').evaluateAll(nodes => nodes.map(node => node.getAttribute('name')));
+    expect(new Set(zoneMaps).size).toBe(5);
+    expect(liveRequests).toBe(1);
+    await expectAccessible(page);
+    const sampleCopy = footer.locator('[data-pb-content-copy]').first();
+    await sampleCopy.screenshot({ path: test.info().outputPath('content-screen-public-desktop.jpg'), quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    const zoneButton = footer.locator('.pb-theme_zone button').first();
+    await expect(zoneButton).toHaveCSS('overflow-wrap', 'normal');
+    expect(await zoneButton.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await expectAccessible(page);
+    await sampleCopy.screenshot({ path: test.info().outputPath('content-screen-public-mobile.jpg'), quality: 15 });
+    // A form in a copy still submits against the real entry and node, not the
+    // copied DOM ID. Its token and status are independent of the other copies.
+    const copiedForm = footer.locator('[data-pb-form]').first();
+    await copiedForm.getByLabel('Nom', { exact: true }).fill('Copie de test');
+    await copiedForm.getByLabel('Adresse e-mail', { exact: true }).fill('pb-copie@example.test');
+    await copiedForm.getByLabel('Message', { exact: true }).fill('Message depuis une copie.');
+    const submitted = page.waitForResponse(response => response.url().endsWith(`/api/prime-builder/v1/forms/${pageId}/submit`) && response.request().method() === 'POST');
+    await copiedForm.getByRole('button', { name: 'Envoyer', exact: true }).click();
+    expect((await submitted).status()).toBe(201);
+    await expect(copiedForm.locator('[data-pb-form-status]')).toHaveText('Votre message a été enregistré.');
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const fallback = await noJs.newPage();
+      await fallback.goto(entry.url);
+      const copies = fallback.locator('[data-pb-content-copy]');
+      await expect(copies).toHaveCount(4);
+      for (const copy of await copies.all()) {
+        await expect(copy.getByText('Premier texte.', { exact: true })).toBeVisible();
+        await expect(copy.getByText('Second texte.', { exact: true })).toBeVisible();
+        await expect(copy.locator('.pb-theme_zone')).toContainText('La zone du thème est disponible avec JavaScript');
+        await expect(copy.locator('[data-pb-carousel] [data-pb-slide]').nth(1)).toBeVisible();
+        await expect(copy.locator('[data-pb-form] button[type="submit"]')).toBeDisabled();
+        const href = await copy.getByRole('link', { name: 'Aller au détail' }).getAttribute('href');
+        expect(await copy.locator(`[id="${href.slice(1)}"]`).count()).toBe(1);
+      }
+      const fallbackIds = await fallback.locator('[id]').evaluateAll(nodes => nodes.map(node => node.id).filter(Boolean));
+      expect(fallbackIds.length).toBe(new Set(fallbackIds).size);
+      result = await api(`/api/v1/content/page/${pageId}`, 'PATCH', { status: 'draft', title: 'Page devenue privée' });
+      expect(result.status, result.body).toBe(200);
+      expect((await fallback.request.get(entry.url)).status()).toBe(404);
+    } finally { await noJs.close(); }
+
+    // A non-Builder entry can contain trusted core HTML. Check the browser's
+    // actual interpretation of SVG, image maps and HTML5 media after the server
+    // scopes it; scripts in the copies must not execute a second time.
+    const raw = '<div data-raw-probe><p id="café">Café</p><a href="#caf%C3%A9">Voir Café</a>'
+      + '<img src="/assets/plugins/prime-builder/icon.svg" alt="Plan" usemap="#plan"><map name="plan"><area href="#caf%C3%A9" alt="Café"></map>'
+      + '<svg role="img" aria-label="Dégradé" width="40" height="40" viewBox="0 0 10 10"><defs><linearGradient id="paint"><stop offset="0%" stop-color="red"></stop><stop offset="100%" stop-color="blue"></stop></linearGradient><rect id="shape" width="10" height="10" fill="url(#paint)"></rect></defs><use xlink:href="#shape"></use></svg>'
+      + '<video controls preload="none"><source src="/demo.webm" type="video/webm"><track kind="captions" src="/demo.vtt" srclang="fr" label="Français"></video>'
+      + '<script type="application/json" id="payload">{"message":"ok"}</script></div>';
+    result = await api('/api/v1/content/page', 'POST', {
+      title: 'Contenu Prime natif', slug: 'pb-contenu-prime-natif', status: 'published',
+      content: { version: 1, blocks: [{ id: 'raw', type: 'html', data: { html: raw } }] },
+    });
+    expect(result.status, result.body).toBe(201);
+    const rawEntry = JSON.parse(result.body).data;
+    rawId = rawEntry.id;
+    await page.goto(rawEntry.url);
+    const rawCopies = page.locator('[data-pb-content-copy] [data-raw-probe]');
+    await expect(rawCopies).toHaveCount(4);
+    for (const copy of await rawCopies.all()) {
+      const targetId = await copy.locator('p').getAttribute('id');
+      await expect(copy.getByRole('link', { name: 'Voir Café' })).toHaveAttribute('href', `#${targetId}`);
+      const mapName = await copy.locator('map').getAttribute('name');
+      await expect(copy.locator('img')).toHaveAttribute('usemap', `#${mapName}`);
+      const gradientId = await copy.locator('linearGradient').getAttribute('id');
+      const shapeId = await copy.locator('rect').getAttribute('id');
+      await expect(copy.locator('rect')).toHaveAttribute('fill', `url(#${gradientId})`);
+      await expect(copy.locator('use')).toHaveAttribute('xlink:href', `#${shapeId}`);
+      expect(await copy.locator('use').evaluate(node => ({ href: node.getAttributeNS('http://www.w3.org/1999/xlink', 'href'), width: node.getBBox().width }))).toEqual({ href: `#${shapeId}`, width: 10 });
+      expect(await copy.locator('svg').evaluate(svg => ({ width: svg.viewBox.baseVal.width, namespace: svg.namespaceURI }))).toEqual({ width: 10, namespace: 'http://www.w3.org/2000/svg' });
+      await expect(copy.locator('map > area')).toHaveCount(1);
+      await expect(copy.locator('video > source')).toHaveCount(1);
+      await expect(copy.locator('video > track')).toHaveCount(1);
+      await expect(copy.locator('script')).toHaveCount(0);
+    }
+    await expect(page.locator('main [data-raw-probe] script[type="application/json"]')).toHaveCount(1);
+    const rawIds = await page.locator('[id]').evaluateAll(nodes => nodes.map(node => node.id).filter(Boolean));
+    expect(rawIds.length).toBe(new Set(rawIds).size);
+    const rawMaps = await page.locator('[data-raw-probe] map').evaluateAll(nodes => nodes.map(node => node.getAttribute('name')));
+    expect(new Set(rawMaps).size).toBe(5);
+    await expect(page.locator('script[src*="/js/tabs.js"], script[src*="/js/content.js"]')).toHaveCount(0);
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (pageId) {
+        await page.goto('/admin/prime-builder/submissions');
+        const submission = page.locator('[data-pb-submission-id]').filter({ hasText: 'pb-copie@example.test' });
+        if (await submission.count()) await submission.getByRole('button', { name: /Supprimer l’envoi/ }).click();
+        await expect(submission).toHaveCount(0);
+      }
+      if (originalTheme) {
+        await page.goto('/admin/prime-builder/theme');
+        await page.getByLabel('En-tête', { exact: true }).selectOption(originalTheme.header);
+        await page.getByLabel('Pied de page', { exact: true }).selectOption(originalTheme.footer);
+        await page.getByLabel('Contenus exclus', { exact: true }).fill(originalTheme.exclude);
+        await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+      }
+      if (pageId) {
+        const trashed = await api(`/api/v1/content/page/${pageId}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/page/${pageId}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (rawId) {
+        const trashed = await api(`/api/v1/content/page/${rawId}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/page/${rawId}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (templateId) {
+        const deleted = await api(`/api/prime-builder/v1/templates/${templateId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(200);
+      }
+      if (originalZone) expect((await saveZone(originalZone)).status()).toBe(200);
     } finally { page.off('dialog', leave); }
   }
 });

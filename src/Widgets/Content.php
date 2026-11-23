@@ -36,6 +36,9 @@ final class Content
     /** @var array<string, EntryView|null> */
     private array $adjacentEntries = [];
 
+    /** @var array<int, true> */
+    private array $renderingEntryContent = [];
+
     public function __construct(
         private readonly EntryQuery $query,
         private readonly ContentTypeRegistry $types,
@@ -359,18 +362,44 @@ final class Content
      */
     public function entryWidgetInPage(string $type, array $settings, ?PageContext $page): string
     {
+        $entry = $this->publicPageEntry($page);
+        return $entry !== null ? $this->entryWidget($type, $settings, $entry, true) : '';
+    }
+
+    /** A copy is only useful in a page-context template, never inside its own saved entry. */
+    public function entryContentInPage(?PageContext $page): string
+    {
+        $entry = $this->publicPageEntry($page);
+        if ($entry === null || isset($this->renderingEntryContent[$entry->id])) {
+            return '';
+        }
+        $this->renderingEntryContent[$entry->id] = true;
+        try {
+            $html = $this->entryView($entry)?->content() ?? '';
+            // Each rendering receives a fresh scope, including multiple widgets in
+            // both theme slots. The copied IDs cannot collide with the original.
+            $prefix = 'pbc-' . bin2hex(random_bytes(12));
+            $html = ContentFragment::scope($html, $prefix);
+            return $html !== '' ? '<div data-pb-content-copy="' . $prefix . '">' . $html . '</div>' : '';
+        } finally {
+            unset($this->renderingEntryContent[$entry->id]);
+        }
+    }
+
+    private function publicPageEntry(?PageContext $page): ?Entry
+    {
         if ($page === null || $page->httpStatus !== 200 || $page->isRedirect()
             || !in_array($page->type, [PageContext::TYPE_ENTRY, PageContext::TYPE_FRONT, PageContext::TYPE_BLOG], true)) {
-            return '';
+            return null;
         }
         $entry = $page->entry;
         if ($entry === null || $this->types->get($entry->type)?->public !== true || !UrlResolver::isPubliclyVisible($entry)) {
-            return '';
+            return null;
         }
         if ($entry->type === 'page' && $this->resolvePageAncestors([$entry]) === []) {
-            return '';
+            return null;
         }
-        return $this->entryWidget($type, $settings, $entry, true);
+        return $entry;
     }
 
     /** @param array<string, mixed> $settings */

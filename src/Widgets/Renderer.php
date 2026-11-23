@@ -247,6 +247,9 @@ final class Renderer
             'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author' => $this->pageContext !== null
                 ? ($this->content?->entryWidgetInPage($type, $settings, $this->pageContext) ?? '')
                 : ($this->content?->entryWidget($type, $settings, $this->entry, $this->live) ?? ''),
+            'entry_content' => $this->pageContext !== null
+                ? ($this->content?->entryContentInPage($this->pageContext) ?? '')
+                : ($this->live && $this->trustedPreview ? '<p class="pb-entry-content__preview">' . self::escape(t('plugin::prime-builder.ui.entry_content_preview')) . '</p>' : ''),
             'archive_title', 'archive_list' => $this->pageContext !== null
                 ? ($this->content?->archiveWidget($type, $settings, $this->pageContext) ?? '')
                 : ($this->live && $this->trustedPreview ? '<p class="pb-archive-preview">' . self::escape(t('plugin::prime-builder.ui.archive_preview')) . '</p>' : ''),

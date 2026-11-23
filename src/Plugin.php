@@ -205,7 +205,7 @@ final class Plugin extends AbstractPlugin
         // so favour freshness over page caching while any such widget is installed.
         $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable) use ($partials): mixed {
             if ($cacheable === true && $partials->usesAnyWidget([
-                'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_featured_image',
+                'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image',
                 'entry_info', 'entry_navigation', 'entry_author',
             ])) {
                 return false;

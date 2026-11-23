@@ -1,0 +1,14 @@
+.pb-entry_content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pb-entry_content :where(img, video, iframe) {
+  max-width: 100%;
+}
+
+/* Keep native controls legible in flex forms: inherited `anywhere` can shrink
+   their min-content width enough to split short button labels mid-word. */
+.pb-entry_content :where(button) {
+  overflow-wrap: normal;
+}
