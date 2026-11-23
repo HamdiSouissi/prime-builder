@@ -122,6 +122,61 @@ final class IntegrationTest extends TestCase
         self::assertSame(404, $this->send($app, 'GET', '/prime-builder/css/1-0000000000000000.css')->status());
     }
 
+    public function testResponsiveVisibilityPersistsInEntryAndThemeStylesheetsWithoutScripts(): void
+    {
+        $app = $this->activated('admin');
+        $app->get(Settings::class)->set('plugin.prime-builder.configuration', ['breakpoint_tablet' => 1000, 'breakpoint_mobile' => 600]);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'responsive', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'section', 'type' => 'container', 'settings' => ['layout' => 'grid', 'columns' => 2],
+            'styles' => ['desktop' => ['visibility' => 'hide'], 'tablet' => ['visibility' => 'show'], 'mobile' => ['visibility' => 'hide']],
+            'children' => [['id' => 'action', 'type' => 'button', 'settings' => ['text' => 'Action visible en tablette', 'url' => '/'], 'styles' => [], 'children' => []]],
+        ]];
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('Action visible en tablette', $entry->contentHtml);
+        $layout = $entry->decodedContent()['blocks'][0]['data'];
+        self::assertSame('show', $layout['elements'][0]['styles']['tablet']['visibility']);
+        $css = (new Compiler(1000, 600))->compile($layout);
+        $url = '/prime-builder/css/1-' . substr(hash('sha256', $css), 0, 16) . '.css';
+        $stylesheet = $this->send($app, 'GET', $url);
+        self::assertSame(200, $stylesheet->status());
+        self::assertSame($css, $stylesheet->body());
+        self::assertStringContainsString('@media not all and (max-width:1000px){.pb-element[data-pb-id="section"]{display:none!important}}', $css);
+        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="section"]{display:none!important}}', $css);
+        self::assertStringNotContainsString('@media(max-width:1000px){@media not all', $css);
+        $assets = new ThemeAssetRegistry();
+        $hooks = $app->get(Hooks::class);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry);
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringContainsString('/assets/plugins/prime-builder/css/widgets/button.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
+
+        $invalid = $document;
+        $invalid['blocks'][0]['data']['elements'][0]['styles']['tablet']['visibility'] = 'show;}body{display:none';
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $invalid], $token)->status());
+        self::assertSame($css, $this->send($app, 'GET', $url)->body(), 'Existing fingerprinted styles remain immutable');
+
+        $template = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Visibilité', 'kind' => 'section', 'data' => $document['blocks'][0]['data']], $token);
+        self::assertSame(201, $template->status(), $template->body());
+        $templateId = json_decode($template->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $templateId, 'footer' => '', 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($header);
+        self::assertSame(1, preg_match('/data-pb-id="([a-zA-Z0-9_-]+)"/', $header, $idMatches));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\\.css)~', $assets->renderStyles(), $matches));
+        $themeStylesheet = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
+        self::assertSame(200, $themeStylesheet->status());
+        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]{display:none!important}', $themeStylesheet->body());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
+    }
+
     public function testPlainTextSeparatesRenderedElementsAndNormalizesWhitespace(): void
     {
         $app = $this->activated(null);

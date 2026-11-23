@@ -633,6 +633,8 @@ return [
         'replace' => 'Créer une mise en page',
         'select_container' => 'Ajout à la racine : sélectionnez un conteneur pour imbriquer.',
         'responsive_help' => 'Une valeur vide hérite du format supérieur.',
+        'visibility' => 'Visibilité sur cet appareil',
+        'visibility_warning' => 'Un parent masqué reste prioritaire. Le contenu masqué reste dans le HTML : ce réglage ne protège pas des données privées.',
         'value_inherited' => 'Hérité de',
         'value_defined' => 'Défini pour',
         'value_default' => 'Valeur héritée du parent ou valeur par défaut.',

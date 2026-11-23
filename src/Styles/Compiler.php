@@ -27,15 +27,25 @@ final class Compiler
     public function compile(array $data): string
     {
         $modes = ['desktop' => '', 'tablet' => '', 'mobile' => ''];
-        $this->walk(is_array($data['elements'] ?? null) ? $data['elements'] : [], $modes);
-        return $modes['desktop'] . ($modes['tablet'] !== '' ? '@media(max-width:' . $this->tablet . 'px){' . $modes['tablet'] . '}' : '') . ($modes['mobile'] !== '' ? '@media(max-width:' . $this->mobile . 'px){' . $modes['mobile'] . '}' : '');
+        $hidden = ['desktop' => '', 'tablet' => '', 'mobile' => ''];
+        $this->walk(is_array($data['elements'] ?? null) ? $data['elements'] : [], $modes, $hidden);
+        // Non-overlapping ranges preserve each element's original display type:
+        // an explicit "show" does not have to guess whether it was flex or grid.
+        // Negating max-width also covers fractional viewport sizes at zoom.
+        return $modes['desktop']
+            . ($modes['tablet'] !== '' ? '@media(max-width:' . $this->tablet . 'px){' . $modes['tablet'] . '}' : '')
+            . ($modes['mobile'] !== '' ? '@media(max-width:' . $this->mobile . 'px){' . $modes['mobile'] . '}' : '')
+            . ($hidden['desktop'] !== '' ? '@media not all and (max-width:' . $this->tablet . 'px){' . $hidden['desktop'] . '}' : '')
+            . ($hidden['tablet'] !== '' ? '@media(max-width:' . $this->tablet . 'px){@media not all and (max-width:' . $this->mobile . 'px){' . $hidden['tablet'] . '}}' : '')
+            . ($hidden['mobile'] !== '' ? '@media(max-width:' . $this->mobile . 'px){' . $hidden['mobile'] . '}' : '');
     }
 
     /**
      * @param array<mixed> $elements
      * @param array<string, string> $modes
+     * @param array<string, string> $hidden
      */
-    private function walk(array $elements, array &$modes): void
+    private function walk(array $elements, array &$modes, array &$hidden): void
     {
         foreach ($elements as $element) {
             if (!is_array($element) || !is_string($element['id'] ?? null) || preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $element['id']) !== 1) {
@@ -57,8 +67,15 @@ final class Compiler
                 $modes['desktop'] .= $selector . '{display:' . $layout . ';' . ($layout === 'grid' ? 'grid-template-columns:repeat(' . $columns . ',minmax(0,1fr));' : 'flex-direction:' . $direction . ';') . '}';
             }
             $styles = is_array($element['styles'] ?? null) ? $element['styles'] : [];
+            $visibility = 'show';
             foreach ($modes as $mode => $_) {
                 $values = is_array($styles[$mode] ?? null) ? $styles[$mode] : [];
+                if (in_array($values['visibility'] ?? null, ['show', 'hide'], true)) {
+                    $visibility = $values['visibility'];
+                }
+                if ($visibility === 'hide') {
+                    $hidden[$mode] .= $selector . '{display:none!important}';
+                }
                 $declarations = '';
                 foreach ($values as $key => $value) {
                     $declarations .= $this->declaration((string) $key, $value);
@@ -72,7 +89,7 @@ final class Compiler
                     }
                 }
             }
-            $this->walk(is_array($element['children'] ?? null) ? $element['children'] : [], $modes);
+            $this->walk(is_array($element['children'] ?? null) ? $element['children'] : [], $modes, $hidden);
         }
     }
 

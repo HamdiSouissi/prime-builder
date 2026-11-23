@@ -1,4 +1,4 @@
-import { History, add, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, update } from './model.js';
+import { History, add, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, update } from './model.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -633,6 +633,7 @@ function renderSettings() {
     const schemas = tab === 'style'
       ? { color: { type: 'color' }, background: { type: 'color' }, font_size: { type: 'length' }, align: { type: 'enum', values: ['left', 'center', 'right'] }, radius: { type: 'length' } }
       : { padding: { type: 'length' }, margin: { type: 'length' }, gap: { type: 'length' }, min_height: { type: 'length' }, width: { type: 'length' },
+        visibility: { type: 'enum', values: ['show', 'hide'] },
         ...(isContainer(element) ? {
           layout_mode: { type: 'enum', values: ['flex', 'grid'] }, flow: { type: 'enum', values: ['row', 'column'] },
           grid_columns: { type: 'integer', min: 1, max: 6 }, wrap: { type: 'enum', values: ['wrap', 'nowrap'] },
@@ -653,13 +654,14 @@ function renderSettings() {
       };
       const field = makeField(name, schema, element.styles?.[device]?.[name], value => {
         const current = find(history.present, selected); if (!current) return;
-        const styles = structuredClone(current.styles || {}); styles[device] ||= {};
-        if (value === undefined) delete styles[device][name]; else styles[device][name] = value;
+        const styles = setResponsiveStyle(current.styles, device, name, value);
         commit(update(history.present, selected, { styles }), false, `${ui[tab]} : ${ui[name] || name}`);
         showSource(styles);
       });
-      field.querySelectorAll('input,select,textarea').forEach(control => control.setAttribute('aria-describedby', hint.id));
-      showSource(element.styles || {}); group.append(field, hint); fields.append(group);
+      const warning = name === 'visibility' ? text('small', ui.visibility_warning, 'pb-inherit-hint') : null;
+      if (warning) warning.id = id();
+      field.querySelectorAll('input,select,textarea').forEach(control => control.setAttribute('aria-describedby', warning ? `${hint.id} ${warning.id}` : hint.id));
+      showSource(element.styles || {}); group.append(field, hint); if (warning) group.append(warning); fields.append(group);
     }
   }
 }
@@ -777,6 +779,9 @@ function applyVisualStyles(doc) {
       const node = doc.querySelector(`[data-pb-id="${CSS.escape(element.id)}"]`);
       if (node) {
         node.draggable = true;
+        // Recompute display before applying responsive visibility; the previous
+        // preview may have hidden this same node at another device width.
+        node.style.removeProperty('display');
         if (element.type === 'container') {
           node.style.display = element.settings.layout === 'grid' ? 'grid' : 'flex';
           node.style.flexDirection = element.settings.direction === 'row' ? 'row' : 'column';
@@ -806,6 +811,7 @@ function applyVisualStyles(doc) {
             }
           }
         }
+        if (responsiveVisibility(element.styles, device) === 'hide') node.style.setProperty('display', 'none', 'important');
         if (element.id === selected) { node.style.outline = '2px solid #ed6647'; node.style.outlineOffset = '2px'; }
       }
       walk(element.children || []);

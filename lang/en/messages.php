@@ -633,6 +633,8 @@ return [
         'replace' => 'Create a layout',
         'select_container' => 'Adding at root: select a container to nest elements.',
         'responsive_help' => 'An empty value inherits from the larger device.',
+        'visibility' => 'Visibility on this device',
+        'visibility_warning' => 'A hidden parent still takes precedence. Hidden content remains in the HTML: this setting does not protect private data.',
         'value_inherited' => 'Inherited from',
         'value_defined' => 'Set for',
         'value_default' => 'Inherited from the parent or the default value.',

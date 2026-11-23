@@ -281,6 +281,7 @@ final class Validator
                     'padding', 'margin', 'gap', 'font_size', 'radius', 'min_height' => Values::length($value) !== null,
                     'width' => Values::length($value, true) !== null,
                     'align' => is_string($value) && in_array($value, ['left', 'center', 'right'], true),
+                    'visibility' => is_string($value) && in_array($value, ['show', 'hide'], true),
                     'layout_mode' => is_string($value) && in_array($value, ['flex', 'grid'], true),
                     'flow' => is_string($value) && in_array($value, ['row', 'column'], true),
                     'grid_columns' => is_int($value) && $value >= 1 && $value <= 6,

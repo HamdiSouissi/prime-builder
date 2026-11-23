@@ -145,6 +145,40 @@ final class DocumentTest extends TestCase
         self::assertStringNotContainsString('body{', (new Compiler())->compile(['elements' => [$node]]));
     }
 
+    public function testResponsiveVisibilityInheritsAndDoesNotOverrideContainerDisplay(): void
+    {
+        $container = $this->element('container', 'section');
+        $container['settings'] = ['layout' => 'flex', 'direction' => 'row'];
+        $container['styles'] = [
+            'desktop' => ['visibility' => 'hide'],
+            'tablet' => ['layout_mode' => 'grid'],
+            'mobile' => ['visibility' => 'show'],
+        ];
+        $button = $this->element('button', 'action');
+        $button['settings'] = ['text' => 'Continuer', 'url' => '/'];
+        $button['styles'] = ['tablet' => ['visibility' => 'hide'], 'mobile' => ['visibility' => 'show']];
+        $heading = $this->element('heading', 'small');
+        $heading['settings'] = ['text' => 'Petit écran'];
+        $heading['styles'] = ['mobile' => ['visibility' => 'hide']];
+        $container['children'] = [$button];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$container, $heading]]);
+        self::assertSame([], $result['errors']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertStringContainsString('Continuer', $html, 'Visibility is presentation, not access control');
+        self::assertStringNotContainsString('data-pb-id="section" hidden', $html);
+        $css = (new Compiler(1000, 600))->compile($result['data']);
+        self::assertStringContainsString('.pb-element[data-pb-id="section"]{display:flex;flex-direction:row;}', $css);
+        self::assertStringContainsString('.pb-element[data-pb-id="section"]{display:grid;}', $css);
+        self::assertStringContainsString('@media not all and (max-width:1000px){.pb-element[data-pb-id="section"]{display:none!important}}', $css);
+        self::assertStringContainsString('@media(max-width:1000px){@media not all and (max-width:600px){.pb-element[data-pb-id="section"]{display:none!important}.pb-element[data-pb-id="action"]{display:none!important}}}', $css);
+        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="small"]{display:none!important}}', $css);
+        $container['styles']['desktop']['visibility'] = 'hide;}body{display:none';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$container]])['errors']);
+        self::assertStringNotContainsString('body{', (new Compiler())->compile(['elements' => [$container]]));
+        $container['styles']['desktop']['visibility'] = true;
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$container]])['errors']);
+    }
+
     public function testKitColorReferencesAndTypedLengthUnitsAreValidatedAndCompiled(): void
     {
         $node = $this->element();

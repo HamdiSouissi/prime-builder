@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { History, add, changedElement, containsWidget, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, update } from '../../assets/js/model.js';
+import { History, add, changedElement, containsWidget, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, update } from '../../assets/js/model.js';
 
 test('preview diff selects a single changed subtree and rejects structural or multiple changes', () => {
   const parent = createElement('container'), first = createElement('heading'), second = createElement('text');
@@ -147,6 +147,33 @@ test('responsive inheritance finds the nearest previous explicit value, includin
   assert.deepEqual(inheritedStyle(styles, 'mobile', 'color'), { mode: 'desktop', value: 'kit:primary' });
   assert.equal(inheritedStyle(styles, 'mobile', 'width'), null);
   assert.equal(inheritedStyle(null, 'mobile', 'width'), null);
+});
+test('style editing handles empty maps returned by PHP without losing changes', () => {
+  const empty = [];
+  const desktop = setResponsiveStyle(empty, 'desktop', 'visibility', 'hide');
+  assert.deepEqual(desktop, { desktop: { visibility: 'hide' } });
+  assert.deepEqual(empty, []);
+  assert.equal(JSON.stringify(desktop), '{"desktop":{"visibility":"hide"}}');
+  const tablet = setResponsiveStyle(desktop, 'tablet', 'padding', 0);
+  assert.deepEqual(tablet, { desktop: { visibility: 'hide' }, tablet: { padding: 0 } });
+  assert.deepEqual(desktop, { desktop: { visibility: 'hide' } });
+  const cleared = setResponsiveStyle(tablet, 'tablet', 'padding', undefined);
+  assert.deepEqual(cleared, desktop);
+  assert.deepEqual(setResponsiveStyle({ mobile: [] }, 'mobile', 'visibility', 'show'), { mobile: { visibility: 'show' } });
+  const node = { ...createElement('heading'), styles: [] };
+  const history = new History([node]);
+  assert.equal(history.commit(update(history.present, node.id, { styles: desktop })), true);
+  assert.equal(history.present[0].styles.desktop.visibility, 'hide');
+});
+test('responsive visibility inherits and allows explicit show after hide', () => {
+  const styles = { desktop: { visibility: 'hide' }, mobile: { visibility: 'show' } };
+  assert.equal(responsiveVisibility(styles, 'desktop'), 'hide');
+  assert.equal(responsiveVisibility(styles, 'tablet'), 'hide');
+  assert.equal(responsiveVisibility(styles, 'mobile'), 'show');
+  assert.equal(responsiveVisibility({ tablet: { visibility: 'hide' } }, 'desktop'), 'show');
+  assert.equal(responsiveVisibility({ tablet: { visibility: 'hide' } }, 'mobile'), 'hide');
+  assert.equal(responsiveVisibility({ desktop: { visibility: 'hide' }, tablet: { visibility: 'invalid' } }, 'mobile'), 'hide');
+  assert.equal(responsiveVisibility(null, 'mobile'), 'show');
 });
 test('extension-defined containers support nesting and safe reparenting', () => {
   const group = { id: 'custom', type: 'third-party-group', settings: {}, styles: {}, children: [] };

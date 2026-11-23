@@ -2047,6 +2047,199 @@ test('color picker uses kit references and spacing has numeric units', async ({ 
   await expectAccessible(page);
 });
 
+test('responsive visibility inherits, preserves layouts and works without JavaScript', async ({ page, browser }) => {
+  test.setTimeout(180_000);
+  page.setDefaultTimeout(12_000);
+  await login(page);
+  let csrf = null, entryId = null, templateId = null, originalTheme = null, originalBreakpoints = null;
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  const saveBreakpoints = async (tablet, mobile) => {
+    await page.goto('/admin/prime-builder/settings');
+    await page.locator('#pb-tablet').fill(String(tablet));
+    await page.locator('#pb-mobile').fill(String(mobile));
+    const response = page.waitForResponse(result => result.request().method() === 'POST' && result.url().endsWith('/admin/prime-builder/settings'));
+    await page.locator('form[action="/admin/prime-builder/settings"] button[type="submit"]').click();
+    expect((await response).status()).toBe(302);
+  };
+  try {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    await page.goto('/admin/prime-builder/settings');
+    originalBreakpoints = [await page.locator('#pb-tablet').inputValue(), await page.locator('#pb-mobile').inputValue()];
+    await saveBreakpoints(1000, 600);
+    const layout = { version: 1, elements: [
+      { id: 'before', type: 'button', settings: { text: 'Lien avant', url: '/' }, styles: {}, children: [] },
+      { id: 'responsive-section', type: 'container', settings: { layout: 'grid', columns: 2 }, styles: {}, children: [
+        { id: 'responsive-title', type: 'heading', settings: { text: 'Visible en tablette' }, styles: {}, children: [] },
+        { id: 'responsive-link', type: 'button', settings: { text: 'Lien adaptatif', url: '/' }, styles: { mobile: { visibility: 'show' } }, children: [] },
+        { id: 'always-hidden', type: 'heading', settings: { text: 'Toujours masqué' }, styles: { desktop: { visibility: 'show' } }, children: [], hidden: true },
+      ] },
+      { id: 'after', type: 'button', settings: { text: 'Lien après', url: '/' }, styles: {}, children: [] },
+      { id: 'tablet-hidden', type: 'button', settings: { text: 'Lien sauf tablette', url: '/' }, styles: { tablet: { visibility: 'hide' }, mobile: { visibility: 'show' } }, children: [] },
+    ] };
+    const created = await api('/api/v1/content/page', 'POST', {
+      title: 'Visibilité responsive', slug: 'pb-visibilite-responsive', status: 'published', published_at: '2021-01-01 10:00:00',
+      content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: layout }] },
+    });
+    expect(created.status, created.body).toBe(201);
+    entryId = JSON.parse(created.body).data.id;
+    await page.goto(`/admin/prime-builder/edit/${entryId}`);
+    await page.locator('[data-pb-panel="navigator"]').click();
+    await page.locator('[data-pb-tree-select="responsive-section"]').click();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    const visibility = page.getByRole('combobox', { name: 'Visibilité sur cet appareil', exact: true });
+    const frame = page.frameLocator('[data-pb-frame]');
+    const section = frame.locator('[data-pb-id="responsive-section"]');
+    await expect(section).toHaveCSS('display', 'grid');
+    await expect(visibility).toHaveAccessibleDescription(/ne protège pas des données privées/);
+    await visibility.focus();
+    await page.keyboard.press('End');
+    await expect(visibility).toHaveValue('hide');
+    await page.keyboard.press('Tab');
+    await expect(section).toBeHidden();
+    await page.getByRole('button', { name: 'Tablette', exact: true }).click();
+    await expect(visibility).toHaveValue('');
+    await expect(visibility).toHaveAccessibleDescription(/Hérité de Ordinateur : Masquer/);
+    await expect(section).toBeHidden();
+    await page.getByLabel('Disposition responsive').selectOption('flex');
+    await visibility.selectOption('show');
+    await expect(section).toHaveCSS('display', 'flex');
+    await expect(section.locator('[data-pb-id="always-hidden"]')).toBeHidden();
+    await page.getByRole('button', { name: 'Mobile', exact: true }).click();
+    await expect(visibility).toHaveAccessibleDescription(/Hérité de Tablette : Afficher/);
+    await expect(section).toHaveCSS('display', 'flex');
+    await visibility.selectOption('hide');
+    await expect(section).toBeHidden();
+    await visibility.selectOption('');
+    await expect(section).toHaveCSS('display', 'flex');
+    await visibility.selectOption('hide');
+    await expect(section).toBeHidden();
+    await expectAccessible(page);
+    await page.locator('[data-pb-fields]').screenshot({ path: test.info().outputPath('visibility-editor.jpg'), quality: 20 });
+    // The CMS serializes an empty style map as []; existing elements must also
+    // accept ordinary style edits, not just the new visibility control.
+    await page.locator('[data-pb-panel="navigator"]').click();
+    await page.locator('[data-pb-tree-select="before"]').click();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await page.getByLabel('Marge intérieure', { exact: true }).fill('12');
+    await expect(frame.locator('[data-pb-id="before"]')).toHaveCSS('padding-top', '12px');
+    const saving = page.waitForResponse(result => result.request().method() === 'PATCH' && result.url().endsWith(`/documents/${entryId}`));
+    await page.locator('[data-pb-save]').click();
+    const saved = await (await saving).json();
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    const persisted = saved.data.content.blocks[0].data;
+    expect(persisted.elements[0].styles.mobile.padding).toBe(12);
+    expect(persisted.elements[1].styles.desktop.visibility).toBe('hide');
+    expect(persisted.elements[1].styles.tablet.visibility).toBe('show');
+    expect(persisted.elements[1].styles.mobile.visibility).toBe('hide');
+    await page.reload();
+    await page.locator('[data-pb-panel="navigator"]').click();
+    await page.locator('[data-pb-tree-select="responsive-section"]').click();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await expect(visibility).toHaveValue('hide');
+    await expect(section).toBeHidden();
+    await page.getByRole('button', { name: 'Tablette', exact: true }).click();
+    await expect(visibility).toHaveValue('show');
+    await expect(section).toHaveCSS('display', 'flex');
+
+    // Reuse the same IDs in the entry and both theme slots. The compiler must
+    // address each namespaced copy, without any client-side visibility script.
+    const template = await api('/api/prime-builder/v1/templates', 'POST', { name: 'Visibilité du thème', kind: 'section', data: persisted });
+    expect(template.status, template.body).toBe(201);
+    templateId = JSON.parse(template.body).data.id;
+    await page.goto('/admin/prime-builder/theme');
+    originalTheme = {
+      header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
+      footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
+      exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
+    };
+    await page.getByLabel('En-tête', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Contenus exclus', { exact: true }).fill('');
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await expect(page.getByLabel('En-tête', { exact: true })).toHaveValue(templateId);
+    await page.goto('/pb-visibilite-responsive');
+    await expect(page.locator('script[src*="/assets/plugins/prime-builder/js/"]')).toHaveCount(0);
+    await expectAccessible(page);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const publicPage = await noJs.newPage();
+      await publicPage.goto('/pb-visibilite-responsive');
+      const main = publicPage.locator('main .pb-layout');
+      const header = publicPage.locator('header.pb-theme-header');
+      const footer = publicPage.locator('footer.pb-theme-footer');
+      const mainSection = main.locator('[data-pb-id="responsive-section"]');
+      const before = main.getByRole('link', { name: 'Lien avant' });
+      const after = main.getByRole('link', { name: 'Lien après' });
+      const adaptiveLink = mainSection.locator('.pb-button-link');
+      const tabletHidden = main.locator('[data-pb-id="tablet-hidden"]');
+      await expect(main.locator('[data-pb-id="always-hidden"]')).toHaveAttribute('hidden', '');
+      await expect(main).toContainText('Toujours masqué'); // presentation only: the HTML remains public
+      for (const width of [1440, 1001, 1000, 601, 600, 375]) {
+        await publicPage.setViewportSize({ width, height: 812 });
+        const tablet = width <= 1000 && width > 600;
+        const mobile = width <= 600;
+        if (tablet) {
+          await expect(mainSection).toHaveCSS('display', 'flex');
+          await expect(header.locator('.pb-container')).toHaveCSS('display', 'flex');
+          await expect(footer.locator('.pb-container')).toHaveCSS('display', 'flex');
+          await expect(tabletHidden).toBeHidden();
+        } else {
+          await expect(mainSection).toBeHidden();
+          await expect(header.locator('.pb-container')).toBeHidden();
+          await expect(footer.locator('.pb-container')).toBeHidden();
+          await expect(tabletHidden).toHaveCSS('display', 'block');
+        }
+        await expect(main.locator('[data-pb-id="always-hidden"]')).toBeHidden();
+        await before.focus();
+        await publicPage.keyboard.press('Tab');
+        if (tablet) {
+          await expect(adaptiveLink).toBeFocused();
+          await publicPage.keyboard.press('Tab');
+        } else {
+          await expect(adaptiveLink).toBeHidden(); // child show cannot override a hidden parent
+        }
+        await expect(after).toBeFocused();
+        if (width === 1000) await main.screenshot({ path: test.info().outputPath('visibility-public-tablet.jpg'), quality: 20 });
+        if (mobile && width === 375) await main.screenshot({ path: test.info().outputPath('visibility-public-mobile.jpg'), quality: 20 });
+      }
+    } finally { await noJs.close(); }
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (originalTheme) {
+        await page.goto('/admin/prime-builder/theme');
+        await page.getByLabel('En-tête', { exact: true }).selectOption(originalTheme.header);
+        await page.getByLabel('Pied de page', { exact: true }).selectOption(originalTheme.footer);
+        await page.getByLabel('Contenus exclus', { exact: true }).fill(originalTheme.exclude);
+        await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+      }
+      if (originalBreakpoints) await saveBreakpoints(...originalBreakpoints);
+      if (templateId) {
+        const deleted = await api(`/api/prime-builder/v1/templates/${templateId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(200);
+      }
+      if (entryId) {
+        const trashed = await api(`/api/v1/content/page/${entryId}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/page/${entryId}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+    } finally { page.off('dialog', leave); }
+  }
+});
+
 test('plugin settings save and remain usable on desktop and mobile', async ({ page }) => {
   await login(page);
   await page.goto('/admin/prime-builder/settings');

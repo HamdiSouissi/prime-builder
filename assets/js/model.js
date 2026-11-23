@@ -17,6 +17,25 @@ export function inheritedStyle(styles, device, name) {
   }
   return null;
 }
+// PHP encodes an empty styles map as []; writing named properties on that
+// array would silently lose them during JSON serialization and history checks.
+export function setResponsiveStyle(styles, device, name, value) {
+  const next = styles && typeof styles === 'object' && !Array.isArray(styles) ? clone(styles) : {};
+  const current = next[device];
+  const values = current && typeof current === 'object' && !Array.isArray(current) ? { ...current } : {};
+  if (value === undefined) delete values[name]; else values[name] = value;
+  if (Object.keys(values).length) next[device] = values; else delete next[device];
+  return next;
+}
+export function responsiveVisibility(styles, device) {
+  const order = device === 'mobile' ? ['desktop', 'tablet', 'mobile'] : device === 'tablet' ? ['desktop', 'tablet'] : ['desktop'];
+  let value = 'show';
+  for (const mode of order) {
+    const candidate = styles?.[mode]?.visibility;
+    if (candidate === 'show' || candidate === 'hide') value = candidate;
+  }
+  return value;
+}
 export function containsWidget(elements, type) {
   return Array.isArray(elements) && elements.some(element => element?.type === type || containsWidget(element?.children, type));
 }
