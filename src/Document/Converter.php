@@ -6,6 +6,7 @@ namespace PrimeBuilder\Document;
 
 use Prime\Content\Entry;
 use Prime\Editor\BlockRegistry;
+use Prime\Media\MediaUsageRepository;
 use Prime\Security\HtmlSanitizer;
 use Prime\Support\Str;
 use PrimeBuilder\Widgets\OriginalContent;
@@ -83,7 +84,10 @@ final class Converter
                         $settings['block_anchor'] = $anchor;
                     }
                 } else {
-                    $payload = $this->originals?->protect($entry->id, $type, $fragments[$index]);
+                    // Keep only IDs that the core itself recognizes for this block.
+                    // The authenticated payload travels with its immutable HTML fragment.
+                    $mediaIds = MediaUsageRepository::extractMediaIdsFromDocument(['blocks' => [$block]]);
+                    $payload = $this->originals?->protect($entry->id, $type, $fragments[$index], mediaIds: $mediaIds);
                     if ($payload === null) {
                         return null;
                     }
@@ -112,7 +116,8 @@ final class Converter
     private function grouped(Entry $entry): ?array
     {
         try {
-            $payload = $this->originals?->protect($entry->id, 'saved-document', $entry->contentHtml, true);
+            $mediaIds = MediaUsageRepository::extractMediaIdsFromDocument($entry->decodedContent());
+            $payload = $this->originals?->protect($entry->id, 'saved-document', $entry->contentHtml, true, $mediaIds);
             if ($payload === null) {
                 return null;
             }

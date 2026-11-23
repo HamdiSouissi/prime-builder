@@ -3941,6 +3941,152 @@ final class IntegrationTest extends TestCase
         self::assertSame($groupedHtml, $original['html']);
     }
 
+    public function testConvertedOriginalsKeepCoreMediaReferencesUntilRemoved(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $media = $app->get(\Prime\Media\MediaRepository::class);
+        $first = $media->create([
+            'disk_path' => 'original/first.jpg', 'filename' => 'first.jpg', 'original_name' => 'first.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image', 'width' => 800, 'height' => 600, 'alt' => 'Première image',
+        ]);
+        $second = $media->create([
+            'disk_path' => 'original/second.jpg', 'filename' => 'second.jpg', 'original_name' => 'second.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image', 'width' => 800, 'height' => 600, 'alt' => 'Deuxième image',
+        ]);
+        $unrelated = $media->create([
+            'disk_path' => 'original/unrelated.jpg', 'filename' => 'unrelated.jpg', 'original_name' => 'unrelated.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image', 'alt' => 'Autre image',
+        ]);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'original media', ['*'])['token'];
+        $content = ['version' => 1, 'blocks' => [
+            ['id' => 'photo', 'type' => 'image', 'data' => ['mediaId' => $first->id, 'alt' => 'Première image']],
+            ['id' => 'text', 'type' => 'paragraph', 'data' => ['text' => 'Entre les images']],
+            ['id' => 'gallery', 'type' => 'gallery', 'data' => ['items' => [['mediaId' => $first->id], ['mediaId' => $second->id]]]],
+        ]];
+        $saved = $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $content], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $usage = $app->get(\Prime\Media\MediaUsageRepository::class);
+        self::assertCount(1, $usage->findByMedia($first->id));
+        self::assertCount(1, $usage->findByMedia($second->id));
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $first->id, token: $token)->status());
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $second->id, token: $token)->status());
+        $before = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($before);
+        $beforeHtml = $before->contentHtml;
+        $config = $this->editorConfig($app, 1);
+        self::assertSame(false, $config['conversionFailed']);
+        $converted = $config['document'];
+        $children = $converted['blocks'][0]['data']['elements'][0]['children'];
+        self::assertSame(['original_content', 'prime_block', 'original_content'], array_column($children, 'type'));
+        // Client-supplied index entries must not be trusted; the server rebuilds it.
+        $converted['blocks'][0]['data']['items'] = [['mediaId' => $unrelated->id]];
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $converted, 'source_hash' => $config['sourceHash']], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('/uploads/original/first.jpg', $entry->contentHtml);
+        self::assertStringContainsString('/uploads/original/second.jpg', $entry->contentHtml);
+        self::assertStringContainsString('Entre les images', $entry->contentHtml);
+        self::assertStringContainsString('pc-block--gallery', $beforeHtml);
+        self::assertSame([['mediaId' => $first->id], ['mediaId' => $second->id]], $entry->decodedContent()['blocks'][0]['data']['items']);
+        self::assertCount(1, $usage->findByMedia($first->id));
+        self::assertCount(1, $usage->findByMedia($second->id));
+        self::assertSame([], $usage->findByMedia($unrelated->id));
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $first->id, token: $token)->status());
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $second->id, token: $token)->status());
+
+        // Removing the gallery still keeps the first image's usage, but frees the second.
+        $layout = $entry->decodedContent();
+        array_pop($layout['blocks'][0]['data']['elements'][0]['children']);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $layout], $token)->status());
+        self::assertCount(1, $usage->findByMedia($first->id));
+        self::assertSame([], $usage->findByMedia($second->id));
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $first->id, token: $token)->status());
+        self::assertSame(204, $this->send($app, 'DELETE', '/api/v1/media/' . $second->id, token: $token)->status());
+        // Finally removing the image releases its reference as well.
+        $layout['blocks'][0]['data']['elements'][0]['children'] = [];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $layout], $token)->status());
+        self::assertSame([], $usage->findByMedia($first->id));
+        self::assertSame(204, $this->send($app, 'DELETE', '/api/v1/media/' . $first->id, token: $token)->status());
+    }
+
+    public function testGroupedOriginalKeepsMediaReferencesAcrossRevisionsAndDeactivation(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $media = $app->get(\Prime\Media\MediaRepository::class);
+        $first = $media->create([
+            'disk_path' => 'group/first.jpg', 'filename' => 'first.jpg', 'original_name' => 'first.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image', 'alt' => 'Image existante',
+        ]);
+        $second = $media->create([
+            'disk_path' => 'group/second.jpg', 'filename' => 'second.jpg', 'original_name' => 'second.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image', 'alt' => 'Image du bloc indisponible',
+        ]);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'grouped media', ['*'])['token'];
+        $content = ['version' => 1, 'blocks' => [
+            ['id' => 'photo', 'type' => 'image', 'data' => ['mediaId' => $first->id, 'alt' => 'Image existante']],
+        ]];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $content], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $old = $entry->decodedContent();
+        // Simulate two renderers that were removed after core had indexed their saved data.
+        $old['blocks'][] = ['id' => 'missing_one', 'type' => 'missing/one', 'data' => ['mediaId' => $second->id]];
+        $old['blocks'][] = ['id' => 'missing_two', 'type' => 'missing/two', 'data' => ['media_id' => $first->id]];
+        $oldHtml = $entry->contentHtml . '<div>Bloc historique <img src="/uploads/group/second.jpg" alt="Image historique"></div><p>Autre bloc</p>';
+        $statement = $pdo->prepare('UPDATE pc_entries SET content = ?, content_html = ? WHERE id = 1');
+        $statement->execute([(string) json_encode($old), $oldHtml]);
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $usage = $app->get(\Prime\Media\MediaUsageRepository::class);
+        $usage->syncFromEntry($entry);
+        self::assertCount(1, $usage->findByMedia($first->id));
+        self::assertCount(1, $usage->findByMedia($second->id));
+        $config = $this->editorConfig($app, 1);
+        self::assertSame(false, $config['conversionFailed']);
+        $layout = $config['document'];
+        $node = $layout['blocks'][0]['data']['elements'][0];
+        self::assertSame('original_group', $node['type']);
+        $originals = \PrimeBuilder\Widgets\OriginalContent::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($originals);
+        self::assertSame([$first->id, $second->id], $originals->open($node['settings']['payload'])['media_ids'] ?? null);
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $layout, 'source_hash' => $config['sourceHash']], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString($oldHtml, $entry->contentHtml);
+        self::assertSame([['mediaId' => $first->id], ['mediaId' => $second->id]], $entry->decodedContent()['blocks'][0]['data']['items']);
+        self::assertCount(1, $usage->findByMedia($first->id));
+        self::assertCount(1, $usage->findByMedia($second->id));
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $second->id, token: $token)->status());
+        $revisions = $app->get(\Prime\Content\RevisionRepository::class)->forEntry(1);
+        self::assertNotEmpty($revisions);
+        $revisionId = $revisions[0]->id;
+
+        $invalid = $layout;
+        $invalid['blocks'][0]['data']['elements'][0]['settings']['payload'] .= 'x';
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $invalid], $token)->status());
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/2', ['content' => $layout], $token)->status());
+        self::assertCount(1, $usage->findByMedia($second->id));
+        $layout['blocks'][0]['data']['elements'] = [];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $layout], $token)->status());
+        self::assertSame([], $usage->findByMedia($first->id));
+        self::assertSame([], $usage->findByMedia($second->id));
+        $restored = $app->get(\Prime\Content\EntryService::class)->restoreRevision(1, $revisionId, $this->user($app, 1));
+        self::assertStringContainsString($oldHtml, $restored->contentHtml);
+        self::assertCount(1, $usage->findByMedia($first->id));
+        self::assertCount(1, $usage->findByMedia($second->id));
+        $app->get(PluginManager::class)->deactivate('prime-builder');
+        self::assertCount(1, $usage->findByMedia($second->id));
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $second->id, token: $token)->status());
+    }
+
     public function testUnknownBlockBoundariesAreGroupedAndStaleDocumentIsRejected(): void
     {
         $app = $this->activated('admin');

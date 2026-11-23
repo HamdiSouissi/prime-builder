@@ -51,13 +51,21 @@ final class Validator
             $errors[] = t('plugin::prime-builder.validation.structure');
         }
         $seen = [];
+        $mediaIds = [];
         $count = 0;
         $definitions = $this->registry->all();
         $elements = is_array($data['elements'] ?? null) && array_is_list($data['elements'])
-            ? $this->elements($data['elements'], 0, $count, $seen, $errors, $definitions)
+            ? $this->elements($data['elements'], 0, $count, $seen, $errors, $definitions, $mediaIds)
             : [];
+        $layout = ['version' => 1, 'elements' => $elements];
+        if ($mediaIds !== []) {
+            // Core's MediaUsageRepository recognizes item.mediaId on a block's
+            // data. Rebuild this index exclusively from authenticated fragments,
+            // never from a client-supplied top-level items list.
+            $layout['items'] = array_map(static fn (int $id): array => ['mediaId' => $id], array_values($mediaIds));
+        }
 
-        return ['data' => ['version' => 1, 'elements' => $elements], 'errors' => $errors];
+        return ['data' => $layout, 'errors' => $errors];
     }
 
     /**
@@ -65,9 +73,10 @@ final class Validator
      * @param array<string, true> $seen
      * @param list<string> $errors
      * @param array<string, array<string, mixed>> $definitions
+     * @param array<int, int> $mediaIds
      * @return list<array<string, mixed>>
      */
-    private function elements(array $items, int $depth, int &$count, array &$seen, array &$errors, array $definitions): array
+    private function elements(array $items, int $depth, int &$count, array &$seen, array &$errors, array $definitions, array &$mediaIds): array
     {
         if ($depth > self::MAX_DEPTH) {
             $errors[] = t('plugin::prime-builder.validation.depth');
@@ -136,6 +145,10 @@ final class Validator
                 // The authenticated marker prevents relabelling a whole document as one block.
                 if (count($settings) !== 1 || $original === null || $original['grouped'] !== ($type === 'original_group')) {
                     $errors[] = t('plugin::prime-builder.validation.settings');
+                } else {
+                    foreach ($original['media_ids'] as $mediaId) {
+                        $mediaIds[$mediaId] = $mediaId;
+                    }
                 }
             }
             $styles = $this->styles($item['styles'] ?? [], $errors);
@@ -147,7 +160,7 @@ final class Validator
                 $errors[] = t('plugin::prime-builder.validation.structure');
                 $children = [];
             }
-            $element = ['id' => $id, 'type' => $type, 'settings' => $settings, 'styles' => $styles, 'children' => $this->elements($children, $depth + 1, $count, $seen, $errors, $definitions)];
+            $element = ['id' => $id, 'type' => $type, 'settings' => $settings, 'styles' => $styles, 'children' => $this->elements($children, $depth + 1, $count, $seen, $errors, $definitions, $mediaIds)];
             if (array_key_exists('label', $item)) {
                 if (!is_string($item['label']) || strlen($item['label']) > 320) {
                     $errors[] = t('plugin::prime-builder.validation.settings');

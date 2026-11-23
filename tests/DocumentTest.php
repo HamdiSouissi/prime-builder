@@ -354,6 +354,36 @@ final class DocumentTest extends TestCase
         self::assertNotEmpty($validator->validate(['version' => 1, 'elements' => [$node]])['errors']);
     }
 
+    public function testOriginalMediaIndexIsAuthenticatedDeduplicatedAndBackwardCompatible(): void
+    {
+        $encrypter = new \Prime\Security\Encrypter(str_repeat('k', 32));
+        $originals = new OriginalContent($encrypter);
+        $legacy = $encrypter->encrypt((string) json_encode(['entry' => 1, 'type' => 'image', 'html' => '<img src="/uploads/old.jpg">']));
+        self::assertSame([], $originals->open($legacy)['media_ids'] ?? null);
+        self::assertNull($originals->protect(1, 'image', '<p>x</p>', mediaIds: [0]));
+        self::assertNull($originals->protect(1, 'image', '<p>x</p>', mediaIds: ['1']));
+        self::assertNull($originals->protect(1, 'image', '<p>x</p>', mediaIds: [1 => 3]));
+        foreach ([['1'], [0], [-1], [1.5], ['nested' => 1], '1'] as $bad) {
+            $invalid = $encrypter->encrypt((string) json_encode(['entry' => 1, 'type' => 'image', 'html' => '<p>x</p>', 'media_ids' => $bad]));
+            self::assertNull($originals->open($invalid));
+        }
+        $payload = $originals->protect(1, 'image', '<img src="/uploads/photo.jpg">', mediaIds: [7, 9, 7]);
+        self::assertIsString($payload);
+        self::assertSame([7, 9], $originals->open($payload)['media_ids'] ?? null);
+        self::assertNull($originals->open($payload . 'x'));
+        $node = $this->element('original_content');
+        $node['settings'] = ['payload' => $payload];
+        $validator = new Validator(new Registry(), new HtmlSanitizer(), originals: $originals, entryId: 1);
+        $result = $validator->validate(['version' => 1, 'elements' => [$node], 'items' => [['mediaId' => 42]]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame([['mediaId' => 7], ['mediaId' => 9]], $result['data']['items']);
+        $node['settings']['payload'] = $legacy;
+        $result = $validator->validate(['version' => 1, 'elements' => [$node], 'items' => [['mediaId' => 42]]]);
+        self::assertSame([], $result['errors']);
+        self::assertArrayNotHasKey('items', $result['data']);
+        self::assertNotEmpty((new Validator(new Registry(), new HtmlSanitizer(), originals: $originals, entryId: 2))->validate(['version' => 1, 'elements' => [$node]])['errors']);
+    }
+
     /** @param array<string, mixed> $settings */
     private function renderBasicWidget(string $type, array $settings): string
     {

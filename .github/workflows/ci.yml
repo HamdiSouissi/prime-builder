@@ -297,38 +297,38 @@ jobs:
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
       # Temporary transport: the sandbox cannot download the artifact host.
-      - name: Report position-editor capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh position-editor 0
-      - name: Report position-editor capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh position-editor 1
-      - name: Report position-editor capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh position-editor 2
-      - name: Report position-editor capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh position-editor 3
-      - name: Report position-editor-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh position-editor-mobile 0
-      - name: Report position-editor-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh position-editor-mobile 1
-      - name: Report position-editor-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh position-editor-mobile 2
-      - name: Report position-editor-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh position-editor-mobile 3
-      - name: Report position-public-desktop capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh position-public-desktop 0
-      - name: Report position-public-desktop capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh position-public-desktop 1
-      - name: Report position-public-desktop capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh position-public-desktop 2
-      - name: Report position-public-desktop capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh position-public-desktop 3
-      - name: Report position-public-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh position-public-mobile 0
-      - name: Report position-public-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh position-public-mobile 1
-      - name: Report position-public-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh position-public-mobile 2
-      - name: Report position-public-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh position-public-mobile 3
+      - name: Report original-media-editor capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-editor 0
+      - name: Report original-media-editor capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-editor 1
+      - name: Report original-media-editor capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-editor 2
+      - name: Report original-media-editor capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-editor 3
+      - name: Report original-media-editor-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-editor-mobile 0
+      - name: Report original-media-editor-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-editor-mobile 1
+      - name: Report original-media-editor-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-editor-mobile 2
+      - name: Report original-media-editor-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-editor-mobile 3
+      - name: Report original-media-public capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-public 0
+      - name: Report original-media-public capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-public 1
+      - name: Report original-media-public capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-public 2
+      - name: Report original-media-public capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-public 3
+      - name: Report original-media-public-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-public-mobile 0
+      - name: Report original-media-public-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-public-mobile 1
+      - name: Report original-media-public-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-public-mobile 2
+      - name: Report original-media-public-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh original-media-public-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |

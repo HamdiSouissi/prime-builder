@@ -2550,6 +2550,106 @@ test('existing three-block page is converted without losing its saved HTML', asy
   await expectAccessible(page);
 });
 
+test('converted core media stays protected until its original fragment is removed', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page);
+  let csrf = null, entryId = null, mediaId = null;
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  try {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    const upload = await page.evaluate(async csrf => {
+      const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 200;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#d9e9e6'; ctx.fillRect(0, 0, 320, 200);
+      ctx.fillStyle = '#f5bf73'; ctx.beginPath(); ctx.arc(246, 49, 23, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#4b827a'; ctx.beginPath(); ctx.moveTo(0, 162); ctx.lineTo(98, 76); ctx.lineTo(181, 160); ctx.lineTo(243, 104); ctx.lineTo(320, 166); ctx.lineTo(320, 200); ctx.lineTo(0, 200); ctx.fill();
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const form = new FormData(); form.append('file', blob, 'fragment-original.png');
+      const response = await fetch('/api/v1/media', { method: 'POST', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' }, body: form });
+      return { status: response.status, body: await response.text() };
+    }, csrf);
+    expect(upload.status, upload.body).toBe(201);
+    mediaId = JSON.parse(upload.body).data.id;
+    const created = await api('/api/v1/content/page', 'POST', {
+      title: 'Image d’origine préservée', slug: 'pb-original-media', status: 'published', published_at: '2021-01-01 10:00:00',
+      content: { version: 1, blocks: [
+        { id: 'intro', type: 'paragraph', data: { text: 'Une image issue de Prime Editor.' } },
+        { id: 'photo', type: 'image', data: { mediaId, alt: 'Paysage d’origine' } },
+      ] },
+    });
+    expect(created.status, created.body).toBe(201);
+    entryId = JSON.parse(created.body).data.id;
+    let detail = await api(`/api/v1/media/${mediaId}`, 'GET');
+    expect(detail.status, detail.body).toBe(200);
+    expect(JSON.parse(detail.body).data.usages.some(item => item.entry_id === entryId && item.context === 'block')).toBe(true);
+    expect((await api(`/api/v1/media/${mediaId}`, 'DELETE')).status).toBe(409);
+
+    await page.goto(`/admin/prime-builder/edit/${entryId}`);
+    const types = await page.evaluate(() => JSON.parse(document.querySelector('[data-pb-config]').value).document.blocks[0].data.elements[0].children.map(node => node.type));
+    expect(types).toEqual(['prime_block', 'original_content']);
+    const preview = page.frameLocator('[data-pb-frame]');
+    await expect(preview.getByAltText('Paysage d’origine')).toBeVisible();
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+    await page.getByRole('button', { name: 'Contenu d’origine', exact: true }).click();
+    await expect(page.locator('[data-pb-fields]').getByText('Ce contenu d’origine ne peut pas être modifié ici.', { exact: false })).toBeVisible();
+    await expectAccessible(page);
+    await page.locator('[data-pb-settings-panel]').screenshot({ path: test.info().outputPath('original-media-editor.jpg'), quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.locator('[data-pb-settings-panel]').screenshot({ path: test.info().outputPath('original-media-editor-mobile.jpg'), quality: 15 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const saving = page.waitForResponse(response => response.url().endsWith(`/documents/${entryId}`) && response.request().method() === 'PATCH');
+    await page.locator('[data-pb-save]').click();
+    const response = await saving;
+    expect(response.status()).toBe(200);
+    expect((await response.json()).data.content.blocks[0].data.items).toEqual([{ mediaId }]);
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    detail = await api(`/api/v1/media/${mediaId}`, 'GET');
+    expect(JSON.parse(detail.body).data.usages.some(item => item.entry_id === entryId && item.context === 'block')).toBe(true);
+    expect((await api(`/api/v1/media/${mediaId}`, 'DELETE')).status).toBe(409);
+    await page.goto('/pb-original-media');
+    await expect(page.getByAltText('Paysage d’origine')).toBeVisible();
+    await expect(page.locator('main')).toContainText('Une image issue de Prime Editor.');
+    await expectAccessible(page);
+    await page.locator('main').screenshot({ path: test.info().outputPath('original-media-public.jpg'), quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect(page.getByAltText('Paysage d’origine')).toBeVisible();
+    await expectAccessible(page);
+    await page.locator('main').screenshot({ path: test.info().outputPath('original-media-public-mobile.jpg'), quality: 15 });
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`/admin/prime-builder/edit/${entryId}`);
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+    await page.getByRole('button', { name: 'Contenu d’origine', exact: true }).click();
+    await page.locator('[data-pb-action="remove"]').click();
+    await page.locator('[data-pb-save]').click();
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    detail = await api(`/api/v1/media/${mediaId}`, 'GET');
+    expect(detail.status, detail.body).toBe(200);
+    expect(JSON.parse(detail.body).data.usages.some(item => item.entry_id === entryId)).toBe(false);
+    expect((await api(`/api/v1/media/${mediaId}`, 'DELETE')).status).toBe(204);
+    mediaId = null;
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (entryId) {
+        await api(`/api/v1/content/page/${entryId}`, 'DELETE');
+        await api(`/api/v1/content/page/${entryId}?force=1`, 'DELETE');
+      }
+      if (mediaId) await api(`/api/v1/media/${mediaId}?force=1`, 'DELETE');
+    } finally { page.off('dialog', leave); }
+  }
+});
+
 test('unavailable block between existing blocks remains read-only and survives saving', async ({ page }) => {
   const missingId = process.env.E2E_MISSING_ENTRY_ID;
   expect(missingId).toMatch(/^[1-9][0-9]*$/);
