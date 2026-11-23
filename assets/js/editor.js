@@ -488,24 +488,35 @@ function makeStyleControl(name, schema, current, onChange) {
     });
     row.append(input, picker); wrapper.append(row, reference); return wrapper;
   }
-  input.type = 'number'; input.min = 0; input.max = 2000; input.step = '0.01';
-  const units = document.createElement('select'); units.setAttribute('aria-label', `${ui.unit} : ${ui[name] || name}`);
-  for (const unit of ['px', '%', 'em', 'rem', 'vw', 'vh']) { const option = text('option', unit); option.value = unit; units.append(option); }
-  const match = typeof current === 'string' ? current.match(/^(\d{1,4}(?:\.\d{1,2})?)(px|%|em|rem|vw|vh)$/) : null;
+  const offset = schema.type === 'offset';
+  const zIndex = schema.type === 'z_index';
+  if (offset || zIndex) row.classList.add('pb-auto-row');
+  input.type = 'number'; input.min = zIndex ? -1000 : offset ? -2000 : 0;
+  input.max = zIndex ? 1000 : 2000; input.step = zIndex ? '1' : '0.01';
+  const units = document.createElement('select');
+  units.setAttribute('aria-label', `${zIndex ? ui.position_mode : ui.unit} : ${ui[name] || name}`);
+  const options = zIndex ? [['value', ui.numeric_value], ['auto', ui.auto]]
+    : [...['px', '%', 'em', 'rem', 'vw', 'vh'].map(unit => [unit, unit]), ...(offset ? [['auto', ui.auto]] : [])];
+  for (const [value, title] of options) { const option = text('option', title); option.value = value; units.append(option); }
+  const match = typeof current === 'string' && !zIndex
+    ? current.match(offset ? /^(-?\d{1,4}(?:\.\d{1,2})?)(px|%|em|rem|vw|vh)$/ : /^(\d{1,4}(?:\.\d{1,2})?)(px|%|em|rem|vw|vh)$/) : null;
   input.value = match ? match[1] : Number.isInteger(current) ? String(current) : '';
-  units.value = match ? match[2] : 'px';
+  units.value = current === 'auto' ? 'auto' : zIndex ? 'value' : match ? match[2] : 'px';
+  input.disabled = units.value === 'auto';
   const emit = () => {
-    input.max = name === 'width' && units.value === '%' ? 100 : 2000;
+    input.disabled = units.value === 'auto';
+    if (input.disabled) { onChange('auto'); return; }
+    input.max = zIndex ? 1000 : name === 'width' && units.value === '%' ? 100 : 2000;
     if (input.value === '') { onChange(undefined); return; }
     const number = Number(input.value);
-    if (!Number.isFinite(number) || number < 0 || number > Number(input.max) || !input.validity.valid) return;
-    onChange(units.value === 'px' && Number.isInteger(number) ? number : `${number}${units.value}`);
+    if (!Number.isFinite(number) || number < Number(input.min) || number > Number(input.max) || !input.validity.valid || (zIndex && !Number.isInteger(number))) return;
+    onChange(zIndex || (units.value === 'px' && Number.isInteger(number)) ? number : `${number}${units.value}`);
   };
   input.addEventListener('input', emit); units.addEventListener('change', emit);
   row.append(input, units); wrapper.append(row); return wrapper;
 }
 function makeField(name, schema, current, onChange) {
-  if (schema.type === 'color' || schema.type === 'length') return makeStyleControl(name, schema, current, onChange);
+  if (['color', 'length', 'offset', 'z_index'].includes(schema.type)) return makeStyleControl(name, schema, current, onChange);
   const wrapper = document.createElement('label'); wrapper.className = 'pb-field';
   wrapper.append(text('span', schema.label || ui[name] || name));
   let input;
@@ -634,6 +645,9 @@ function renderSettings() {
       ? { color: { type: 'color' }, background: { type: 'color' }, font_size: { type: 'length' }, align: { type: 'enum', values: ['left', 'center', 'right'] }, radius: { type: 'length' } }
       : { padding: { type: 'length' }, margin: { type: 'length' }, gap: { type: 'length' }, min_height: { type: 'length' }, width: { type: 'length' },
         visibility: { type: 'enum', values: ['show', 'hide'] },
+        position: { type: 'enum', values: ['static', 'relative', 'absolute', 'fixed', 'sticky'] },
+        offset_top: { type: 'offset' }, offset_right: { type: 'offset' }, offset_bottom: { type: 'offset' }, offset_left: { type: 'offset' },
+        z_index: { type: 'z_index' },
         ...(isContainer(element) ? {
           layout_mode: { type: 'enum', values: ['flex', 'grid'] }, flow: { type: 'enum', values: ['row', 'column'] },
           grid_columns: { type: 'integer', min: 1, max: 6 }, wrap: { type: 'enum', values: ['wrap', 'nowrap'] },
@@ -649,7 +663,7 @@ function renderSettings() {
         const inherited = inheritedStyle(styles, device, name);
         if (!inherited) { hint.textContent = ui.value_default; return; }
         const value = inherited.value === 'kit:primary' ? ui.kit_primary : inherited.value === 'kit:text' ? ui.kit_text
-          : typeof inherited.value === 'number' && schema.type === 'length' ? `${inherited.value}px` : ui[inherited.value] || String(inherited.value);
+          : typeof inherited.value === 'number' && ['length', 'offset'].includes(schema.type) ? `${inherited.value}px` : ui[inherited.value] || String(inherited.value);
         hint.textContent = `${ui.value_inherited} ${ui[inherited.mode]} : ${value}`;
       };
       const field = makeField(name, schema, element.styles?.[device]?.[name], value => {
@@ -658,7 +672,8 @@ function renderSettings() {
         commit(update(history.present, selected, { styles }), false, `${ui[tab]} : ${ui[name] || name}`);
         showSource(styles);
       });
-      const warning = name === 'visibility' ? text('small', ui.visibility_warning, 'pb-inherit-hint') : null;
+      const warningText = name === 'visibility' ? ui.visibility_warning : name === 'position' ? ui.position_warning : null;
+      const warning = warningText ? text('small', warningText, 'pb-inherit-hint') : null;
       if (warning) warning.id = id();
       field.querySelectorAll('input,select,textarea').forEach(control => control.setAttribute('aria-describedby', warning ? `${hint.id} ${warning.id}` : hint.id));
       showSource(element.styles || {}); group.append(field, hint); if (warning) group.append(warning); fields.append(group);
@@ -768,6 +783,12 @@ function cssLength(value, width = false) {
   if (!match || Number(match[1]) > 2000 || (width && match[2] === '%' && Number(match[1]) > 100)) return null;
   return value;
 }
+function cssOffset(value) {
+  if (value === 'auto') return value;
+  if (Number.isInteger(value) && value >= -2000 && value <= 2000) return `${value}px`;
+  const match = typeof value === 'string' && value.match(/^-?(\d{1,4}(?:\.\d{1,2})?)(px|%|em|rem|vw|vh)$/);
+  return match && Number(match[1]) <= 2000 ? value : null;
+}
 function cssColor(value) {
   if (value === 'kit:primary') return 'var(--pb-kit-primary)';
   if (value === 'kit:text') return 'var(--pb-kit-text)';
@@ -802,6 +823,9 @@ function applyVisualStyles(doc) {
             }
             else if (key === 'align' && ['left', 'center', 'right'].includes(value)) node.style.textAlign = value;
             else if (key === 'width' && cssLength(value, true) !== null) node.style.width = cssLength(value, true);
+            else if (key === 'position' && ['static', 'relative', 'absolute', 'fixed', 'sticky'].includes(value)) node.style.position = value;
+            else if (['offset_top', 'offset_right', 'offset_bottom', 'offset_left'].includes(key) && cssOffset(value) !== null) node.style[key.slice(7)] = cssOffset(value);
+            else if (key === 'z_index' && (value === 'auto' || (Number.isInteger(value) && value >= -1000 && value <= 1000))) node.style.zIndex = String(value);
             else if (key === 'layout_mode' && ['flex', 'grid'].includes(value)) node.style.display = value;
             else if (key === 'flow' && ['row', 'column'].includes(value)) node.style.flexDirection = value;
             else if (key === 'grid_columns' && Number.isInteger(value) && value >= 1 && value <= 6) node.style.gridTemplateColumns = `repeat(${value},minmax(0,1fr))`;

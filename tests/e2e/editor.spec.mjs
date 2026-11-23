@@ -2240,6 +2240,251 @@ test('responsive visibility inherits, preserves layouts and works without JavaSc
   }
 });
 
+test('responsive positioning and stacking inherit, reset and render without JavaScript', async ({ page, browser }) => {
+  test.setTimeout(180_000);
+  page.setDefaultTimeout(12_000);
+  await login(page);
+  let csrf = null, entryId = null, templateId = null, originalTheme = null, originalBreakpoints = null;
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  const saveBreakpoints = async (tablet, mobile) => {
+    await page.goto('/admin/prime-builder/settings');
+    await page.locator('#pb-tablet').fill(String(tablet));
+    await page.locator('#pb-mobile').fill(String(mobile));
+    const response = page.waitForResponse(result => result.request().method() === 'POST' && result.url().endsWith('/admin/prime-builder/settings'));
+    await page.locator('form[action="/admin/prime-builder/settings"] button[type="submit"]').click();
+    expect((await response).status()).toBe(302);
+  };
+  try {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    await page.goto('/admin/prime-builder/settings');
+    originalBreakpoints = [await page.locator('#pb-tablet').inputValue(), await page.locator('#pb-mobile').inputValue()];
+    await saveBreakpoints(1000, 600);
+    const layout = { version: 1, elements: [
+      { id: 'position-section', type: 'container', settings: { layout: 'flex', direction: 'column' }, styles: {}, children: [
+        { id: 'positioned', type: 'button', settings: { text: 'Action positionnée', url: '/' }, styles: {}, children: [] },
+        { id: 'normal', type: 'button', settings: { text: 'Action normale', url: '/' }, styles: {}, children: [] },
+      ] },
+    ] };
+    const created = await api('/api/v1/content/page', 'POST', {
+      title: 'Position responsive', slug: 'pb-position-responsive', status: 'published', published_at: '2021-01-01 10:00:00',
+      content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: layout }] },
+    });
+    expect(created.status, created.body).toBe(201);
+    entryId = JSON.parse(created.body).data.id;
+    await page.goto(`/admin/prime-builder/edit/${entryId}`);
+    await page.locator('[data-pb-panel="navigator"]').click();
+    await page.locator('[data-pb-tree-select="positioned"]').click();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    const position = page.getByRole('combobox', { name: 'Position', exact: true });
+    const top = page.getByRole('spinbutton', { name: 'Décalage haut', exact: true });
+    const left = page.getByRole('spinbutton', { name: 'Décalage gauche', exact: true });
+    const topUnit = page.getByRole('combobox', { name: 'Unité : Décalage haut', exact: true });
+    const leftUnit = page.getByRole('combobox', { name: 'Unité : Décalage gauche', exact: true });
+    const zIndex = page.getByRole('spinbutton', { name: 'Ordre de superposition (z-index)', exact: true });
+    const zMode = page.getByRole('combobox', { name: 'Mode : Ordre de superposition (z-index)', exact: true });
+    const frame = page.frameLocator('[data-pb-frame]');
+    const preview = frame.locator('[data-pb-id="positioned"]');
+    await expect(position).toHaveAccessibleDescription(/superposition reste limitée par les parents/);
+    await position.focus();
+    await page.keyboard.press('Home');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await expect(position).toHaveValue('relative');
+    await top.fill('-12.5');
+    await left.fill('10');
+    await leftUnit.selectOption('%');
+    await zIndex.fill('3');
+    await expect(preview).toHaveCSS('position', 'relative');
+    await expect(preview).toHaveCSS('top', '-12.5px');
+    await expect(preview).toHaveCSS('z-index', '3');
+    await expect.poll(() => preview.evaluate(node => node.style.left)).toBe('10%');
+    await expect(frame.locator('[data-pb-id="normal"]')).toHaveCSS('position', 'static');
+
+    await page.getByRole('button', { name: 'Tablette', exact: true }).click();
+    await expect(position).toHaveValue('');
+    await expect(position).toHaveAccessibleDescription(/Hérité de Ordinateur : Relative/);
+    await expect(top).toHaveAccessibleDescription(/Hérité de Ordinateur : -12\.5px/);
+    await expect(zIndex).toHaveAccessibleDescription(/Hérité de Ordinateur : 3/);
+    await expect(preview).toHaveCSS('top', '-12.5px');
+    await position.selectOption('sticky');
+    await top.fill('0');
+    await leftUnit.selectOption('auto');
+    await zMode.selectOption('auto');
+    await expect(left).toBeDisabled();
+    await expect(zIndex).toBeDisabled();
+    await expect(preview).toHaveCSS('position', 'sticky');
+    await expect(preview).toHaveCSS('top', '0px');
+    await expect(preview).toHaveCSS('left', 'auto');
+    await expect(preview).toHaveCSS('z-index', 'auto');
+    await leftUnit.selectOption('px');
+    await zMode.selectOption('value');
+    await expect(left).toBeEnabled();
+    await expect(zIndex).toBeEnabled();
+    await expect.poll(() => preview.evaluate(node => node.style.left)).toBe('10%');
+    await expect(preview).toHaveCSS('z-index', '3');
+    await leftUnit.selectOption('auto');
+    await zMode.selectOption('auto');
+    await expect(preview).toHaveCSS('left', 'auto');
+    await expect(preview).toHaveCSS('z-index', 'auto');
+
+    await page.getByRole('button', { name: 'Mobile', exact: true }).click();
+    await expect(position).toHaveAccessibleDescription(/Hérité de Tablette : Collante/);
+    await expect(top).toHaveAccessibleDescription(/Hérité de Tablette : 0px/);
+    await expect(left).toHaveAccessibleDescription(/Hérité de Tablette : Automatique/);
+    await expect(zIndex).toHaveAccessibleDescription(/Hérité de Tablette : Automatique/);
+    await position.selectOption('static');
+    await topUnit.selectOption('auto');
+    await zIndex.fill('-2');
+    await expect(top).toBeDisabled();
+    await expect(preview).toHaveCSS('position', 'static');
+    await expect(preview).toHaveCSS('top', 'auto');
+    await expect(preview).toHaveCSS('z-index', '-2');
+    // A negative z-index can place a control behind its parent. Keep the final
+    // demo visible while still testing negative values in the editor.
+    await zIndex.fill('2');
+    await expect(preview).toHaveCSS('z-index', '2');
+    // Choosing a unit and leaving the number empty clears the override; zero
+    // from tablet must be inherited rather than treated as an empty value.
+    await topUnit.selectOption('px');
+    await expect(top).toBeEnabled();
+    await expect(top).toHaveAccessibleDescription(/Hérité de Tablette : 0px/);
+    await expect(preview).toHaveCSS('top', '0px');
+    await topUnit.selectOption('auto');
+    await expect(preview).toHaveCSS('top', 'auto');
+    await page.setViewportSize({ width: 1440, height: 1400 });
+    await zMode.scrollIntoViewIfNeeded();
+    await expectAccessible(page);
+    await page.locator('[data-pb-settings-panel]').screenshot({ path: test.info().outputPath('position-editor.jpg'), quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    const selectedLabelFits = control => control.evaluate(node => {
+      const style = getComputedStyle(node);
+      const context = document.createElement('canvas').getContext('2d');
+      context.font = style.font;
+      return node.clientWidth >= context.measureText(node.selectedOptions[0].textContent).width
+        + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 16;
+    });
+    await topUnit.scrollIntoViewIfNeeded();
+    expect(await selectedLabelFits(topUnit)).toBe(true);
+    expect(await selectedLabelFits(zMode)).toBe(true);
+    await page.locator('[data-pb-settings-panel]').screenshot({ path: test.info().outputPath('position-editor-mobile.jpg'), quality: 15 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.setViewportSize({ width: 320, height: 812 });
+    expect(await selectedLabelFits(topUnit)).toBe(true);
+    expect(await selectedLabelFits(zMode)).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+    await expectAccessible(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const saving = page.waitForResponse(result => result.request().method() === 'PATCH' && result.url().endsWith(`/documents/${entryId}`));
+    await page.locator('[data-pb-save]').click();
+    const saved = await (await saving).json();
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    const persisted = saved.data.content.blocks[0].data;
+    expect(persisted.elements[0].children[0].styles).toEqual({
+      desktop: { position: 'relative', offset_top: '-12.5px', offset_left: '10%', z_index: 3 },
+      tablet: { position: 'sticky', offset_top: 0, offset_left: 'auto', z_index: 'auto' },
+      mobile: { position: 'static', z_index: 2, offset_top: 'auto' },
+    });
+    await page.reload();
+    await page.locator('[data-pb-panel="navigator"]').click();
+    await page.locator('[data-pb-tree-select="positioned"]').click();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await page.getByRole('button', { name: 'Mobile', exact: true }).click();
+    await expect(position).toHaveValue('static');
+    await expect(topUnit).toHaveValue('auto');
+    await expect(top).toBeDisabled();
+    await expect(zIndex).toHaveValue('2');
+    await expect(preview).toHaveCSS('position', 'static');
+
+    // The same controls apply in ordinary entries and namespaced theme copies.
+    const template = await api('/api/prime-builder/v1/templates', 'POST', { name: 'Position du thème', kind: 'section', data: persisted });
+    expect(template.status, template.body).toBe(201);
+    templateId = JSON.parse(template.body).data.id;
+    await page.goto('/admin/prime-builder/theme');
+    originalTheme = {
+      header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
+      footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
+      exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
+    };
+    await page.getByLabel('En-tête', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Contenus exclus', { exact: true }).fill('');
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await expect(page.getByLabel('En-tête', { exact: true })).toHaveValue(templateId);
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const publicPage = await noJs.newPage();
+      await publicPage.goto('/pb-position-responsive');
+      await expect(publicPage.locator('script[src*="/assets/plugins/prime-builder/js/"]')).toHaveCount(0);
+      const areas = [publicPage.locator('main .pb-layout'), publicPage.locator('header.pb-theme-header'), publicPage.locator('footer.pb-theme-footer')];
+      for (const width of [1440, 1001, 1000, 601, 600, 375]) {
+        await publicPage.setViewportSize({ width, height: 812 });
+        for (const area of areas) {
+          const target = area.locator('.pb-button').filter({ hasText: 'Action positionnée' });
+          const other = area.locator('.pb-button').filter({ hasText: 'Action normale' });
+          await expect(other).toHaveCSS('position', 'static');
+          if (width > 1000) {
+            await expect(target).toHaveCSS('position', 'relative');
+            await expect(target).toHaveCSS('top', '-12.5px');
+            await expect(target).toHaveCSS('z-index', '3');
+            expect(parseFloat(await target.evaluate(node => getComputedStyle(node).left))).toBeGreaterThan(0);
+          } else if (width > 600) {
+            await expect(target).toHaveCSS('position', 'sticky');
+            await expect(target).toHaveCSS('top', '0px');
+            await expect(target).toHaveCSS('left', 'auto');
+            await expect(target).toHaveCSS('z-index', 'auto');
+          } else {
+            await expect(target).toHaveCSS('position', 'static');
+            await expect(target).toHaveCSS('top', 'auto');
+            await expect(target).toHaveCSS('left', 'auto');
+            await expect(target).toHaveCSS('z-index', '2');
+          }
+        }
+        if (width === 1440) await areas[0].screenshot({ path: test.info().outputPath('position-public-desktop.jpg'), quality: 15 });
+        if (width === 375) await areas[0].screenshot({ path: test.info().outputPath('position-public-mobile.jpg'), quality: 15 });
+      }
+      const ids = await publicPage.locator('[id]').evaluateAll(nodes => nodes.map(node => node.id).filter(Boolean));
+      expect(ids.length).toBe(new Set(ids).size);
+    } finally { await noJs.close(); }
+    await page.goto('/pb-position-responsive');
+    await expectAccessible(page);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (originalTheme) {
+        await page.goto('/admin/prime-builder/theme');
+        await page.getByLabel('En-tête', { exact: true }).selectOption(originalTheme.header);
+        await page.getByLabel('Pied de page', { exact: true }).selectOption(originalTheme.footer);
+        await page.getByLabel('Contenus exclus', { exact: true }).fill(originalTheme.exclude);
+        await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+      }
+      if (originalBreakpoints) await saveBreakpoints(...originalBreakpoints);
+      if (templateId) {
+        const deleted = await api(`/api/prime-builder/v1/templates/${templateId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(200);
+      }
+      if (entryId) {
+        const trashed = await api(`/api/v1/content/page/${entryId}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/page/${entryId}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+    } finally { page.off('dialog', leave); }
+  }
+});
+
 test('plugin settings save and remain usable on desktop and mobile', async ({ page }) => {
   await login(page);
   await page.goto('/admin/prime-builder/settings');

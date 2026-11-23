@@ -148,6 +148,18 @@ test('responsive inheritance finds the nearest previous explicit value, includin
   assert.equal(inheritedStyle(styles, 'mobile', 'width'), null);
   assert.equal(inheritedStyle(null, 'mobile', 'width'), null);
 });
+test('position inheritance distinguishes zero, automatic resets and cleared overrides', () => {
+  const desktop = setResponsiveStyle([], 'desktop', 'offset_top', -12);
+  const tablet = setResponsiveStyle(desktop, 'tablet', 'offset_top', 0);
+  const mobile = setResponsiveStyle(tablet, 'mobile', 'offset_top', 'auto');
+  assert.deepEqual(inheritedStyle(mobile, 'tablet', 'offset_top'), { mode: 'desktop', value: -12 });
+  assert.deepEqual(inheritedStyle(mobile, 'mobile', 'offset_top'), { mode: 'tablet', value: 0 });
+  assert.equal(mobile.mobile.offset_top, 'auto');
+  const cleared = setResponsiveStyle(mobile, 'mobile', 'offset_top', undefined);
+  assert.deepEqual(cleared, tablet);
+  assert.equal(JSON.stringify(mobile), '{"desktop":{"offset_top":-12},"tablet":{"offset_top":0},"mobile":{"offset_top":"auto"}}');
+  assert.deepEqual(desktop, { desktop: { offset_top: -12 } });
+});
 test('style editing handles empty maps returned by PHP without losing changes', () => {
   const empty = [];
   const desktop = setResponsiveStyle(empty, 'desktop', 'visibility', 'hide');

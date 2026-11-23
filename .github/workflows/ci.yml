@@ -297,30 +297,38 @@ jobs:
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
       # Temporary transport: the sandbox cannot download the artifact host.
-      - name: Report visibility-editor capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-editor 0
-      - name: Report visibility-editor capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-editor 1
-      - name: Report visibility-editor capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-editor 2
-      - name: Report visibility-editor capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-editor 3
-      - name: Report visibility-public-tablet capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-public-tablet 0
-      - name: Report visibility-public-tablet capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-public-tablet 1
-      - name: Report visibility-public-tablet capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-public-tablet 2
-      - name: Report visibility-public-tablet capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-public-tablet 3
-      - name: Report visibility-public-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-public-mobile 0
-      - name: Report visibility-public-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-public-mobile 1
-      - name: Report visibility-public-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-public-mobile 2
-      - name: Report visibility-public-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh visibility-public-mobile 3
+      - name: Report position-editor capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh position-editor 0
+      - name: Report position-editor capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh position-editor 1
+      - name: Report position-editor capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh position-editor 2
+      - name: Report position-editor capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh position-editor 3
+      - name: Report position-editor-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh position-editor-mobile 0
+      - name: Report position-editor-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh position-editor-mobile 1
+      - name: Report position-editor-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh position-editor-mobile 2
+      - name: Report position-editor-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh position-editor-mobile 3
+      - name: Report position-public-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh position-public-desktop 0
+      - name: Report position-public-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh position-public-desktop 1
+      - name: Report position-public-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh position-public-desktop 2
+      - name: Report position-public-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh position-public-desktop 3
+      - name: Report position-public-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh position-public-mobile 0
+      - name: Report position-public-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh position-public-mobile 1
+      - name: Report position-public-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh position-public-mobile 2
+      - name: Report position-public-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh position-public-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |

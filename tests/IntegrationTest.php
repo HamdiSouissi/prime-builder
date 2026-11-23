@@ -177,6 +177,74 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
     }
 
+    public function testResponsivePositionPersistsInEntryAndThemeStylesheetsWithoutScripts(): void
+    {
+        $app = $this->activated('admin');
+        $app->get(Settings::class)->set('plugin.prime-builder.configuration', ['breakpoint_tablet' => 1000, 'breakpoint_mobile' => 600]);
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Décalage haut', $config['ui']['offset_top']);
+        self::assertSame('Automatique', $config['ui']['auto']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'responsive position', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'positioned', 'type' => 'button', 'settings' => ['text' => 'Action positionnée', 'url' => '/'],
+            'styles' => [
+                'desktop' => ['position' => 'relative', 'offset_top' => -12, 'offset_left' => '10%', 'z_index' => -3],
+                'tablet' => ['position' => 'sticky', 'offset_top' => 0, 'offset_left' => 'auto', 'z_index' => 'auto'],
+                'mobile' => ['position' => 'static', 'offset_top' => 'auto', 'z_index' => 2],
+            ],
+            'children' => [],
+        ]];
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('Action positionnée', $entry->contentHtml);
+        self::assertStringNotContainsString('style=', $entry->contentHtml);
+        $layout = $entry->decodedContent()['blocks'][0]['data'];
+        self::assertSame($document['blocks'][0]['data']['elements'][0]['styles'], $layout['elements'][0]['styles']);
+        $css = (new Compiler(1000, 600))->compile($layout);
+        $url = '/prime-builder/css/1-' . substr(hash('sha256', $css), 0, 16) . '.css';
+        $stylesheet = $this->send($app, 'GET', $url);
+        self::assertSame(200, $stylesheet->status());
+        self::assertSame($css, $stylesheet->body());
+        self::assertStringContainsString('position:relative;top:-12px;left:10%;z-index:-3;', $css);
+        self::assertStringContainsString('position:sticky;top:0px;left:auto;z-index:auto;', $css);
+        self::assertStringContainsString('position:static;top:auto;z-index:2;', $css);
+        $hooks = $app->get(Hooks::class);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringContainsString($url, $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
+
+        foreach ([['position', 'fixed;}body{display:none'], ['offset_top', '1px;display:none'], ['z_index', 1001]] as [$key, $bad]) {
+            $invalid = $document;
+            $invalid['blocks'][0]['data']['elements'][0]['styles']['desktop'][$key] = $bad;
+            self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $invalid], $token)->status());
+            self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $invalid], $token)->status());
+        }
+        self::assertSame($css, $this->send($app, 'GET', $url)->body());
+        self::assertSame($entry->content, $app->get(EntryRepository::class)->find(1)?->content);
+
+        $template = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Position', 'kind' => 'section', 'data' => $layout], $token);
+        self::assertSame(201, $template->status(), $template->body());
+        $templateId = json_decode($template->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $templateId, 'footer' => '', 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($header);
+        self::assertSame(1, preg_match('/data-pb-id="([a-zA-Z0-9_-]+)"/', $header, $idMatches));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\\.css)~', $assets->renderStyles(), $matches));
+        $themeCss = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
+        self::assertSame(200, $themeCss->status());
+        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]{position:relative;top:-12px;left:10%;z-index:-3;}', $themeCss->body());
+        self::assertStringContainsString('position:static;top:auto;z-index:2;', $themeCss->body());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
+    }
+
     public function testPlainTextSeparatesRenderedElementsAndNormalizesWhitespace(): void
     {
         $app = $this->activated(null);

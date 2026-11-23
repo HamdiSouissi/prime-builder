@@ -22,6 +22,29 @@ final class Values
         return $value;
     }
 
+    /** Signed positioning offsets may also explicitly reset an inherited value to auto. */
+    public static function offset(mixed $value): ?string
+    {
+        if ($value === 'auto') {
+            return 'auto';
+        }
+        if (is_int($value)) {
+            return $value >= -2000 && $value <= 2000 ? $value . 'px' : null;
+        }
+        if (!is_string($value) || preg_match('/^-?(\d{1,4}(?:\.\d{1,2})?)(px|%|em|rem|vw|vh)$/D', $value, $matches) !== 1) {
+            return null;
+        }
+        return (float) $matches[1] <= 2000 ? $value : null;
+    }
+
+    public static function zIndex(mixed $value): ?string
+    {
+        if ($value === 'auto') {
+            return 'auto';
+        }
+        return is_int($value) && $value >= -1000 && $value <= 1000 ? (string) $value : null;
+    }
+
     public static function color(mixed $value): ?string
     {
         if (!is_string($value)) {

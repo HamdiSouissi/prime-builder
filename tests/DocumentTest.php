@@ -179,6 +179,43 @@ final class DocumentTest extends TestCase
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$container]])['errors']);
     }
 
+    public function testResponsivePositionOffsetsAndStackingAreBoundedAndCompiled(): void
+    {
+        $node = $this->element('button', 'positioned');
+        $node['settings'] = ['text' => 'Lien', 'url' => '/'];
+        $node['styles'] = [
+            'desktop' => ['position' => 'relative', 'offset_top' => -12, 'offset_right' => '1.25rem', 'z_index' => -5],
+            'tablet' => ['position' => 'sticky', 'offset_top' => 0, 'offset_left' => '-25%', 'z_index' => 'auto'],
+            'mobile' => ['position' => 'static', 'offset_top' => 'auto', 'offset_bottom' => '-0.5em', 'z_index' => 1000],
+        ];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame($node['styles'], $result['data']['elements'][0]['styles']);
+        $css = (new Compiler(1000, 600))->compile($result['data']);
+        self::assertStringContainsString('.pb-element[data-pb-id="positioned"]{position:relative;top:-12px;right:1.25rem;z-index:-5;}', $css);
+        self::assertStringContainsString('@media(max-width:1000px){.pb-element[data-pb-id="positioned"]{position:sticky;top:0px;left:-25%;z-index:auto;}}', $css);
+        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="positioned"]{position:static;top:auto;bottom:-0.5em;z-index:1000;}}', $css);
+        foreach (['static', 'relative', 'absolute', 'fixed', 'sticky'] as $position) {
+            $node['styles'] = ['desktop' => ['position' => $position, 'offset_left' => -2000, 'offset_right' => '2000vh', 'z_index' => -1000]];
+            $valid = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+            self::assertSame([], $valid['errors']);
+            self::assertStringContainsString('position:' . $position . ';left:-2000px;right:2000vh;z-index:-1000;', (new Compiler())->compile($valid['data']));
+        }
+        // The compiler independently rejects unvalidated input as well as the API validator.
+        foreach ([
+            ['position', 'absolute;}body{display:none'], ['position', true],
+            ['offset_top', '0'], ['offset_right', 'calc(1px + 2px)'], ['offset_bottom', '-2000.01px'],
+            ['offset_left', '1px;display:none'], ['offset_top', -2001], ['offset_bottom', 1.5],
+            ['z_index', '10'], ['z_index', 'auto;display:none'], ['z_index', -1001], ['z_index', 1001], ['z_index', 0.5],
+            // Existing padding and margin remain nonnegative.
+            ['padding', -1], ['margin', '-1px'],
+        ] as [$key, $value]) {
+            $node['styles'] = ['desktop' => [$key => $value]];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors'], (string) $key);
+            self::assertSame('', (new Compiler())->compile(['elements' => [$node]]), (string) $key);
+        }
+    }
+
     public function testKitColorReferencesAndTypedLengthUnitsAreValidatedAndCompiled(): void
     {
         $node = $this->element();

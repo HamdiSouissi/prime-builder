@@ -111,6 +111,18 @@ final class Compiler
             $width = Values::length($value, true);
             return $width !== null ? 'width:' . $width . ';' : '';
         }
+        if ($key === 'position' && is_string($value) && in_array($value, ['static', 'relative', 'absolute', 'fixed', 'sticky'], true)) {
+            return 'position:' . $value . ';';
+        }
+        $offsets = ['offset_top' => 'top', 'offset_right' => 'right', 'offset_bottom' => 'bottom', 'offset_left' => 'left'];
+        if (isset($offsets[$key])) {
+            $offset = Values::offset($value);
+            return $offset !== null ? $offsets[$key] . ':' . $offset . ';' : '';
+        }
+        if ($key === 'z_index') {
+            $zIndex = Values::zIndex($value);
+            return $zIndex !== null ? 'z-index:' . $zIndex . ';' : '';
+        }
         if ($key === 'layout_mode' && is_string($value) && in_array($value, ['flex', 'grid'], true)) {
             return 'display:' . $value . ';';
         }
