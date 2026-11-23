@@ -10,8 +10,11 @@ use Prime\Content\Entry;
 use Prime\Content\EntryQuery;
 use Prime\Content\EntryRepository;
 use Prime\Content\TaxonomyRegistry;
+use Prime\Content\TermRepository;
+use Prime\Hooks\Hooks;
 use Prime\Security\HtmlSanitizer;
 use Prime\Site\Menu\MenuRenderer;
+use Prime\Site\Menu\MenuRepository;
 use Prime\Site\PageContext;
 use Prime\Site\PermalinkSettings;
 use Prime\Site\Seo\SeoManager;
@@ -54,6 +57,8 @@ final class Content
         private readonly ?SiteIdentity $siteIdentity = null,
         private readonly ?EntryViewFactory $entryViews = null,
         private readonly ?UserRepository $users = null,
+        private readonly ?Hooks $hooks = null,
+        private readonly ?TermRepository $terms = null,
     ) {
     }
 
@@ -254,7 +259,115 @@ final class Content
     /** @param array<string, mixed> $settings */
     public function navigation(array $settings, ?Entry $entry, bool $live): string
     {
-        return Navigation::render($settings, $this->menus, $live, $entry !== null ? $this->urls->entryUrl($entry) : '/');
+        return $this->renderNavigation($settings, $live, $entry !== null ? $this->urls->entryUrl($entry) : '/');
+    }
+
+    /** @param array<string, mixed> $settings */
+    public function navigationInPage(array $settings, PageContext $page): string
+    {
+        return $this->renderNavigation($settings, true, $page->path);
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function renderNavigation(array $settings, bool $live, string $path): string
+    {
+        return Navigation::render($settings, $this->menus, $live, $path, $this->hooks, $this->publicNavigationItems(...));
+    }
+
+    /**
+     * Recheck typed destinations after the core's menu filters. Unlike a custom
+     * URL, an entry/term/archive target has a CMS identity that we can verify.
+     * Ancestors are fetched in batches and URL cache entries are refreshed.
+     *
+     * @param array<mixed> $items
+     * @return list<array<string, mixed>>
+     */
+    private function publicNavigationItems(array $items): array
+    {
+        if ($this->entries === null || $this->terms === null || $this->taxonomies === null) {
+            return [];
+        }
+        $entryIds = [];
+        $termIds = [];
+        $targetId = static function (mixed $value): int {
+            if (is_int($value)) {
+                return max(0, $value);
+            }
+            return is_string($value) && ctype_digit($value) ? max(0, (int) $value) : 0;
+        };
+        $collect = static function (array $nodes, int $depth) use (&$collect, &$entryIds, &$termIds, $targetId): void {
+            if ($depth > MenuRepository::MAX_DEPTH) {
+                return;
+            }
+            foreach ($nodes as $node) {
+                if (!is_array($node)) {
+                    continue;
+                }
+                $id = $targetId($node['target_id'] ?? null);
+                if ($id > 0 && ($node['type'] ?? null) === MenuRepository::TYPE_ENTRY) {
+                    $entryIds[$id] = true;
+                } elseif ($id > 0 && ($node['type'] ?? null) === MenuRepository::TYPE_TERM) {
+                    $termIds[$id] = true;
+                }
+                if (is_array($node['children'] ?? null)) {
+                    $collect($node['children'], $depth + 1);
+                }
+            }
+        };
+        $collect($items, 1);
+        $candidates = [];
+        foreach ($this->entries->findManyById(array_keys($entryIds)) as $entry) {
+            if ($this->types->get($entry->type)?->public === true && UrlResolver::isPubliclyVisible($entry)) {
+                $candidates[] = $entry;
+            }
+        }
+        $entries = [];
+        foreach ($this->resolvePageAncestors($candidates) as $entry) {
+            $entries[$entry->id] = $entry;
+        }
+        $terms = $this->terms->findManyById(array_keys($termIds));
+        $publicBlog = null;
+        $filter = function (array $nodes, int $depth) use (&$filter, $targetId, $entries, $terms, &$publicBlog): array {
+            if ($depth > MenuRepository::MAX_DEPTH) {
+                return [];
+            }
+            $result = [];
+            foreach ($nodes as $node) {
+                if (!is_array($node)) {
+                    continue;
+                }
+                $type = $node['type'] ?? MenuRepository::TYPE_URL;
+                $id = $targetId($node['target_id'] ?? null);
+                if ($type === MenuRepository::TYPE_ENTRY) {
+                    $entry = $entries[$id] ?? null;
+                    if (!$entry instanceof Entry) {
+                        continue;
+                    }
+                    $node['url'] = $this->urls->entryUrl($entry);
+                } elseif ($type === MenuRepository::TYPE_TERM) {
+                    $term = $terms[$id] ?? null;
+                    if ($term === null || $this->taxonomies->get($term->taxonomy)?->public !== true) {
+                        continue;
+                    }
+                    $node['url'] = $this->urls->termUrl($term);
+                } elseif ($type === MenuRepository::TYPE_ARCHIVE) {
+                    $archive = is_string($node['raw_url'] ?? null) ? $node['raw_url'] : '';
+                    if ($this->types->get($archive)?->public !== true) {
+                        continue;
+                    }
+                    if ($archive === 'post') {
+                        $publicBlog ??= $this->publicPostsPage();
+                    }
+                    $node['url'] = $archive === 'post' && !$publicBlog ? '/blog' : $this->urls->archiveUrl($archive);
+                } elseif ($type !== MenuRepository::TYPE_URL) {
+                    continue;
+                }
+                $node['children'] = is_array($node['children'] ?? null) ? $filter($node['children'], $depth + 1) : [];
+                $result[] = $node;
+            }
+            return $result;
+        };
+        return $filter($items, 1);
     }
 
     /**

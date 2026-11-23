@@ -297,22 +297,22 @@ jobs:
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
       # Temporary transport: the sandbox cannot download the artifact host.
-      - name: Report search-partial-public-desktop capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh search-partial-public-desktop 0
-      - name: Report search-partial-public-desktop capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh search-partial-public-desktop 1
-      - name: Report search-partial-public-desktop capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh search-partial-public-desktop 2
-      - name: Report search-partial-public-desktop capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh search-partial-public-desktop 3
-      - name: Report search-partial-public-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh search-partial-public-mobile 0
-      - name: Report search-partial-public-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh search-partial-public-mobile 1
-      - name: Report search-partial-public-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh search-partial-public-mobile 2
-      - name: Report search-partial-public-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh search-partial-public-mobile 3
+      - name: Report navigation-partial-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh navigation-partial-desktop 0
+      - name: Report navigation-partial-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh navigation-partial-desktop 1
+      - name: Report navigation-partial-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh navigation-partial-desktop 2
+      - name: Report navigation-partial-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh navigation-partial-desktop 3
+      - name: Report navigation-partial-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh navigation-partial-mobile 0
+      - name: Report navigation-partial-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh navigation-partial-mobile 1
+      - name: Report navigation-partial-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh navigation-partial-mobile 2
+      - name: Report navigation-partial-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh navigation-partial-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |

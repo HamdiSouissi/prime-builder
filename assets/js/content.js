@@ -146,6 +146,12 @@
     });
     node.addEventListener('focusout', onFocusOut);
   };
+  // Theme parts contain a fresh server-rendered menu, without a live endpoint.
+  // A copied entry can contain its own live layout inside the part: leave that
+  // fallback alone until the corresponding response has actually arrived.
+  for (const node of document.querySelectorAll('.pb-theme-header .pb-navigation[data-pb-id], .pb-theme-footer .pb-navigation[data-pb-id]')) {
+    if (!node.closest('.pb-layout[data-pb-live]')) enhanceNavigation(node);
+  }
   const requests = new Map();
   for (const layout of document.querySelectorAll('.pb-layout[data-pb-live]')) {
     const url = layout.dataset.pbLive;

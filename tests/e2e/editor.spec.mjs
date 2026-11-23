@@ -3910,6 +3910,217 @@ test('navigation uses CMS menus with keyboard disclosures on desktop and mobile'
   } finally { await noJs.close(); }
 });
 
+test('theme navigation renders current public menus with keyboard and no-JavaScript fallbacks', async ({ page, browser }) => {
+  test.setTimeout(150_000);
+  page.setDefaultTimeout(12_000);
+  await login(page);
+  let csrf = null, templateId = null, createdMenuId = null, originalTheme = null, originalCache = null;
+  const pages = [];
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      // The REST API and the CMS administration routes use different CSRF headers.
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, 'X-CSRF-Token': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  const saveMenu = items => api(`/admin/appearance/menus/${createdMenuId}/save`, 'POST', { name: 'Menu thème test', items });
+  try {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    const currentSettings = await api('/api/v1/settings', 'GET');
+    expect(currentSettings.status, currentSettings.body).toBe(200);
+    originalCache = JSON.parse(currentSettings.body).data['cache.page_enabled'];
+    for (const [title, slug] of [['Parent menu', 'pb-parent-menu'], ['Enfant menu', 'pb-enfant-menu']]) {
+      const result = await api('/api/v1/content/page', 'POST', {
+        title, slug, status: 'published', published_at: '2021-01-01 10:00:00',
+        parent_id: pages.length ? pages[pages.length - 1].id : 0, content: { version: 1, blocks: [] },
+      });
+      expect(result.status, result.body).toBe(201);
+      pages.push(JSON.parse(result.body).data);
+    }
+    const createdMenu = await page.evaluate(async csrfToken => {
+      const body = new URLSearchParams({ _csrf_token: csrfToken, name: 'Menu thème test', location: '' });
+      const response = await fetch('/admin/appearance/menus/create', { method: 'POST', body });
+      return { status: response.status, url: response.url };
+    }, csrf);
+    expect(createdMenu.status).toBe(200);
+    createdMenuId = new URL(createdMenu.url).searchParams.get('menu');
+    expect(createdMenuId).toMatch(/^[1-9][0-9]*$/);
+    const items = [
+      { type: 'url', url: '/', label: 'Accueil' },
+      { type: 'url', url: '/blog/actualite-publique', label: 'Actualité', children: [
+        { type: 'url', url: '/services', label: 'Services', children: [
+          { type: 'url', url: '/details', label: 'Détails' },
+        ] },
+      ] },
+      { type: 'entry', target_id: pages[1].id, label: 'Enfant du menu' },
+      { type: 'url', url: 'https://example.test/', label: 'Externe', target: '_blank' },
+    ];
+    let result = await saveMenu(items);
+    expect(result.status, result.body).toBe(200);
+    const layout = { version: 1, elements: [
+      { id: 'menu', type: 'navigation', settings: { menu_id: createdMenuId, label: 'Explorer le site' }, styles: {}, children: [] },
+    ] };
+    const template = await api('/api/prime-builder/v1/templates', 'POST', { name: 'Navigation du thème', kind: 'section', data: layout });
+    expect(template.status, template.body).toBe(201);
+    templateId = JSON.parse(template.body).data.id;
+    await page.goto('/admin/prime-builder/theme');
+    originalTheme = {
+      header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
+      footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
+      exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
+    };
+    // First prove that this public page is really cached without a contextual
+    // theme part; otherwise a later missing HIT would not prove the bypass.
+    await page.getByLabel('En-tête', { exact: true }).selectOption('');
+    await page.getByLabel('Pied de page', { exact: true }).selectOption('');
+    await page.getByLabel('Contenus exclus', { exact: true }).fill('');
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    result = await api('/api/v1/settings', 'PATCH', { 'cache.page_enabled': true });
+    expect(result.status, result.body).toBe(200);
+    const cacheProbe = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const probePage = await cacheProbe.newPage();
+      await probePage.goto('/blog/actualite-publique');
+      const cached = await probePage.reload();
+      expect(cached.headers()['x-prime-cache']).toBe('HIT');
+    } finally { await cacheProbe.close(); }
+    await page.getByLabel('En-tête', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await expect(page.getByLabel('En-tête', { exact: true })).toHaveValue(templateId);
+
+    await page.goto('/blog/actualite-publique');
+    const header = page.locator('header.pb-theme-header');
+    const footer = page.locator('footer.pb-theme-footer');
+    const nav = header.getByRole('navigation', { name: 'Explorer le site' });
+    const current = nav.getByRole('link', { name: 'Actualité' });
+    const toggle = nav.getByRole('button', { name: 'Sous-menu : Actualité' });
+    await expect(current).toHaveAttribute('aria-current', 'page');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(nav.getByRole('link', { name: 'Externe' })).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(page.locator('link[href*="/css/widgets/navigation.css"]')).toHaveCount(1);
+    await expect(page.locator('script[src*="/js/content.js"]')).toHaveCount(1);
+    await expect(header.locator('.pb-layout[data-pb-live]')).toHaveCount(0);
+    await expect(footer.locator('.pb-layout[data-pb-live]')).toHaveCount(0);
+    const controlIds = await page.locator('.pb-theme-header .pb-navigation [id], .pb-theme-footer .pb-navigation [id]').evaluateAll(nodes => nodes.map(node => node.id));
+    expect(controlIds.length).toBeGreaterThanOrEqual(6);
+    expect(new Set(controlIds).size).toBe(controlIds.length);
+    await current.focus();
+    await page.keyboard.press('Tab');
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press('Enter');
+    const services = nav.getByRole('link', { name: 'Services' });
+    await page.keyboard.press('Tab');
+    await expect(services).toBeFocused();
+    await page.keyboard.press('Tab');
+    const nested = nav.getByRole('button', { name: 'Sous-menu : Services' });
+    await expect(nested).toBeFocused();
+    await page.keyboard.press('Space');
+    await page.keyboard.press('Tab');
+    await expect(nav.getByRole('link', { name: 'Détails' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(nested).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(toggle).toBeFocused();
+    await expectAccessible(page);
+    await header.screenshot({ path: test.info().outputPath('navigation-partial-desktop.jpg'), quality: 20 });
+
+    for (const width of [320, 375]) {
+      await page.setViewportSize({ width, height: 812 });
+      await page.reload();
+      const mobile = nav.getByRole('button', { name: 'Menu de navigation' });
+      await expect(mobile).toHaveAttribute('aria-expanded', 'false');
+      await mobile.focus();
+      await page.keyboard.press('Enter');
+      await expect(mobile).toHaveAttribute('aria-expanded', 'true');
+      await page.keyboard.press('Tab');
+      await expect(nav.getByRole('link', { name: 'Accueil' })).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(current).toBeFocused();
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Enter');
+      await expect(services).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(toggle).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(mobile).toBeFocused();
+      await expect(mobile).toHaveAttribute('aria-expanded', 'false');
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      await expectAccessible(page);
+    }
+    await nav.getByRole('button', { name: 'Menu de navigation' }).click();
+    await header.screenshot({ path: test.info().outputPath('navigation-partial-mobile.jpg'), quality: 20 });
+
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const publicPage = await noJs.newPage();
+      let response = await publicPage.goto('/blog/actualite-publique');
+      // PageCacheMiddleware returns directly for uncacheable requests, without
+      // an X-Prime-Cache header (the PHPUnit test checks the hook itself).
+      expect(response.headers()['x-prime-cache']).toBeUndefined();
+      response = await publicPage.reload();
+      expect(response.headers()['x-prime-cache']).toBeUndefined();
+      const publicHeader = publicPage.locator('header.pb-theme-header').getByRole('navigation', { name: 'Explorer le site' });
+      const publicFooter = publicPage.locator('footer.pb-theme-footer').getByRole('navigation', { name: 'Explorer le site' });
+      await expect(publicHeader.getByRole('link', { name: 'Détails' })).toBeVisible();
+      await expect(publicFooter.getByRole('link', { name: 'Enfant du menu' })).toHaveAttribute('href', '/pb-parent-menu/pb-enfant-menu');
+      await expect(publicHeader.getByRole('link', { name: 'Actualité' })).toHaveAttribute('aria-current', 'page');
+      result = await api(`/api/v1/content/page/${pages[0].id}`, 'PATCH', { status: 'draft' });
+      expect(result.status, result.body).toBe(200);
+      response = await publicPage.reload();
+      expect(response.headers()['x-prime-cache']).toBeUndefined();
+      await expect(publicHeader.getByText('Enfant du menu')).toHaveCount(0);
+      await expect(publicFooter.getByText('Enfant du menu')).toHaveCount(0);
+      expect(await publicPage.locator('header.pb-theme-header').innerHTML()).not.toContain('pb-parent-menu');
+      result = await saveMenu([...items, { type: 'url', url: '/nouveau-menu', label: 'Lien actualisé' }]);
+      expect(result.status, result.body).toBe(200);
+      await publicPage.reload();
+      await expect(publicHeader.getByRole('link', { name: 'Lien actualisé' })).toHaveAttribute('href', '/nouveau-menu');
+      result = await api(`/api/v1/content/page/${pages[0].id}`, 'PATCH', { status: 'published', slug: 'pb-parent-menu-renomme' });
+      expect(result.status, result.body).toBe(200);
+      await publicPage.reload();
+      await expect(publicHeader.getByRole('link', { name: 'Enfant du menu' })).toHaveAttribute('href', '/pb-parent-menu-renomme/pb-enfant-menu');
+      await publicPage.goto('/page-introuvable-pb');
+      await expect(publicFooter.getByRole('link', { name: 'Détails' })).toBeVisible();
+      await publicFooter.getByRole('link', { name: 'Accueil' }).focus();
+      await publicPage.keyboard.press('Enter');
+      await expect(publicPage).toHaveURL(/\/$/);
+    } finally { await noJs.close(); }
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (originalTheme) {
+        await page.goto('/admin/prime-builder/theme');
+        await page.getByLabel('En-tête', { exact: true }).selectOption(originalTheme.header);
+        await page.getByLabel('Pied de page', { exact: true }).selectOption(originalTheme.footer);
+        await page.getByLabel('Contenus exclus', { exact: true }).fill(originalTheme.exclude);
+        await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+      }
+      if (originalCache !== null) {
+        const restored = await api('/api/v1/settings', 'PATCH', { 'cache.page_enabled': originalCache });
+        expect(restored.status, restored.body).toBe(200);
+      }
+      if (createdMenuId) {
+        const deleted = await api(`/admin/appearance/menus/${createdMenuId}/delete`, 'POST', {});
+        expect(deleted.status, deleted.body).toBe(200);
+      }
+      for (const item of pages.reverse()) {
+        const trashed = await api(`/api/v1/content/page/${item.id}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/page/${item.id}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (templateId) {
+        const deleted = await api(`/api/prime-builder/v1/templates/${templateId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(200);
+      }
+    } finally { page.off('dialog', leave); }
+  }
+});
+
 test('theme search forms use the current search URL without JavaScript or duplicate IDs', async ({ page, browser }) => {
   test.setTimeout(120_000);
   page.setDefaultTimeout(12_000);

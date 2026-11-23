@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace PrimeBuilder\Widgets;
 
+use Prime\Hooks\Hooks;
 use Prime\Site\Menu\MenuRenderer;
 use Throwable;
 
 /** Public CMS menus with a conservative saved fallback. */
 final class Navigation
 {
-    /** @param array<string, mixed> $settings */
-    public static function render(array $settings, ?MenuRenderer $menus, bool $live, string $path = '/'): string
+    /**
+     * @param array<string, mixed> $settings
+     * @param (callable(array<mixed>): array<mixed>)|null $publicItems
+     */
+    public static function render(array $settings, ?MenuRenderer $menus, bool $live, string $path = '/', ?Hooks $hooks = null, ?callable $publicItems = null): string
     {
         $label = is_string($settings['label'] ?? null) ? trim(strip_tags($settings['label'])) : '';
         if ($label === '') {
@@ -19,18 +23,40 @@ final class Navigation
         }
         $reference = is_string($settings['menu_id'] ?? null) ? $settings['menu_id'] : '';
         $list = '';
-        if ($live && $menus !== null && preg_match('/^[1-9][0-9]{0,8}$/D', $reference) === 1) {
+        if ($live && $menus !== null && $hooks !== null && $publicItems !== null && preg_match('/^[1-9][0-9]{0,8}$/D', $reference) === 1) {
+            // Run the core's site.menu_items filters first, then check typed targets
+            // ourselves: core does not check page ancestors or private taxonomies.
+            // The marker confines this temporary filter to this particular render.
+            $marker = new \stdClass();
+            $filter = static function (mixed $items, mixed $location, mixed $menu, mixed $options) use ($marker, $publicItems): mixed {
+                if (!is_array($options) || ($options['prime_builder_navigation'] ?? null) !== $marker) {
+                    return $items;
+                }
+                if (!is_array($items)) {
+                    return [];
+                }
+                try {
+                    return $publicItems($items);
+                } catch (Throwable) {
+                    // Hooks isolate plugin exceptions: fail closed rather than
+                    // returning a potentially private menu after an error.
+                    return [];
+                }
+            };
+            $hooks->filter('site.menu_items', $filter, PHP_INT_MAX);
             try {
-                // The core renderer resolves only public menu targets and applies its hooks.
                 $list = $menus->renderLocation('', [
                     'menu_id' => (int) $reference,
                     'wrap_nav' => false,
                     'list_class' => 'pb-nav__list',
                     'current_path' => $path,
+                    'prime_builder_navigation' => $marker,
                 ]);
                 $list = self::isolateClasses($list);
             } catch (Throwable) {
                 $list = '';
+            } finally {
+                $hooks->off('site.menu_items', $filter);
             }
         }
         if ($list === '') {

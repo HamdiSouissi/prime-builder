@@ -51,7 +51,7 @@ final class Partials
     /**
      * Revalidate even stored data. Some route-dependent widgets lack a suitable
      * theme context and are not accepted in this first slice. Site identity,
-     * entry metadata, breadcrumbs, search forms and archives are server-rendered.
+     * entry metadata, breadcrumbs, menus, search forms and archives are server-rendered.
      *
      * @param array<mixed> $elements
      * @return array<string, mixed>|null
@@ -105,7 +105,7 @@ final class Partials
                 continue;
             }
             $type = $element['type'] ?? null;
-            if (in_array($type, ['posts', 'current_content', 'theme_zone', 'form', 'navigation', 'share_buttons'], true)) {
+            if (in_array($type, ['posts', 'current_content', 'theme_zone', 'form', 'share_buttons'], true)) {
                 return true;
             }
             $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];

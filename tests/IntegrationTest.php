@@ -640,6 +640,169 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('href="/"', json_decode($live->body(), true)['data']['widgets']['menu']);
     }
 
+    public function testNavigationInThemePartsUsesPublicTargetsAndRealPageContext(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $pdo->exec('CREATE TABLE pc_menus (id ' . $idColumn . ', name VARCHAR(150) NOT NULL, slug VARCHAR(120) NOT NULL UNIQUE, location VARCHAR(80) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)');
+        $pdo->exec('CREATE TABLE pc_menu_items (id ' . $idColumn . ", menu_id INTEGER NOT NULL, parent_id INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0, type VARCHAR(20) NOT NULL DEFAULT 'url', target_id INTEGER NULL, url VARCHAR(500) NULL, label VARCHAR(255) NOT NULL DEFAULT '', target VARCHAR(16) NOT NULL DEFAULT '_self', css_class VARCHAR(255) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
+        $parent = $this->insertGridEntry($pdo, 'page', 'draft', 'Parent privé', 'parent-secret', 1);
+        $child = $this->insertGridEntry($pdo, 'page', 'published', 'Enfant', 'enfant-secret', 1, $parent);
+        $publicParent = $this->insertGridEntry($pdo, 'page', 'published', 'Parent public', 'parent-public', 1);
+        $publicChild = $this->insertGridEntry($pdo, 'page', 'published', 'Page publique', 'page-publique', 1, $publicParent);
+        $cycle = $this->insertGridEntry($pdo, 'page', 'published', 'Page cyclique', 'cycle-secret', 1);
+        $pdo->exec('UPDATE pc_entries SET parent_id = ' . $cycle . ' WHERE id = ' . $cycle);
+        $future = $this->insertGridEntry($pdo, 'page', 'published', 'Page future', 'future-secret', 1, 0, '2100-01-01 00:00:00');
+        $futureChild = $this->insertGridEntry($pdo, 'page', 'published', 'Enfant futur', 'enfant-futur', 1, $future);
+        $orphan = $this->insertGridEntry($pdo, 'page', 'published', 'Page orpheline', 'orpheline', 1, 999999);
+        $deep = 0;
+        for ($depth = 0; $depth < 13; $depth++) {
+            $deep = $this->insertGridEntry($pdo, 'page', 'published', 'Profondeur ' . $depth, 'niveau-' . $depth, 1, $deep);
+        }
+        $types = $app->get(ContentTypeRegistry::class);
+        $types->register(new ContentType(name: 'internal', labels: ['singular' => 'Privé'], public: false));
+        $privateEntry = $this->insertGridEntry($pdo, 'internal', 'published', 'Type privé', 'type-secret', 1);
+        $taxonomies = $app->get(TaxonomyRegistry::class);
+        $taxonomies->register(new Taxonomy(name: 'secret', labels: ['singular' => 'Privé'], public: false));
+        $pdo->exec("INSERT INTO pc_terms (id, taxonomy, name, slug, parent_id, menu_order, `count`) VALUES (11, 'category', 'Arts', 'arts', 0, 0, 0), (12, 'secret', 'Interne', 'terme-secret', 0, 0, 0)");
+        $permalinks = $app->get(PermalinkSettings::class);
+        $permalinks->setOverride('reading.front_mode', 'page');
+        $permalinks->setOverride('reading.posts_page_id', $parent);
+        $menus = $app->get(\Prime\Site\Menu\MenuRepository::class);
+        $menuId = $menus->create('Menu du thème');
+        $menus->replaceItems($menuId, [
+            ['type' => 'url', 'url' => '/', 'label' => 'Accueil'],
+            ['type' => 'entry', 'target_id' => $publicChild, 'label' => 'Page publique', 'children' => [
+                ['type' => 'url', 'url' => '/services', 'label' => 'Services'],
+            ]],
+            ['type' => 'entry', 'target_id' => $child, 'label' => 'Enfant inaccessible', 'children' => [
+                ['type' => 'url', 'url' => '/orphelin', 'label' => 'Sous-menu inaccessible'],
+            ]],
+            ['type' => 'entry', 'target_id' => $cycle, 'label' => 'Cycle inaccessible'],
+            ['type' => 'entry', 'target_id' => $future, 'label' => 'Publication future'],
+            ['type' => 'entry', 'target_id' => $futureChild, 'label' => 'Parent futur'],
+            ['type' => 'entry', 'target_id' => $orphan, 'label' => 'Parent manquant'],
+            ['type' => 'entry', 'target_id' => $deep, 'label' => 'Chemin trop profond'],
+            ['type' => 'entry', 'target_id' => $privateEntry, 'label' => 'Type inaccessible'],
+            ['type' => 'term', 'target_id' => 11, 'label' => 'Arts'],
+            ['type' => 'term', 'target_id' => 12, 'label' => 'Taxonomie privée'],
+            ['type' => 'archive', 'url' => 'post', 'label' => 'Blog'],
+            ['type' => 'archive', 'url' => 'internal', 'label' => 'Archive privée'],
+            ['type' => 'url', 'url' => 'https://example.test/', 'label' => 'Externe', 'target' => '_blank'],
+        ]);
+        $hooks = $app->get(Hooks::class);
+        $hooks->filter('site.menu_items', static function (mixed $items) use ($child): mixed {
+            if (is_array($items)) {
+                $items[] = ['label' => 'Ajout du filtre', 'url' => '/filtre', 'children' => []];
+                $items[] = ['type' => 'entry', 'target_id' => $child, 'label' => 'Ajout privé', 'url' => '/faux', 'children' => []];
+            }
+            return $items;
+        }, 100);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'theme menu', ['*'])['token'];
+        $layout = ['version' => 1, 'elements' => [[
+            'id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [[
+                'id' => 'menu', 'type' => 'navigation', 'settings' => ['menu_id' => (string) $menuId, 'label' => 'Explorer'], 'styles' => [], 'children' => [],
+            ]],
+        ]]];
+        $created = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Menu thème', 'kind' => 'section', 'data' => $layout], $token);
+        self::assertSame(201, $created->status(), $created->body());
+        $template = json_decode($created->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $template, 'footer' => $template, 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, path: '/parent-public/page-publique');
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        $footer = $hooks->apply('site.partial', null, 'footer', $page, []);
+        self::assertIsString($header);
+        self::assertIsString($footer);
+        foreach ([$header, $footer] as $html) {
+            self::assertStringContainsString('aria-label="Explorer"', $html);
+            self::assertStringContainsString('href="/parent-public/page-publique" class="pb-nav__link" aria-current="page"', $html);
+            self::assertStringContainsString('<ul class="pb-nav__submenu">', $html);
+            self::assertStringContainsString('>Services</a>', $html);
+            self::assertStringContainsString('href="/categorie/arts"', $html);
+            self::assertStringContainsString('href="/blog"', $html);
+            self::assertStringContainsString('>Ajout du filtre</a>', $html);
+            self::assertStringContainsString('target="_blank" rel="noopener noreferrer"', $html);
+            self::assertStringNotContainsString('data-pb-live=', $html);
+            foreach (['parent-secret', 'Enfant inaccessible', 'Sous-menu inaccessible', 'Ajout privé', 'cycle-secret', 'Cycle inaccessible', 'Publication future', 'Parent futur', 'Parent manquant', 'Chemin trop profond', 'Type inaccessible', 'Taxonomie privée', 'Archive privée'] as $secret) {
+                self::assertStringNotContainsString($secret, $html);
+            }
+        }
+        preg_match_all('/data-pb-id="([a-zA-Z0-9_-]+)"/', $header . $footer, $ids);
+        self::assertSame(count($ids[1]), count(array_unique($ids[1])));
+        $archive = $hooks->apply('site.partial', null, 'footer', new PageContext(type: PageContext::TYPE_BLOG, path: '/blog'), []);
+        self::assertIsString($archive);
+        self::assertStringContainsString('href="/blog" class="pb-nav__link" aria-current="page"', $archive);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/navigation.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        self::assertSame(false, $cache->isCacheableRequest(Request::create('GET', '/parent-public/page-publique')));
+
+        // The live endpoint for an entry uses the same typed-target checks and
+        // still persists only the conservative home-link fallback.
+        $document = $this->document();
+        $document['blocks'][0]['data'] = $layout;
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $saved = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($saved);
+        self::assertStringNotContainsString('Enfant inaccessible', $saved->contentHtml);
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $live->status(), $live->body());
+        $liveMenu = json_decode($live->body(), true)['data']['widgets']['menu'];
+        self::assertStringNotContainsString('parent-secret', $liveMenu);
+        self::assertStringNotContainsString('Ajout privé', $liveMenu);
+
+        // If a dependency fails while checking the items, the hook must fail
+        // closed rather than returning the unfiltered core list. It is removed
+        // afterwards so other renders and core menu filters remain usable.
+        $brokenTaxonomies = static function (): never {
+            throw new \RuntimeException('Taxonomy lookup failed');
+        };
+        $hooks->filter('content.taxonomies', $brokenTaxonomies, 1000);
+        $provider = $app->get(Content::class);
+        $fallback = $provider->navigation(['menu_id' => (string) $menuId, 'label' => 'Explorer'], null, true);
+        self::assertStringContainsString('href="/"', $fallback);
+        self::assertStringNotContainsString('Page publique', $fallback);
+        self::assertStringNotContainsString('parent-secret', $fallback);
+        $hooks->off('content.taxonomies', $brokenTaxonomies);
+        $resumed = $provider->navigation(['menu_id' => (string) $menuId, 'label' => 'Explorer'], null, true);
+        self::assertStringContainsString('Page publique', $resumed);
+        self::assertStringContainsString('Ajout du filtre', $resumed);
+        self::assertStringNotContainsString('Ajout privé', $resumed);
+
+        // Menu targets and parent paths are read afresh even within one request.
+        $pdo->exec("UPDATE pc_entries SET status = 'published', slug = 'parent-ouvert' WHERE id = " . $parent);
+        $updated = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($updated);
+        self::assertStringContainsString('href="/parent-ouvert/enfant-secret"', $updated);
+        self::assertStringContainsString('href="/parent-ouvert" class="pb-nav__link">Blog</a>', $updated);
+        self::assertStringNotContainsString('parent-secret', $updated);
+        $pdo->exec("UPDATE pc_entries SET status = 'draft' WHERE id = " . $parent);
+        $updated = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($updated);
+        self::assertStringNotContainsString('Enfant inaccessible', $updated);
+        self::assertStringNotContainsString('parent-ouvert', $updated);
+        $menus->replaceItems($menuId, [['type' => 'url', 'url' => '/nouveau', 'label' => 'Nouveau lien']]);
+        $updated = $hooks->apply('site.partial', null, 'footer', $page, []);
+        self::assertIsString($updated);
+        self::assertStringContainsString('>Nouveau lien</a>', $updated);
+        self::assertStringNotContainsString('Page publique', $updated);
+        $menus->delete($menuId);
+        $missing = $hooks->apply('site.partial', null, 'header', PageContext::notFound('/absent'), []);
+        self::assertIsString($missing);
+        self::assertStringContainsString('href="/"', $missing);
+        $app->get(Settings::class)->set('plugin.prime-builder.theme_partials', []);
+        self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/parent-public/page-publique')));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/navigation.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+    }
+
     public function testBreadcrumbsRefreshFromCoreContextWithoutPersistingPrivatePaths(): void
     {
         $app = $this->activated(null);
@@ -2983,7 +3146,7 @@ final class IntegrationTest extends TestCase
         $fields['header'] = json_decode($dynamicTemplate->body(), true)['data']['id'];
         self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
-        foreach (['navigation', 'share_buttons'] as $type) {
+        foreach (['share_buttons'] as $type) {
             $unsupported = ['version' => 1, 'elements' => [['id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
                 ['id' => 'dynamic', 'type' => $type, 'settings' => [], 'styles' => [], 'children' => []],
             ]]]];

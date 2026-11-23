@@ -118,6 +118,8 @@ final class Plugin extends AbstractPlugin
             $identity,
             $context->app()->get(\Prime\Site\View\EntryViewFactory::class),
             $context->app()->get(\Prime\Auth\UserRepository::class),
+            $context->app()->get(Hooks::class),
+            $context->app()->get(\Prime\Content\TermRepository::class),
         );
         $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
         foreach (['settings.updated', 'theme.activated'] as $event) {
@@ -206,7 +208,7 @@ final class Plugin extends AbstractPlugin
         $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable) use ($partials): mixed {
             if ($cacheable === true && $partials->usesAnyWidget([
                 'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image',
-                'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs',
+                'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'navigation',
             ])) {
                 return false;
             }

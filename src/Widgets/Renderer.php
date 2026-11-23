@@ -240,7 +240,9 @@ final class Renderer
             'posts' => $this->content?->posts($settings, $this->live, $id) ?? '',
             'current_content' => $this->content?->current($settings, $this->entry, $this->live) ?? '',
             'search_form' => $this->content?->searchForm($settings, $id) ?? '',
-            'navigation' => $this->content?->navigation($settings, $this->entry, $this->live) ?? Navigation::render($settings, null, false),
+            'navigation' => $this->pageContext !== null
+                ? ($this->content?->navigationInPage($settings, $this->pageContext) ?? Navigation::render($settings, null, false))
+                : ($this->content?->navigation($settings, $this->entry, $this->live) ?? Navigation::render($settings, null, false)),
             'breadcrumbs' => $this->pageContext !== null
                 ? ($this->content?->breadcrumbsInPage($settings, $this->pageContext, $this->sanitizer) ?? '')
                 : ($this->content?->breadcrumbs($settings, $this->entry, $this->live, $this->sanitizer, $this->trustedPreview) ?? Breadcrumbs::fallback($settings)),

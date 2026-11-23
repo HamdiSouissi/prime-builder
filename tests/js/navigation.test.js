@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
 const script = readFileSync(new URL('../../assets/js/content.js', import.meta.url), 'utf8');
+const themeNavigationSelector = '.pb-theme-header .pb-navigation[data-pb-id], .pb-theme-footer .pb-navigation[data-pb-id]';
 
 // The small DOM double exercises the actual public script without adding a test dependency.
 class Element {
@@ -94,7 +95,7 @@ function setup(ids = ['one', 'two']) {
     activeElement: null,
     defaultView: { matchMedia: query => { assert.equal(query, '(max-width: 767px)'); return media; } },
     createElement(tag) { return new Element(this, tag); },
-    querySelectorAll(selector) { assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },
+    querySelectorAll(selector) { if (selector === themeNavigationSelector) return []; assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },
     getElementById(id) { return [external, layout, ...layout.descendants()].find(node => node.id === id) || null; },
   };
   // Test collision handling with a pre-existing ID elsewhere on the page.
@@ -187,10 +188,50 @@ test('mobile disclosure preserves focused links on resize and Escape closes the 
   assert.equal(list.hidden, false);
 });
 
+test('server-rendered theme menus are enhanced without a live request and copied live layouts are skipped', () => {
+  const media = { matches: true, addEventListener() {} };
+  const document = {
+    activeElement: null,
+    defaultView: { matchMedia: () => media },
+    createElement(tag) { return new Element(this, tag); },
+    querySelectorAll(selector) {
+      if (selector === themeNavigationSelector) return nodes;
+      assert.equal(selector, '.pb-layout[data-pb-live]');
+      return [];
+    },
+    getElementById(id) { return nodes.flatMap(node => [node, ...node.descendants()]).find(node => node.id === id) || null; },
+  };
+  const nodes = ['header', 'footer', 'copy'].map(id => {
+    const node = new Element(document, 'div', ['pb-navigation']);
+    node.dataset.pbId = id;
+    node.navParts = navigation(document, id);
+    node.append(node.navParts.nav);
+    if (id === 'copy') node.closest = selector => selector === '.pb-layout[data-pb-live]' ? {} : null;
+    return node;
+  });
+  runInNewContext(script, {
+    document, window: { location: { search: '' } }, URLSearchParams, queueMicrotask,
+    fetch() { assert.fail('A server-rendered theme menu must not request an entry live endpoint'); },
+  });
+  const header = nodes[0].navParts, footer = nodes[1].navParts, copy = nodes[2].navParts;
+  const menu = mobileButton(header.nav), toggle = button(header.item);
+  assert.equal(menu.getAttribute('aria-expanded'), 'false');
+  assert.equal(header.list.hidden, true);
+  assert.notEqual(header.list.id, footer.list.id);
+  assert.notEqual(header.submenu.id, footer.submenu.id);
+  assert.equal(mobileButton(copy.nav), undefined);
+  menu.focus(); menu.click(); toggle.focus(); toggle.click();
+  assert.equal(header.submenu.hidden, false);
+  assert.equal(escape(header.nav), true);
+  assert.equal(document.activeElement, toggle);
+  assert.equal(escape(header.nav), true);
+  assert.equal(document.activeElement, menu);
+});
+
 test('breadcrumb refresh waits for focus to leave its saved fallback', async () => {
   const document = {
     activeElement: null,
-    querySelectorAll(selector) { assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },
+    querySelectorAll(selector) { if (selector === themeNavigationSelector) return []; assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },
   };
   const layout = new Element(document); layout.dataset.pbLive = '/api/prime-builder/v1/documents/8/live';
   const node = new Element(document, 'div', ['pb-breadcrumbs']); node.dataset.pbId = 'trail';
@@ -222,7 +263,7 @@ test('identity and entry widget refresh waits while a fallback contains focus', 
   for (const type of ['site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author']) {
     const document = {
       activeElement: null,
-      querySelectorAll(selector) { assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },
+      querySelectorAll(selector) { if (selector === themeNavigationSelector) return []; assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },
     };
     const layout = new Element(document); layout.dataset.pbLive = '/api/prime-builder/v1/documents/8/live';
     const node = new Element(document, 'div', [`pb-${type}`]); node.dataset.pbId = type;
