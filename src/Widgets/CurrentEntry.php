@@ -63,6 +63,57 @@ final class CurrentEntry
         return $document->saveHTML($node) ?: '';
     }
 
+    /**
+     * @param array<string, mixed> $settings
+     */
+    public static function navigation(array $settings, ?EntryView $previous, ?EntryView $next): string
+    {
+        $items = [];
+        foreach (['previous' => $previous, 'next' => $next] as $direction => $entry) {
+            if (($settings[$direction] ?? 'show') !== 'show' || $entry === null || trim($entry->rawTitle()) === '') {
+                continue;
+            }
+            $rel = $direction === 'previous' ? 'prev' : 'next';
+            $label = t('plugin::prime-builder.ui.entry_navigation_' . $direction);
+            $items[] = '<li class="pb-entry-navigation__item pb-entry-navigation__item--' . $rel . '"><a href="' . $entry->url() . '" rel="' . $rel . '">'
+                . '<span class="pb-entry-navigation__direction">' . Renderer::escape($label) . '</span>'
+                . '<span class="pb-entry-navigation__title">' . $entry->title() . '</span></a></li>';
+        }
+        if ($items === []) {
+            return '';
+        }
+        $label = is_string($settings['label'] ?? null) ? trim(strip_tags($settings['label'])) : '';
+        $label = $label !== '' ? $label : t('plugin::prime-builder.ui.entry_navigation_default_label');
+        return '<nav class="pb-entry-navigation" aria-label="' . Renderer::escape($label) . '"><ul>' . implode('', $items) . '</ul></nav>';
+    }
+
+    /** @param array<string, mixed> $settings */
+    public static function author(array $settings, ?EntryView $entry, bool $archiveAvailable): string
+    {
+        if ($entry === null) {
+            return '';
+        }
+        $author = $entry->author();
+        if ($author['id'] <= 0 || trim($author['raw_name']) === '') {
+            return '';
+        }
+        $avatar = '';
+        if (($settings['avatar'] ?? 'show') === 'show') {
+            // The CMS supplies escaped image markup and initials. The adjacent name
+            // already identifies the author, so the avatar is purely decorative.
+            $image = $author['avatar'] !== '' ? $author['avatar'] : '<span>' . $author['initials'] . '</span>';
+            $avatar = '<div class="pb-entry-author__avatar" aria-hidden="true">' . $image . '</div>';
+        }
+        $name = $author['name'];
+        if ($archiveAvailable && ($settings['link'] ?? 'show') === 'show') {
+            $name = '<a href="' . $author['url'] . '">' . $name . '</a>';
+        }
+        $bio = ($settings['bio'] ?? 'show') === 'show' && $author['bio'] !== ''
+            ? '<p class="pb-entry-author__bio">' . $author['bio'] . '</p>' : '';
+        return '<div class="pb-entry-author__card">' . $avatar . '<div class="pb-entry-author__details"><p class="pb-entry-author__name">'
+            . $name . '</p>' . $bio . '</div></div>';
+    }
+
     /** @param array<string, mixed> $settings */
     public static function info(array $settings, ?EntryView $entry, bool $publicCategories): string
     {

@@ -145,7 +145,7 @@
       const widgets = result?.data?.widgets;
       if (!widgets || typeof widgets !== 'object') return;
       for (const node of layout.querySelectorAll('[data-pb-id]')) {
-        const deferred = ['pb-breadcrumbs', 'pb-site_title', 'pb-site_logo', 'pb-entry_title', 'pb-entry_excerpt', 'pb-entry_featured_image', 'pb-entry_info'].some(type => node.classList.contains(type));
+        const deferred = ['pb-breadcrumbs', 'pb-site_title', 'pb-site_logo', 'pb-entry_title', 'pb-entry_excerpt', 'pb-entry_featured_image', 'pb-entry_info', 'pb-entry_navigation', 'pb-entry_author'].some(type => node.classList.contains(type));
         if (!deferred && !['pb-posts', 'pb-current_content', 'pb-theme_zone', 'pb-search_form', 'pb-navigation'].some(type => node.classList.contains(type))) continue;
         const html = widgets[node.dataset.pbId];
         if (typeof html !== 'string') continue;

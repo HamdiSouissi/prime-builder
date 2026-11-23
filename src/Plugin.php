@@ -117,6 +117,7 @@ final class Plugin extends AbstractPlugin
             $context->app()->get(\Prime\Site\PermalinkSettings::class),
             $identity,
             $context->app()->get(\Prime\Site\View\EntryViewFactory::class),
+            $context->app()->get(\Prime\Auth\UserRepository::class),
         );
         $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
         foreach (['settings.updated', 'theme.activated'] as $event) {

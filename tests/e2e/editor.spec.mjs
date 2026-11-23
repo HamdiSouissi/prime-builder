@@ -2683,6 +2683,201 @@ test('site title and logo use core identity and refresh without losing focus', a
   }
 });
 
+test('current entry navigation and author box use public CMS data', async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  await login(page);
+  let csrf = null, restorePosts = false, originalProfile = null, mediaId = null;
+  const posts = [];
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  const updateProfile = values => page.evaluate(async values => {
+    const form = document.querySelector('form[action="/admin/profile/info"]');
+    const fields = new FormData(form);
+    fields.set('bio', values.bio);
+    fields.set('avatar_media_id', values.avatar);
+    const response = await fetch(form.action, { method: 'POST', body: fields });
+    return { status: response.status, redirected: response.redirected };
+  }, values);
+  try {
+    await page.goto('/admin/prime-builder/settings');
+    if (!await page.locator('input[name="posts"]').isChecked()) {
+      await page.locator('input[name="posts"]').check();
+      const saved = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/admin/prime-builder/settings'));
+      await page.locator('form[action="/admin/prime-builder/settings"] button[type="submit"]').click();
+      expect((await saved).status()).toBe(302);
+      restorePosts = true;
+    }
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    const upload = await page.evaluate(async csrf => {
+      const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 160;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#224a57'; ctx.fillRect(0, 0, 160, 160);
+      ctx.fillStyle = '#f4c975'; ctx.beginPath(); ctx.arc(80, 67, 35, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(35, 115, 90, 45);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const form = new FormData(); form.append('file', blob, 'portrait-builder.png');
+      const response = await fetch('/api/v1/media', { method: 'POST', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' }, body: form });
+      return { status: response.status, body: await response.text() };
+    }, csrf);
+    expect(upload.status, upload.body).toBe(201);
+    mediaId = JSON.parse(upload.body).data.id;
+    await page.goto('/admin/profile');
+    const profile = page.locator('form[action="/admin/profile/info"]');
+    const name = await profile.locator('[name="display_name"]').inputValue();
+    originalProfile = { bio: await profile.locator('[name="bio"]').inputValue(), avatar: await profile.locator('[name="avatar_media_id"]').inputValue() };
+    expect(await updateProfile({ bio: 'Une biographie pour les lecteurs.', avatar: String(mediaId) })).toEqual({ status: 200, redirected: true });
+
+    for (const [title, slug, published_at] of [
+      ['Chapitre précédent', 'pb-chapitre-avant', '2023-04-01 10:00:00'],
+      ['Chapitre présent', 'pb-chapitre-present', '2023-05-01 10:00:00'],
+      ['Chapitre suivant', 'pb-chapitre-apres', '2023-06-01 10:00:00'],
+    ]) {
+      const result = await api('/api/v1/content/post', 'POST', { title, slug, status: 'published', published_at, content: { version: 1, blocks: [] } });
+      expect(result.status, result.body).toBe(201);
+      posts.push(JSON.parse(result.body).data);
+    }
+    const [older, current, newer] = posts;
+    await page.goto(`/admin/prime-builder/edit/${current.id}`);
+    const frame = page.frameLocator('[data-pb-frame]');
+    await page.getByRole('button', { name: 'Ajouter Navigation entre contenus', exact: true }).click();
+    await page.getByLabel('Nom accessible de la navigation entre contenus', { exact: true }).fill('À lire ensuite');
+    const previewNav = frame.getByRole('navigation', { name: 'À lire ensuite' });
+    await expect(previewNav.getByRole('link', { name: /Chapitre précédent/ })).toHaveAttribute('href', older.url);
+    await expect(previewNav.getByRole('link', { name: /Chapitre suivant/ })).toHaveAttribute('href', newer.url);
+    await page.getByRole('combobox', { name: 'Afficher le contenu précédent', exact: true }).selectOption('hide');
+    await expect(previewNav.getByRole('link', { name: /Chapitre précédent/ })).toHaveCount(0);
+    await page.getByRole('combobox', { name: 'Afficher le contenu précédent', exact: true }).selectOption('show');
+    await page.getByRole('button', { name: 'Style', exact: true }).click();
+    await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+    await page.locator('[data-pb-panel="widgets"]').click();
+    await page.getByRole('button', { name: 'Ajouter Boîte auteur', exact: true }).click();
+    const previewAuthor = frame.locator('.pb-entry_author');
+    await expect(previewAuthor.locator('.pb-entry-author__name')).toHaveText(name);
+    await expect(previewAuthor.locator('.pb-entry-author__bio')).toHaveText('Une biographie pour les lecteurs.');
+    await expect(previewAuthor.locator('img')).toHaveAttribute('src', /portrait-builder/);
+    await page.getByRole('combobox', { name: 'Afficher la biographie de l’auteur', exact: true }).selectOption('hide');
+    await expect(previewAuthor.locator('.pb-entry-author__bio')).toHaveCount(0);
+    await page.getByRole('combobox', { name: 'Afficher la biographie de l’auteur', exact: true }).selectOption('show');
+    await page.getByRole('combobox', { name: 'Afficher l’avatar de l’auteur', exact: true }).selectOption('hide');
+    await expect(previewAuthor.locator('.pb-entry-author__avatar')).toHaveCount(0);
+    await page.getByRole('combobox', { name: 'Afficher l’avatar de l’auteur', exact: true }).selectOption('show');
+    await page.getByRole('combobox', { name: 'Lien vers les articles de l’auteur', exact: true }).selectOption('hide');
+    await expect(previewAuthor.locator('.pb-entry-author__name a')).toHaveCount(0);
+    await page.getByRole('combobox', { name: 'Lien vers les articles de l’auteur', exact: true }).selectOption('show');
+    await page.getByRole('button', { name: 'Style', exact: true }).click();
+    await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+    for (const type of ['entry_navigation', 'entry_author']) {
+      await expect(frame.locator(`link[href*="/css/widgets/${type}.css"]`)).toHaveCount(1);
+    }
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('context-screen-editor-desktop.jpg'), fullPage: true, quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await showMobilePreview(page, frame, '.pb-entry_author');
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('context-screen-editor-mobile.jpg'), fullPage: true, quality: 15 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator('[data-pb-save]').click();
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    await page.goto(current.url);
+    const nav = page.getByRole('navigation', { name: 'À lire ensuite' });
+    const prevLink = nav.getByRole('link', { name: /Chapitre précédent/ });
+    const nextLink = nav.getByRole('link', { name: /Chapitre suivant/ });
+    const author = page.locator('.pb-entry_author');
+    await expect(prevLink).toHaveAttribute('href', older.url);
+    await expect(nextLink).toHaveAttribute('href', newer.url);
+    const desktopRows = await nav.locator('li').evaluateAll(items => items.map(item => Math.round(item.getBoundingClientRect().top)));
+    expect(desktopRows[0]).toBe(desktopRows[1]);
+    await expect(author.locator('.pb-entry-author__bio')).toHaveText('Une biographie pour les lecteurs.');
+    const authorLink = author.locator('.pb-entry-author__name a');
+    await expect(authorLink).toHaveText(name);
+    await expect(authorLink).toHaveAttribute('href', /^\/auteur\//);
+    await expect(page.locator('script[src*="/js/content.js"]')).toHaveCount(1);
+    await prevLink.focus(); await page.keyboard.press('Tab'); await expect(nextLink).toBeFocused();
+    await page.keyboard.press('Tab'); await expect(authorLink).toBeFocused();
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('context-screen-public-desktop.jpg'), fullPage: true, quality: 15 });
+    await authorLink.focus(); await page.keyboard.press('Enter'); await expect(page).toHaveURL(/\/auteur\//);
+    await page.goto(current.url);
+    await nextLink.focus(); await page.keyboard.press('Enter'); await expect(page).toHaveURL(new RegExp(newer.url + '$'));
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(current.url);
+    await expect(nav.getByRole('link', { name: /Chapitre suivant/ })).toBeVisible();
+    await expect(author.locator('.pb-entry-author__bio')).toHaveText('Une biographie pour les lecteurs.');
+    const mobileRows = await nav.locator('li').evaluateAll(items => items.map(item => Math.round(item.getBoundingClientRect().top)));
+    expect(mobileRows[1]).toBeGreaterThan(mobileRows[0]);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    const longWidth = await author.locator('.pb-entry-author__name').evaluate(node => {
+      const original = node.textContent; node.textContent = 'W'.repeat(160);
+      const width = document.documentElement.scrollWidth; node.textContent = original; return width;
+    });
+    expect(longWidth).toBeLessThanOrEqual(375);
+    const longNavigationWidth = await nav.locator('.pb-entry-navigation__title').first().evaluate(node => {
+      const original = node.textContent; node.textContent = 'W'.repeat(160);
+      const width = document.documentElement.scrollWidth; node.textContent = original; return width;
+    });
+    expect(longNavigationWidth).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('context-screen-public-mobile.jpg'), fullPage: true, quality: 15 });
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const fallback = await noJs.newPage();
+      await fallback.goto(current.url);
+      // Other entries and profiles can become private; never persist their data.
+      await expect(fallback.locator('.pb-entry_navigation')).toBeEmpty();
+      await expect(fallback.locator('.pb-entry_author')).toBeEmpty();
+    } finally { await noJs.close(); }
+    const withdrawn = await api(`/api/v1/content/post/${older.id}`, 'PATCH', { status: 'draft', title: 'Titre privé retiré' });
+    expect(withdrawn.status, withdrawn.body).toBe(200);
+    await page.goto(current.url);
+    await expect(nav).not.toContainText('Chapitre précédent');
+    await expect(nav).not.toContainText('Titre privé retiré');
+    await expect(nav.getByRole('link', { name: /Chapitre suivant/ })).toBeVisible();
+    await page.goto('/admin/profile');
+    expect(await updateProfile({ bio: 'Une biographie actualisée.', avatar: String(mediaId) })).toEqual({ status: 200, redirected: true });
+    await page.goto(current.url);
+    await expect(author.locator('.pb-entry-author__bio')).toHaveText('Une biographie actualisée.');
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (originalProfile) {
+        await page.goto('/admin/profile');
+        expect(await updateProfile(originalProfile)).toEqual({ status: 200, redirected: true });
+      }
+      for (const post of posts) {
+        const trashed = await api(`/api/v1/content/post/${post.id}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/post/${post.id}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (mediaId) {
+        const deleted = await api(`/api/v1/media/${mediaId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+    } finally {
+      if (restorePosts) {
+        await page.goto('/admin/prime-builder/settings');
+        await page.locator('input[name="posts"]').uncheck();
+        const saved = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/admin/prime-builder/settings'));
+        await page.locator('form[action="/admin/prime-builder/settings"] button[type="submit"]').click();
+        expect((await saved).status()).toBe(302);
+      }
+      page.off('dialog', leave);
+    }
+  }
+});
+
 test('current entry title, excerpt, image and information use real CMS metadata', async ({ page, browser }) => {
   test.setTimeout(120_000);
   await login(page);

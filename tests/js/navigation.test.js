@@ -219,7 +219,7 @@ test('breadcrumb refresh waits for focus to leave its saved fallback', async () 
 });
 
 test('identity and entry widget refresh waits while a fallback contains focus', async () => {
-  for (const type of ['site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info']) {
+  for (const type of ['site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author']) {
     const document = {
       activeElement: null,
       querySelectorAll(selector) { assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },

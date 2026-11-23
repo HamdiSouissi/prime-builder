@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PrimeBuilder\Widgets;
 
+use Prime\Auth\UserRepository;
 use Prime\Content\ContentTypeRegistry;
 use Prime\Content\Entry;
 use Prime\Content\EntryQuery;
@@ -32,6 +33,9 @@ final class Content
 
     private ?EntryView $entryView = null;
 
+    /** @var array<string, EntryView|null> */
+    private array $adjacentEntries = [];
+
     public function __construct(
         private readonly EntryQuery $query,
         private readonly ContentTypeRegistry $types,
@@ -46,6 +50,7 @@ final class Content
         private readonly ?PermalinkSettings $permalinks = null,
         private readonly ?SiteIdentity $siteIdentity = null,
         private readonly ?EntryViewFactory $entryViews = null,
+        private readonly ?UserRepository $users = null,
     ) {
     }
 
@@ -54,6 +59,7 @@ final class Content
         $this->postQueries = [];
         $this->viewEntry = null;
         $this->entryView = null;
+        $this->adjacentEntries = [];
     }
 
     /** @param array<string, mixed> $settings */
@@ -327,8 +333,15 @@ final class Content
         // title and metadata. On a simultaneous publish that old entry may be a
         // private draft; never persist any of its values in the public HTML.
         $public = $entry !== null && $this->types->get($entry->type)?->public === true && UrlResolver::isPubliclyVisible($entry);
+        // Neighbours and author profiles can independently become private after a
+        // save. Never persist them, including when the old entry was public.
+        if (!$live && in_array($type, ['entry_navigation', 'entry_author'], true)) {
+            return '';
+        }
         $view = $this->entryView($live || $public ? $entry : null);
         return match ($type) {
+            'entry_navigation' => $this->entryNavigation($settings, $view),
+            'entry_author' => $this->entryAuthor($settings, $view),
             'entry_title' => CurrentEntry::title($settings, $view),
             'entry_excerpt' => CurrentEntry::excerpt($settings, $view),
             'entry_featured_image' => CurrentEntry::featuredImage($settings, $view),
@@ -337,6 +350,56 @@ final class Content
             'entry_info' => CurrentEntry::info($settings, $view, $live && $this->taxonomies?->get('category')?->public === true),
             default => '',
         };
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function entryNavigation(array $settings, ?EntryView $entry): string
+    {
+        if ($entry === null || $this->types->get($entry->raw()->type)?->public !== true) {
+            return '';
+        }
+        $previous = ($settings['previous'] ?? 'show') === 'show' ? $this->adjacentEntry($entry, 'previous') : null;
+        $next = ($settings['next'] ?? 'show') === 'show' ? $this->adjacentEntry($entry, 'next') : null;
+        return CurrentEntry::navigation($settings, $previous, $next);
+    }
+
+    private function adjacentEntry(EntryView $entry, string $direction): ?EntryView
+    {
+        if (array_key_exists($direction, $this->adjacentEntries)) {
+            return $this->adjacentEntries[$direction];
+        }
+        $seen = [$entry->raw()->id => true];
+        $candidate = $entry;
+        // Core finds the nearest published entry, but a published child may have
+        // a private ancestor. Skip at most ten unreachable neighbours without
+        // disclosing their title or path; core itself bounds each query to ten.
+        for ($attempt = 0; $attempt < 10; $attempt++) {
+            $candidate = $direction === 'previous' ? $candidate->previous() : $candidate->next();
+            if ($candidate === null || isset($seen[$candidate->raw()->id])) {
+                break;
+            }
+            $raw = $candidate->raw();
+            $seen[$raw->id] = true;
+            if (UrlResolver::isPubliclyVisible($raw) && trim($candidate->rawTitle()) !== ''
+                && ($raw->type !== 'page' || $this->resolvePageAncestors([$raw]) !== [])) {
+                return $this->adjacentEntries[$direction] = $candidate;
+            }
+        }
+        return $this->adjacentEntries[$direction] = null;
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function entryAuthor(array $settings, ?EntryView $entry): string
+    {
+        $authorId = $entry?->raw()->authorId;
+        $user = $authorId !== null && $authorId > 0 ? $this->users?->find($authorId) : null;
+        if ($entry === null || $user === null || !$user->isActive()) {
+            return '';
+        }
+        // A duplicate slug can resolve to a different user. In that case show
+        // the author's name, but never link it to someone else's archive.
+        $resolved = $this->users->findByAuthorSlug($user->authorSlug());
+        return CurrentEntry::author($settings, $entry, $resolved !== null && $resolved->id === $user->id && $resolved->isActive());
     }
 
     private function entryView(?Entry $entry): ?EntryView
@@ -349,6 +412,7 @@ final class Content
         if ($this->viewEntry !== $entry || $this->entryView === null) {
             $this->viewEntry = $entry;
             $this->entryView = $this->entryViews?->makeOne($entry) ?? new EntryView($entry, $this->urls);
+            $this->adjacentEntries = [];
         }
         return $this->entryView;
     }

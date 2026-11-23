@@ -1098,6 +1098,77 @@ final class DocumentTest extends TestCase
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/entry_info.css');
     }
 
+    public function testEntryNavigationEscapesLabelsAndTitlesAndValidatesItsControls(): void
+    {
+        $node = $this->element('entry_navigation', 'adjacent');
+        $node['settings'] = ['label' => 'Explorer & apprendre', 'previous' => 'show', 'next' => 'show'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $urls = new UrlGenerator(new PermalinkSettings());
+        $previous = new \Prime\Site\View\EntryView(\Prime\Content\Entry::fromRow(['id' => 4, 'type' => 'post', 'slug' => 'avant', 'title' => 'Avant & <après>']), $urls);
+        $next = new \Prime\Site\View\EntryView(\Prime\Content\Entry::fromRow(['id' => 6, 'type' => 'post', 'slug' => 'apres', 'title' => 'Après']), $urls);
+        $html = CurrentEntry::navigation($result['data']['elements'][0]['settings'], $previous, $next);
+        self::assertStringContainsString('<nav class="pb-entry-navigation" aria-label="Explorer &amp; apprendre">', $html);
+        self::assertStringContainsString('href="/blog/avant" rel="prev"', $html);
+        self::assertStringContainsString('Avant &amp; &lt;après&gt;', $html);
+        self::assertStringContainsString('href="/blog/apres" rel="next"', $html);
+        self::assertStringNotContainsString('rel="prev"', CurrentEntry::navigation(['previous' => 'hide'], $previous, $next));
+        self::assertSame('', CurrentEntry::navigation([], null, null));
+        $node['settings']['next'] = 'invalid';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['entry_navigation'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/entry_navigation.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/entry_navigation.css');
+    }
+
+    public function testEntryAuthorEscapesProfileAndValidatesItsControls(): void
+    {
+        $node = $this->element('entry_author', 'author');
+        $node['settings'] = ['avatar' => 'show', 'bio' => 'show', 'link' => 'show'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $user = new \Prime\Auth\User(
+            id: 7,
+            email: 'author@prime.test',
+            displayName: 'Camille & <Co>',
+            status: 'active',
+            locale: 'fr',
+            sessionVersion: 1,
+            lastLoginAt: null,
+            passwordChangedAt: null,
+            twoFactorConfirmedAt: null,
+            twoFactorLastStep: null,
+            createdAt: null,
+            updatedAt: null,
+            username: 'camille',
+            bio: 'Bio & <script>alert(1)</script>',
+        );
+        $entry = \Prime\Content\Entry::fromRow(['id' => 9, 'author_id' => 7]);
+        $media = \Prime\Media\Media::fromRow(['id' => 3, 'kind' => 'image', 'disk_path' => 'avatar.png', 'width' => 100, 'height' => 100]);
+        $view = new \Prime\Site\View\EntryView($entry, new UrlGenerator(new PermalinkSettings()), authorUser: $user, authorAvatarMedia: $media);
+        $html = CurrentEntry::author($result['data']['elements'][0]['settings'], $view, true);
+        self::assertStringContainsString('href="/auteur/camille">Camille &amp; &lt;Co&gt;</a>', $html);
+        self::assertStringContainsString('Bio &amp; &lt;script&gt;alert(1)&lt;/script&gt;', $html);
+        self::assertStringContainsString('aria-hidden="true"', $html);
+        self::assertStringContainsString('src="/uploads/avatar.png"', $html);
+        self::assertStringNotContainsString('<script>', $html);
+        $hidden = CurrentEntry::author(['avatar' => 'hide', 'bio' => 'hide', 'link' => 'hide'], $view, true);
+        self::assertStringNotContainsString('href=', $hidden);
+        self::assertStringNotContainsString('avatar', $hidden);
+        self::assertStringNotContainsString('Bio', $hidden);
+        self::assertStringNotContainsString('href=', CurrentEntry::author([], $view, false));
+        self::assertSame('', CurrentEntry::author([], null, false));
+        $node['settings']['avatar'] = 'invalid';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['entry_author'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/entry_author.css', $definition['style']);
+        self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/entry_author.css');
+    }
+
     public function testShareButtonsEncodePublicUrlsAndRejectUnsafeValues(): void
     {
         $node = $this->element('share_buttons', 'share');

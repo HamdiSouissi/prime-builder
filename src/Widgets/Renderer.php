@@ -65,7 +65,7 @@ final class Renderer
             if (!is_array($element)) {
                 continue;
             }
-            if (in_array($element['type'] ?? null, ['posts', 'current_content', 'theme_zone', 'search_form', 'navigation', 'breadcrumbs', 'site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info'], true)) {
+            if (in_array($element['type'] ?? null, ['posts', 'current_content', 'theme_zone', 'search_form', 'navigation', 'breadcrumbs', 'site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author'], true)) {
                 return true;
             }
             if (is_array($element['children'] ?? null) && $this->containsLive($element['children'])) {
@@ -114,7 +114,7 @@ final class Renderer
                             // Keep the saved fallback when the identity service fails.
                             $this->logger?->error('Prime Builder site identity failed', ['widget' => $type, 'message' => $exception->getMessage()]);
                         }
-                    } elseif (in_array($type, ['entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info'], true)) {
+                    } elseif (in_array($type, ['entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author'], true)) {
                         try {
                             $output[$id] = $this->content->entryWidget($type, $settings, $this->entry, true);
                         } catch (Throwable $exception) {
@@ -242,7 +242,7 @@ final class Renderer
             'breadcrumbs' => $this->content?->breadcrumbs($settings, $this->entry, $this->live, $this->sanitizer) ?? Breadcrumbs::fallback($settings),
             'site_title' => $this->content?->siteTitle($settings) ?? '',
             'site_logo' => $this->content?->siteLogo($settings) ?? '',
-            'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info' => $this->content?->entryWidget($type, $settings, $this->entry, $this->live) ?? '',
+            'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author' => $this->content?->entryWidget($type, $settings, $this->entry, $this->live) ?? '',
             'share_buttons' => $this->content?->shareButtons($settings, $this->entry) ?? ShareButtons::render($settings, ''),
             'table_of_contents' => ($this->tableOfContents ?? new TableOfContents([]))->render($settings),
             'theme_zone' => $this->content?->themeZone($settings, $this->live) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>',

@@ -1,0 +1,61 @@
+.pb-entry_author .pb-entry-author__card {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid #d5d9e0;
+  border-radius: 0.5rem;
+}
+
+.pb-entry_author .pb-entry-author__avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 4rem;
+  width: 4rem;
+  height: 4rem;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #e6e8ec;
+  color: #20232a;
+  font-weight: 700;
+}
+
+.pb-entry_author .pb-entry-author__avatar picture,
+.pb-entry_author .pb-entry-author__avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pb-entry_author .pb-entry-author__avatar img {
+  object-fit: cover;
+}
+
+.pb-entry_author .pb-entry-author__details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pb-entry_author .pb-entry-author__name,
+.pb-entry_author .pb-entry-author__bio {
+  margin: 0;
+}
+
+.pb-entry_author .pb-entry-author__name {
+  font-weight: 700;
+}
+
+.pb-entry_author .pb-entry-author__bio {
+  margin-top: 0.4rem;
+  white-space: pre-line;
+}
+
+.pb-entry_author .pb-entry-author__name a {
+  color: inherit;
+}
+
+.pb-entry_author .pb-entry-author__name a:focus-visible {
+  outline: 3px solid #ed6647;
+  outline-offset: 3px;
+}

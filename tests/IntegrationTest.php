@@ -1016,6 +1016,118 @@ final class IntegrationTest extends TestCase
         self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live')->status());
     }
 
+    public function testEntryNavigationAndAuthorRefreshWithoutPersistingOtherProfilesOrEntries(): void
+    {
+        $app = $this->activated(null);
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec("UPDATE pc_entries SET published_at = '2024-06-01 10:00:00' WHERE id = 1");
+        $pdo->exec("UPDATE pc_users SET display_name = 'Camille & Co', username = 'camille', bio = 'Bio <privée> & sûre' WHERE id = 1");
+        $insert = $pdo->prepare('INSERT INTO pc_entries (id, type, status, title, slug, excerpt, content, content_html, content_text, author_id, parent_id, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        foreach ([
+            [4, 'published', 'Ancien & public', 'ancien', '2024-05-01 10:00:00'],
+            [5, 'published', 'Nouveau public', 'nouveau', '2024-07-01 10:00:00'],
+            [6, 'draft', 'Titre secret', 'secret', '2024-05-15 10:00:00'],
+            [7, 'published', 'Titre futur', 'futur', '2999-01-01 00:00:00'],
+        ] as [$id, $status, $title, $slug, $date]) {
+            $insert->execute([$id, 'post', $status, $title, $slug, '', '{"blocks":[]}', '', '', 1, 0, $date, $date, $date]);
+        }
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'entry context', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'adjacent', 'type' => 'entry_navigation', 'settings' => ['label' => 'À lire', 'previous' => 'show', 'next' => 'show'], 'styles' => [], 'children' => []],
+            ['id' => 'author', 'type' => 'entry_author', 'settings' => ['avatar' => 'show', 'bio' => 'show', 'link' => 'show'], 'styles' => [], 'children' => []],
+        ];
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        $html = json_decode($preview->body(), true)['data']['html'];
+        self::assertStringContainsString('href="/blog/ancien" rel="prev"', $html);
+        self::assertStringContainsString('Ancien &amp; public', $html);
+        self::assertStringContainsString('href="/blog/nouveau" rel="next"', $html);
+        self::assertStringContainsString('href="/auteur/camille">Camille &amp; Co</a>', $html);
+        self::assertStringContainsString('Bio &lt;privée&gt; &amp; sûre', $html);
+        self::assertStringNotContainsString('Titre secret', $html);
+        self::assertStringNotContainsString('Titre futur', $html);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('class="pb-element pb-entry_navigation" data-pb-id="adjacent"></div>', $entry->contentHtml);
+        self::assertStringContainsString('class="pb-element pb-entry_author" data-pb-id="author"></div>', $entry->contentHtml);
+        self::assertStringNotContainsString('Ancien', $entry->contentHtml);
+        self::assertStringNotContainsString('Camille', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        foreach (['entry_navigation', 'entry_author'] as $type) {
+            self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/' . $type . '.css'));
+        }
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $unused = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $unused, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        foreach (['entry_navigation', 'entry_author'] as $type) {
+            self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $unused->renderStyles());
+        }
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $unused->renderScripts());
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $live->status(), $live->body());
+        self::assertStringContainsString('no-store', (string) $live->header('Cache-Control'));
+        $widgets = json_decode($live->body(), true)['data']['widgets'];
+        self::assertStringContainsString('Ancien &amp; public', $widgets['adjacent']);
+        self::assertStringContainsString('Camille &amp; Co', $widgets['author']);
+
+        // A neighbour and an author may be withdrawn without saving this entry.
+        $pdo->exec("UPDATE pc_entries SET status = 'draft', title = 'Nouveau secret' WHERE id = 4");
+        $pdo->exec("UPDATE pc_users SET status = 'disabled', bio = 'Biographie devenue privée' WHERE id = 1");
+        $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $live->status());
+        $widgets = json_decode($live->body(), true)['data']['widgets'];
+        self::assertStringNotContainsString('Nouveau secret', $widgets['adjacent']);
+        self::assertStringNotContainsString('Ancien', $widgets['adjacent']);
+        self::assertStringContainsString('Nouveau public', $widgets['adjacent']);
+        self::assertSame('', $widgets['author']);
+        $stored = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($stored);
+        self::assertStringNotContainsString('Nouveau secret', $stored->contentHtml);
+        self::assertStringNotContainsString('Biographie devenue privée', $stored->contentHtml);
+
+        // The CMS resolves an explicit username before another user's generated slug.
+        // Do not link the latter's name to the wrong active author's archive.
+        $pdo->exec("UPDATE pc_users SET status = 'active', username = NULL, display_name = 'Camille', bio = '' WHERE id = 1");
+        $pdo->exec("UPDATE pc_users SET username = 'camille' WHERE id = 2");
+        $collision = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
+        self::assertSame(200, $collision->status());
+        $author = json_decode($collision->body(), true)['data']['widgets']['author'];
+        self::assertStringContainsString('Camille', $author);
+        self::assertStringNotContainsString('href=', $author);
+    }
+
+    public function testEntryNavigationSkipsPublishedPagesWithPrivateOrCyclicAncestors(): void
+    {
+        $app = $this->activated(null);
+        $pdo = $this->db($app)->pdo();
+        $insert = $pdo->prepare('INSERT INTO pc_entries (id, type, status, title, slug, excerpt, content, content_html, content_text, author_id, parent_id, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        foreach ([
+            [10, 'published', 'Page courante', 'courante', 0, '2024-06-01 10:00:00'],
+            [11, 'published', 'Enfant inaccessible', 'enfant', 12, '2024-05-15 10:00:00'],
+            [12, 'draft', 'Parent privé', 'parent-secret', 0, '2024-05-01 10:00:00'],
+            [13, 'published', 'Page précédente', 'precedente', 0, '2024-04-01 10:00:00'],
+            [14, 'published', 'Cycle inaccessible', 'cycle', 14, '2024-07-01 10:00:00'],
+            [15, 'published', 'Page suivante', 'suivante', 0, '2024-08-01 10:00:00'],
+        ] as [$id, $status, $title, $slug, $parent, $date]) {
+            $insert->execute([$id, 'page', $status, $title, $slug, '', '{"blocks":[]}', '', '', 1, $parent, $date, $date, $date]);
+        }
+        $entry = $app->get(EntryRepository::class)->find(10);
+        self::assertNotNull($entry);
+        $content = $app->get(Content::class);
+        $html = $content->entryWidget('entry_navigation', [], $entry, true);
+        self::assertStringContainsString('href="/precedente" rel="prev"', $html);
+        self::assertStringContainsString('href="/suivante" rel="next"', $html);
+        self::assertStringNotContainsString('inaccessible', $html);
+        self::assertStringNotContainsString('parent-secret', $html);
+        self::assertSame('', $content->entryWidget('entry_navigation', [], $entry, false));
+        self::assertSame('', $content->entryWidget('entry_author', [], $entry, false));
+    }
+
     public function testEntryWidgetsDoNotPersistDraftMetadataDuringPublication(): void
     {
         $app = $this->activated(null);
@@ -2233,7 +2345,7 @@ final class IntegrationTest extends TestCase
         $fields['header'] = json_decode($dynamicTemplate->body(), true)['data']['id'];
         self::assertSame(422, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
         self::assertSame($header, $hooks->apply('site.partial', null, 'header', $page, []));
-        foreach (['navigation', 'share_buttons', 'breadcrumbs', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info'] as $type) {
+        foreach (['navigation', 'share_buttons', 'breadcrumbs', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author'] as $type) {
             $unsupported = ['version' => 1, 'elements' => [['id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
                 ['id' => 'dynamic', 'type' => $type, 'settings' => [], 'styles' => [], 'children' => []],
             ]]]];
