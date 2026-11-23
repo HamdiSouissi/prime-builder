@@ -353,6 +353,29 @@ final class Content
     }
 
     /** @param array<string, mixed> $settings */
+    public function archiveWidget(string $type, array $settings, ?PageContext $page): string
+    {
+        if (!Archive::supports($page) || $page === null) {
+            return '';
+        }
+        if ($type === 'archive_title') {
+            return Archive::title($settings, $page);
+        }
+        if ($type !== 'archive_list') {
+            return '';
+        }
+        // The resolver's paginated result is already public. Recheck definitions
+        // and dates, and batch-check hierarchical pages before linking them.
+        $items = [];
+        foreach (array_slice($page->entries, 0, 50) as $entry) {
+            if ($this->types->get($entry->type)?->public === true && UrlResolver::isPubliclyVisible($entry)) {
+                $items[] = $entry;
+            }
+        }
+        return Archive::listing($settings, $page, $this->resolvePageAncestors($items), $this->urls);
+    }
+
+    /** @param array<string, mixed> $settings */
     private function entryNavigation(array $settings, ?EntryView $entry): string
     {
         if ($entry === null || $this->types->get($entry->raw()->type)?->public !== true) {

@@ -1623,7 +1623,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
     return { status: result.status, count: elements.length };
   }, id);
   expect(status).toBe(200);
-  expect(count).toBe(60);
+  expect(count).toBe(62);
   await page.goto('/test-prime-builder');
   await expect(page.locator('.pb-element')).toHaveCount(count);
   await expectAccessible(page);
@@ -2680,6 +2680,185 @@ test('site title and logo use core identity and refresh without losing focus', a
       const removed = await page.evaluate(async ({ templateId, csrf }) => (await fetch(`/api/prime-builder/v1/templates/${templateId}`, { method: 'DELETE', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' } })).status, { templateId, csrf });
       expect(removed).toBe(200);
     }
+  }
+});
+
+test('archive title and list use the real public context without JavaScript', async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  page.setDefaultTimeout(12_000);
+  await login(page);
+  let csrf = null, termId = null, templateId = null, readingPerPage = null, originalTheme = null;
+  const posts = [];
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  const saveReading = value => page.evaluate(async value => {
+    const form = document.querySelector('form[action="/admin/settings/reading"]');
+    const fields = new FormData(form);
+    fields.set('posts_per_page', value);
+    const response = await fetch(form.action, { method: 'POST', body: fields });
+    return { status: response.status, redirected: response.redirected };
+  }, value);
+  try {
+    await page.goto('/admin/settings/reading');
+    readingPerPage = await page.locator('[name="posts_per_page"]').inputValue();
+    expect(await saveReading('1')).toEqual({ status: 200, redirected: true });
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    const category = await api('/api/v1/terms/category', 'POST', { name: 'Carnets & idées', slug: 'pb-carnets-archive' });
+    expect(category.status, category.body).toBe(201);
+    termId = JSON.parse(category.body).data.id;
+    for (const [title, slug, date, status] of [
+      ['Carnet ancien', 'pb-carnet-ancien', '2021-01-01 10:00:00', 'published'],
+      ['Carnet récent', 'pb-carnet-recent', '2022-01-01 10:00:00', 'published'],
+      ['Carnet confidentiel', 'pb-carnet-secret', '2023-01-01 10:00:00', 'draft'],
+    ]) {
+      const created = await api('/api/v1/content/post', 'POST', {
+        title, slug, status, published_at: date, excerpt: `Extrait ${title.toLowerCase()}.`,
+        terms: { category: [termId] }, content: { version: 1, blocks: [] },
+      });
+      expect(created.status, created.body).toBe(201);
+      posts.push(JSON.parse(created.body).data);
+    }
+    // Start with a clean document so the editor screenshots show only these widgets.
+    const empty = await api(`/api/prime-builder/v1/documents/${id}`, 'PATCH', {
+      content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] },
+    });
+    expect(empty.status, empty.body).toBe(200);
+    await page.reload();
+    const frame = page.frameLocator('[data-pb-frame]');
+    await page.getByRole('button', { name: 'Ajouter Titre d’archive', exact: true }).click();
+    await expect(frame.locator('.pb-archive_title')).toContainText('Ce widget affiche l’archive courante');
+    await page.getByRole('combobox', { name: 'Balise du titre d’archive', exact: true }).selectOption('h3');
+    await page.getByRole('button', { name: 'Style', exact: true }).click();
+    await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+    await page.locator('[data-pb-panel="widgets"]').click();
+    await page.getByRole('button', { name: 'Ajouter Liste d’archive', exact: true }).click();
+    await expect(frame.locator('.pb-archive_list')).toContainText('Ce widget affiche l’archive courante');
+    await page.getByRole('combobox', { name: 'Présentation', exact: true }).selectOption('list');
+    await page.getByRole('combobox', { name: 'Présentation', exact: true }).selectOption('cards');
+    await page.getByRole('button', { name: 'Style', exact: true }).click();
+    await expect(page.getByLabel('Couleur du texte', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Avancé', exact: true }).click();
+    await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
+    for (const type of ['archive_title', 'archive_list']) {
+      await expect(frame.locator(`link[href*="/css/widgets/${type}.css"]`)).toHaveCount(1);
+    }
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('archive-screen-editor-desktop.jpg'), fullPage: true, quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await showMobilePreview(page, frame, '.pb-archive_list');
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('archive-screen-editor-mobile.jpg'), fullPage: true, quality: 15 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator('[data-pb-save]').click();
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    // Snapshot the archive widgets in the already available footer slot. Archive
+    // and single template selection is a later milestone, not emulated here.
+    const layout = { version: 1, elements: [
+      { id: 'archive_title', type: 'archive_title', settings: { tag: 'h2' }, styles: {}, children: [] },
+      { id: 'archive_list', type: 'archive_list', settings: { layout: 'cards', columns: 2, show_excerpt: 'show', pagination: 'show' }, styles: {}, children: [] },
+    ] };
+    const template = await api('/api/prime-builder/v1/templates', 'POST', { name: 'Archive de test', kind: 'section', data: layout });
+    expect(template.status, template.body).toBe(201);
+    templateId = JSON.parse(template.body).data.id;
+    await page.goto('/admin/prime-builder/theme');
+    originalTheme = {
+      header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
+      footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
+      exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
+    };
+    await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await expect(page.getByLabel('Pied de page', { exact: true })).toHaveValue(templateId);
+    await page.goto('/categorie/pb-carnets-archive');
+    const footer = page.locator('footer.pb-theme-footer');
+    await expect(footer.locator('.pb-archive_title h2')).toHaveText('Carnets & idées');
+    await expect(footer.getByRole('link', { name: 'Carnet récent' })).toHaveAttribute('href', posts[1].url);
+    await expect(footer).not.toContainText('Carnet ancien');
+    await expect(footer).not.toContainText('Carnet confidentiel');
+    const nav = footer.getByRole('navigation', { name: 'Pagination de l’archive' });
+    const next = nav.getByRole('link', { name: 'Suivant' });
+    await expect(next).toHaveAttribute('href', '/categorie/pb-carnets-archive/page/2');
+    await expect(nav.locator('[aria-current="page"]')).toHaveText('Page 1 sur 2');
+    for (const type of ['archive_title', 'archive_list']) {
+      await expect(page.locator(`link[href*="/css/widgets/${type}.css"]`)).toHaveCount(1);
+    }
+    await expect(page.locator('script[src*="/js/content.js"]')).toHaveCount(0);
+    await expectAccessible(page);
+    await footer.screenshot({ path: test.info().outputPath('archive-screen-public-desktop.jpg'), quality: 15 });
+    await next.focus(); await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/categorie\/pb-carnets-archive\/page\/2$/);
+    await expect(footer.getByRole('link', { name: 'Carnet ancien' })).toBeVisible();
+    await expect(nav.locator('[aria-current="page"]')).toHaveText('Page 2 sur 2');
+    await nav.getByRole('link', { name: 'Précédent' }).focus(); await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/categorie\/pb-carnets-archive$/);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect(footer.getByRole('link', { name: 'Carnet récent' })).toBeVisible();
+    const longWidth = await footer.locator('h2').evaluate(node => {
+      const original = node.textContent; node.textContent = 'W'.repeat(160);
+      const width = document.documentElement.scrollWidth; node.textContent = original; return width;
+    });
+    expect(longWidth).toBeLessThanOrEqual(375);
+    await expectAccessible(page);
+    await footer.screenshot({ path: test.info().outputPath('archive-screen-public-mobile.jpg'), quality: 15 });
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const publicPage = await noJs.newPage();
+      await publicPage.goto('/categorie/pb-carnets-archive');
+      const archive = publicPage.locator('footer.pb-theme-footer');
+      await expect(archive.locator('.pb-archive_title h2')).toHaveText('Carnets & idées');
+      await expect(archive.getByRole('link', { name: 'Carnet récent' })).toBeVisible();
+      await archive.getByRole('link', { name: 'Suivant' }).focus(); await publicPage.keyboard.press('Enter');
+      await expect(archive.getByRole('link', { name: 'Carnet ancien' })).toBeVisible();
+      await expect(archive).not.toContainText('Carnet confidentiel');
+    } finally { await noJs.close(); }
+    const withdrawn = await api(`/api/v1/content/post/${posts[1].id}`, 'PATCH', { status: 'draft', title: 'Retiré privé' });
+    expect(withdrawn.status, withdrawn.body).toBe(200);
+    await page.goto('/categorie/pb-carnets-archive');
+    await expect(footer.getByRole('link', { name: 'Carnet ancien' })).toBeVisible();
+    await expect(footer).not.toContainText('Retiré privé');
+    await expect(nav).toHaveCount(0);
+    await page.goto(posts[0].url);
+    await expect(page.locator('footer.pb-theme-footer .pb-archive_title')).toBeEmpty();
+    await expect(page.locator('footer.pb-theme-footer .pb-archive_list')).toBeEmpty();
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (originalTheme) {
+        await page.goto('/admin/prime-builder/theme');
+        await page.getByLabel('En-tête', { exact: true }).selectOption(originalTheme.header);
+        await page.getByLabel('Pied de page', { exact: true }).selectOption(originalTheme.footer);
+        await page.getByLabel('Contenus exclus', { exact: true }).fill(originalTheme.exclude);
+        await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+      }
+      for (const post of posts) {
+        const trashed = await api(`/api/v1/content/post/${post.id}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/post/${post.id}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (termId) {
+        const deleted = await api(`/api/v1/terms/category/${termId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+      if (templateId) {
+        const deleted = await api(`/api/prime-builder/v1/templates/${templateId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(200);
+      }
+      if (readingPerPage !== null) {
+        await page.goto('/admin/settings/reading');
+        expect(await saveReading(readingPerPage)).toEqual({ status: 200, redirected: true });
+      }
+    } finally { page.off('dialog', leave); }
   }
 });
 

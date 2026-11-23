@@ -83,6 +83,8 @@ final class Documents
             'entry_info' => ['date' => 'show', 'author' => 'show', 'categories' => 'show'],
             'entry_navigation' => ['label' => t('plugin::prime-builder.ui.entry_navigation_default_label'), 'previous' => 'show', 'next' => 'show'],
             'entry_author' => ['avatar' => 'show', 'bio' => 'show', 'link' => 'show'],
+            'archive_title' => ['tag' => 'h2'],
+            'archive_list' => ['layout' => 'cards', 'columns' => 3, 'show_excerpt' => 'show', 'pagination' => 'show'],
             'toggle' => ['title' => $copy('toggle_title'), 'text' => $copy('accordion_text'), 'initial' => 'closed'],
             'star_rating' => ['value' => 4],
             'counter' => ['title' => $copy('counter')],

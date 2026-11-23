@@ -197,8 +197,18 @@ final class Plugin extends AbstractPlugin
                 return $previous;
             }
             // Only validated library snapshots can reach here; HTML is still filtered.
-            $renderer = new Renderer($registry, $context->app()->get(\Prime\Security\HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, true);
+            $renderer = new Renderer($registry, $context->app()->get(\Prime\Security\HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, true, $page);
             return '<' . $name . ' class="pb-theme-' . $name . '">' . $renderer->render($layout) . '</' . $name . '>';
+        });
+        // Archive data in a shared snapshot may depend on a custom archive path,
+        // a term, or an author. Core has no complete invalidation events for all
+        // of those dependencies, so favour correctness over page caching while
+        // either contextual widget is installed in a theme partial.
+        $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable) use ($partials): mixed {
+            if ($cacheable === true && ($partials->usesWidget('archive_title') || $partials->usesWidget('archive_list'))) {
+                return false;
+            }
+            return $cacheable;
         });
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
             if ($menu instanceof AdminMenu) {

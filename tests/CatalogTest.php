@@ -55,6 +55,10 @@ final class CatalogTest extends TestCase
         self::assertSame('Content navigation', $en['widgets']['entry_navigation']);
         self::assertSame('Boîte auteur', $fr['widgets']['entry_author']);
         self::assertSame('Author box', $en['widgets']['entry_author']);
+        self::assertSame('Titre d’archive', $fr['widgets']['archive_title']);
+        self::assertSame('Archive title', $en['widgets']['archive_title']);
+        self::assertSame('Liste d’archive', $fr['widgets']['archive_list']);
+        self::assertSame('Archive list', $en['widgets']['archive_list']);
         self::assertSame('Boutons de partage', $fr['widgets']['share_buttons']);
         self::assertSame('Share buttons', $en['widgets']['share_buttons']);
         self::assertSame('Sommaire automatique', $fr['widgets']['table_of_contents']);

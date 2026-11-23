@@ -8,6 +8,7 @@ use Prime\Content\Entry;
 use Prime\Editor\BlockRegistry;
 use Prime\Log\Logger;
 use Prime\Security\HtmlSanitizer;
+use Prime\Site\PageContext;
 use PrimeBuilder\Document\HtmlContent;
 use Throwable;
 
@@ -27,6 +28,7 @@ final class Renderer
         private readonly ?OriginalContent $originals = null,
         private readonly ?HtmlContent $html = null,
         private readonly bool $trustedPreview = false,
+        private readonly ?PageContext $pageContext = null,
     ) {
     }
 
@@ -243,6 +245,9 @@ final class Renderer
             'site_title' => $this->content?->siteTitle($settings) ?? '',
             'site_logo' => $this->content?->siteLogo($settings) ?? '',
             'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author' => $this->content?->entryWidget($type, $settings, $this->entry, $this->live) ?? '',
+            'archive_title', 'archive_list' => $this->pageContext !== null
+                ? ($this->content?->archiveWidget($type, $settings, $this->pageContext) ?? '')
+                : ($this->live && $this->trustedPreview ? '<p class="pb-archive-preview">' . self::escape(t('plugin::prime-builder.ui.archive_preview')) . '</p>' : ''),
             'share_buttons' => $this->content?->shareButtons($settings, $this->entry) ?? ShareButtons::render($settings, ''),
             'table_of_contents' => ($this->tableOfContents ?? new TableOfContents([]))->render($settings),
             'theme_zone' => $this->content?->themeZone($settings, $this->live) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>',

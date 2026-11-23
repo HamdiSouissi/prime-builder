@@ -934,6 +934,141 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('brand-new.png', $header);
     }
 
+    public function testArchiveWidgetsUseTheResolvedPageAndConditionalAssetsWithoutPersistingResults(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql') {
+            // The SQLite-derived isolated fixture does not copy indexes; core search
+            // uses this real CMS full-text index on MySQL for longer queries.
+            $pdo->exec('CREATE FULLTEXT INDEX pb_test_content_search ON pc_entries (title, content_text)');
+        }
+        $this->insertGridEntry($pdo, 'post', 'published', 'Ancien public', 'ancien-public', 1);
+        $this->insertGridEntry($pdo, 'post', 'published', 'Futur confidentiel', 'futur-confidentiel', 1, published: '2999-01-01 00:00:00');
+        $pdo->exec("INSERT INTO pc_terms (id, taxonomy, name, slug, parent_id, menu_order, `count`) VALUES (11, 'category', 'Arts & idées', 'arts', 0, 0, 1)");
+        $pdo->exec('INSERT INTO pc_entry_terms (entry_id, term_id, position) VALUES (1, 11, 0)');
+        $settings = $app->get(Settings::class);
+        $settings->set('reading.posts_per_page', 1);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'archive widgets', ['*'])['token'];
+        $layout = ['version' => 1, 'elements' => [
+            ['id' => 'archive-title', 'type' => 'archive_title', 'settings' => ['tag' => 'h2'], 'styles' => [], 'children' => []],
+            ['id' => 'archive-list', 'type' => 'archive_list', 'settings' => ['layout' => 'cards', 'columns' => 2, 'show_excerpt' => 'show', 'pagination' => 'show'], 'styles' => [], 'children' => []],
+        ]];
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $layout], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        self::assertStringContainsString('Ce widget affiche l’archive courante', $preview->body());
+        $document = $this->document();
+        $document['blocks'][0]['data'] = $layout;
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringNotContainsString('Article publié', $entry->contentHtml);
+        self::assertStringNotContainsString('Ce widget affiche', $entry->contentHtml);
+        self::assertStringNotContainsString('data-pb-live=', $entry->contentHtml);
+        $template = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Archives', 'kind' => 'section', 'data' => $layout], $token);
+        self::assertSame(201, $template->status(), $template->body());
+        $templateId = json_decode($template->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => '', 'footer' => $templateId, 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $hooks = $app->get(Hooks::class);
+        $resolver = $app->get(UrlResolver::class);
+        $home = $resolver->resolve(Request::create('GET', '/'));
+        self::assertSame(PageContext::TYPE_FRONT, $home->type);
+        $footer = $hooks->apply('site.partial', null, 'footer', $home, []);
+        self::assertIsString($footer);
+        self::assertStringContainsString('<h2 class="pb-archive-title__text">Articles récents</h2>', $footer);
+        self::assertStringContainsString('href="/blog/article-publie">Article publié</a>', $footer);
+        self::assertStringContainsString('href="/page/2" rel="next"', $footer);
+        self::assertStringContainsString('aria-current="page"', $footer);
+        self::assertStringNotContainsString('Brouillon', $footer);
+        self::assertStringNotContainsString('Futur confidentiel', $footer);
+        self::assertStringNotContainsString('data-pb-live=', $footer);
+        $second = $resolver->resolve(Request::create('GET', '/page/2'));
+        $footer = $hooks->apply('site.partial', null, 'footer', $second, []);
+        self::assertIsString($footer);
+        self::assertStringContainsString('Ancien public', $footer);
+        self::assertStringContainsString('href="/" rel="prev"', $footer);
+        $category = $resolver->resolve(Request::create('GET', '/categorie/arts'));
+        self::assertSame(PageContext::TYPE_TERM, $category->type);
+        $footer = $hooks->apply('site.partial', null, 'footer', $category, []);
+        self::assertIsString($footer);
+        self::assertStringContainsString('Arts &amp; idées</h2>', $footer);
+        self::assertStringContainsString('Article publié', $footer);
+        $author = $resolver->resolve(Request::create('GET', '/auteur/admin'));
+        self::assertSame(PageContext::TYPE_AUTHOR, $author->type);
+        $footer = $hooks->apply('site.partial', null, 'footer', $author, []);
+        self::assertIsString($footer);
+        self::assertStringContainsString('Admin Prime</h2>', $footer);
+        $search = $resolver->resolve(Request::create('GET', '/recherche', query: ['q' => 'art & <idée>']));
+        $footer = $hooks->apply('site.partial', null, 'footer', $search, []);
+        self::assertIsString($footer);
+        self::assertStringContainsString('art &amp; &lt;idée&gt;', $footer);
+        $single = $resolver->resolve(Request::create('GET', '/blog/article-publie'));
+        $footer = $hooks->apply('site.partial', null, 'footer', $single, []);
+        self::assertIsString($footer);
+        self::assertStringNotContainsString('pb-archive-title__text', $footer);
+        self::assertStringNotContainsString('pb-archive-list__items', $footer);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $home);
+        foreach (['archive_title', 'archive_list'] as $type) {
+            self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/' . $type . '.css'));
+        }
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        self::assertSame(false, $cache->isCacheableRequest(Request::create('GET', '/')));
+        $settings->set('plugin.prime-builder.theme_partials', []);
+        self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/')));
+        $other = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($other);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
+        foreach (['archive_title', 'archive_list'] as $type) {
+            self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/' . $type . '.css', $assets->renderStyles());
+        }
+    }
+
+    public function testArchiveListChecksPrivateEntriesAndBatchesPageAncestors(): void
+    {
+        $app = $this->activated(null);
+        $db = $this->db($app);
+        $pdo = $db->pdo();
+        $ids = [];
+        for ($i = 1; $i <= 12; $i++) {
+            $parent = $this->insertGridEntry($pdo, 'page', 'published', 'Parent ' . $i, 'archive-parent-' . $i, 1);
+            $ids[] = $this->insertGridEntry($pdo, 'page', 'published', 'Enfant ' . $i, 'archive-enfant-' . $i, 1, $parent);
+        }
+        $hidden = $this->insertGridEntry($pdo, 'page', 'draft', 'Parent secret', 'archive-secret', 1);
+        $ids[] = $this->insertGridEntry($pdo, 'page', 'published', 'Enfant secret', 'archive-enfant-secret', 1, $hidden);
+        $ids[] = $this->insertGridEntry($pdo, 'page', 'published', 'Orphelin secret', 'archive-orphelin', 1, 999999);
+        $cycle = $this->insertGridEntry($pdo, 'page', 'published', 'Cycle secret', 'archive-cycle', 1);
+        $pdo->exec('UPDATE pc_entries SET parent_id = ' . $cycle . ' WHERE id = ' . $cycle);
+        $ids[] = $cycle;
+        $ids[] = $this->insertGridEntry($pdo, 'post', 'draft', 'Brouillon secret', 'archive-brouillon', 1);
+        $ids[] = $this->insertGridEntry($pdo, 'post', 'published', 'Futur secret', 'archive-futur', 1, published: '2999-01-01 00:00:00');
+        $raw = $app->get(EntryRepository::class)->findManyById($ids);
+        $items = array_values($raw);
+        $one = new PageContext(type: PageContext::TYPE_SEARCH, path: '/recherche', entries: [$items[0]]);
+        $all = new PageContext(type: PageContext::TYPE_SEARCH, path: '/recherche', entries: $items);
+        $db->enableQueryLog();
+        $provider = $this->gridProvider($app);
+        $db->clearQueryLog();
+        $single = $provider->archiveWidget('archive_list', [], $one);
+        $oneQueries = count($db->queryLog());
+        self::assertSame(1, $oneQueries);
+        self::assertSame(1, substr_count($single, '<article>'));
+        $provider = $this->gridProvider($app);
+        $db->clearQueryLog();
+        $many = $provider->archiveWidget('archive_list', [], $all);
+        self::assertSame($oneQueries, count($db->queryLog()), 'Ancestors are fetched in batches, not one query per result');
+        self::assertSame(12, substr_count($many, '<article>'));
+        self::assertStringContainsString('href="/archive-parent-12/archive-enfant-12"', $many);
+        self::assertStringNotContainsString('secret', strtolower($many));
+        self::assertStringNotContainsString('archive-brouillon', $many);
+        self::assertStringNotContainsString('archive-futur', $many);
+        $db->enableQueryLog(false);
+    }
+
     public function testEntryWidgetsUseCoreMetadataRefreshAndLoadConditionalAssets(): void
     {
         $app = $this->activated(null);

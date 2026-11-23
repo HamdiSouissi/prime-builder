@@ -49,9 +49,9 @@ final class Partials
     }
 
     /**
-     * Revalidate even stored data. Entry- and route-dependent widgets need a separate
-     * public live endpoint for theme layouts and are not accepted in this first slice.
-     * Site identity is resolved server-side and is permitted.
+     * Revalidate even stored data. Most entry- and route-dependent widgets lack
+     * a suitable theme context and are not accepted in this first slice. Site
+     * identity and archive widgets are resolved server-side and are permitted.
      *
      * @param array<mixed> $elements
      * @return array<string, mixed>|null

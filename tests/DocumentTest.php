@@ -19,6 +19,7 @@ use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
+use PrimeBuilder\Widgets\Archive;
 use PrimeBuilder\Widgets\Assets;
 use PrimeBuilder\Widgets\Breadcrumbs;
 use PrimeBuilder\Widgets\Content;
@@ -30,6 +31,7 @@ use PrimeBuilder\Widgets\Renderer;
 use PrimeBuilder\Widgets\ShareButtons;
 use PrimeBuilder\Widgets\SiteIdentity;
 
+require_once dirname(__DIR__) . '/src/Widgets/Archive.php';
 require_once dirname(__DIR__) . '/src/Widgets/Assets.php';
 require_once dirname(__DIR__) . '/src/Widgets/Breadcrumbs.php';
 require_once dirname(__DIR__) . '/src/Widgets/Content.php';
@@ -1167,6 +1169,67 @@ final class DocumentTest extends TestCase
         self::assertSame('/assets/plugins/prime-builder/css/widgets/entry_author.css', $definition['style']);
         self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/entry_author.css');
+    }
+
+    public function testArchiveTitleUsesOnlySupportedPublicContextsAndEscapesValues(): void
+    {
+        $node = $this->element('archive_title', 'archive-title');
+        $node['settings'] = ['tag' => 'h3'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $term = \Prime\Content\Term::fromRow(['id' => 4, 'taxonomy' => 'category', 'name' => 'Art & <idées>', 'slug' => 'art']);
+        $taxonomy = new \Prime\Content\Taxonomy(name: 'category', labels: ['singular' => 'Catégorie'], public: true);
+        $page = new \Prime\Site\PageContext(type: \Prime\Site\PageContext::TYPE_TERM, taxonomy: $taxonomy, term: $term);
+        self::assertSame('<h3 class="pb-archive-title__text">Art &amp; &lt;idées&gt;</h3>', Archive::title($result['data']['elements'][0]['settings'], $page));
+        $type = new \Prime\Content\ContentType(name: 'book', labels: ['plural' => 'Livres & revues']);
+        $archive = new \Prime\Site\PageContext(type: \Prime\Site\PageContext::TYPE_ARCHIVE, contentType: $type);
+        self::assertStringContainsString('Livres &amp; revues', Archive::title([], $archive));
+        $search = new \Prime\Site\PageContext(type: \Prime\Site\PageContext::TYPE_SEARCH, searchQuery: '<script> & nature');
+        self::assertStringContainsString(Renderer::escape(t('plugin::prime-builder.ui.archive_search_query', ['query' => '<script> & nature'])), Archive::title([], $search));
+        self::assertStringNotContainsString('<script>', Archive::title([], $search));
+        $private = new \Prime\Content\Taxonomy(name: 'category', labels: ['singular' => 'Catégorie'], public: false);
+        self::assertSame('', Archive::title([], new \Prime\Site\PageContext(type: \Prime\Site\PageContext::TYPE_TERM, taxonomy: $private, term: $term)));
+        self::assertSame('', Archive::title([], new \Prime\Site\PageContext(type: \Prime\Site\PageContext::TYPE_ENTRY)));
+        self::assertSame('', Archive::title([], \Prime\Site\PageContext::notFound()));
+        $node['settings']['tag'] = 'script';
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['archive_title'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/archive_title.css', $definition['style']);
+        self::assertArrayNotHasKey('script', $definition);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/archive_title.css');
+    }
+
+    public function testArchiveListRendersResolvedEntriesAndAccessiblePaginationWithoutScript(): void
+    {
+        $node = $this->element('archive_list', 'archive-list');
+        $node['settings'] = ['layout' => 'cards', 'columns' => 2, 'show_excerpt' => 'show', 'pagination' => 'show'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $entry = \Prime\Content\Entry::fromRow(['id' => 9, 'type' => 'post', 'slug' => 'nature', 'title' => 'Nature & <idées>', 'excerpt' => 'Un <b>texte</b> & plus']);
+        $page = new \Prime\Site\PageContext(type: \Prime\Site\PageContext::TYPE_SEARCH, path: '/recherche/page/2', page: 2, totalPages: 3, searchQuery: 'art & idées');
+        $urls = new UrlGenerator(new PermalinkSettings());
+        $html = Archive::listing($result['data']['elements'][0]['settings'], $page, [$entry], $urls);
+        self::assertStringContainsString('pb-archive-list__items--cards pb-archive-list__columns-2', $html);
+        self::assertStringContainsString('<a href="/blog/nature">Nature &amp; &lt;idées&gt;</a>', $html);
+        self::assertStringContainsString('<p>Un texte &amp; plus</p>', $html);
+        self::assertStringContainsString('href="/recherche?q=art%20%26%20id%C3%A9es" rel="prev"', $html);
+        self::assertStringContainsString('href="/recherche/page/3?q=art%20%26%20id%C3%A9es" rel="next"', $html);
+        self::assertStringContainsString('aria-current="page"', $html);
+        self::assertStringNotContainsString('<script', $html);
+        self::assertStringNotContainsString('<p>Un texte', Archive::listing(['show_excerpt' => 'hide', 'pagination' => 'hide'], $page, [$entry], $urls));
+        self::assertStringNotContainsString('<nav', Archive::listing(['pagination' => 'hide'], $page, [$entry], $urls));
+        self::assertStringContainsString('pb-archive-list__empty', Archive::listing([], $page, [], $urls));
+        $unsafePath = new \Prime\Site\PageContext(type: \Prime\Site\PageContext::TYPE_SEARCH, path: '//evil.test', page: 1, totalPages: 2);
+        self::assertStringNotContainsString('<nav', Archive::listing([], $unsafePath, [$entry], $urls));
+        self::assertSame('', Archive::listing([], new \Prime\Site\PageContext(type: \Prime\Site\PageContext::TYPE_ENTRY), [$entry], $urls));
+        $node['settings']['columns'] = 5;
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $definition = (new Registry())->all()['archive_list'];
+        self::assertSame('pro', $definition['category']);
+        self::assertSame('/assets/plugins/prime-builder/css/widgets/archive_list.css', $definition['style']);
+        self::assertArrayNotHasKey('script', $definition);
+        self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/archive_list.css');
     }
 
     public function testShareButtonsEncodePublicUrlsAndRejectUnsafeValues(): void
