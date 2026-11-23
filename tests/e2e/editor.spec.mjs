@@ -3910,7 +3910,110 @@ test('navigation uses CMS menus with keyboard disclosures on desktop and mobile'
   } finally { await noJs.close(); }
 });
 
-// Keep the saved page intact: the CI workflow disables the plugin after the suite.
+test('theme search forms use the current search URL without JavaScript or duplicate IDs', async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  page.setDefaultTimeout(12_000);
+  await login(page);
+  let csrf = null, templateId = null, originalTheme = null, originalSettings = null;
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  try {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    const currentSettings = await api('/api/v1/settings', 'GET');
+    expect(currentSettings.status, currentSettings.body).toBe(200);
+    const settings = JSON.parse(currentSettings.body).data;
+    originalSettings = { 'permalinks.search_base': settings['permalinks.search_base'], 'cache.page_enabled': settings['cache.page_enabled'] };
+    const layout = { version: 1, elements: [
+      { id: 'search1', type: 'search_form', settings: { search_label: 'Recherche du thème', placeholder: 'Un sujet', button_text: 'Trouver' }, styles: {}, children: [] },
+    ] };
+    const template = await api('/api/prime-builder/v1/templates', 'POST', { name: 'Recherche du thème', kind: 'section', data: layout });
+    expect(template.status, template.body).toBe(201);
+    templateId = JSON.parse(template.body).data.id;
+    await page.goto('/admin/prime-builder/theme');
+    originalTheme = {
+      header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
+      footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
+      exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
+    };
+    await page.getByLabel('En-tête', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
+    await page.getByLabel('Contenus exclus', { exact: true }).fill('');
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await expect(page.getByLabel('En-tête', { exact: true })).toHaveValue(templateId);
+    const enabled = await api('/api/v1/settings', 'PATCH', { 'cache.page_enabled': true });
+    expect(enabled.status, enabled.body).toBe(200);
+
+    await page.goto('/blog/actualite-publique');
+    const header = page.locator('header.pb-theme-header');
+    const footer = page.locator('footer.pb-theme-footer');
+    await expect(header.getByRole('searchbox', { name: 'Recherche du thème' })).toBeVisible();
+    await expect(footer.getByRole('searchbox', { name: 'Recherche du thème' })).toBeVisible();
+    await expect(page.locator('link[href*="/css/widgets/search_form.css"]')).toHaveCount(1);
+    await expect(page.locator('script[src*="/js/content.js"]')).toHaveCount(0);
+    const ids = await page.locator('.pb-theme-header input[type=search], .pb-theme-footer input[type=search]').evaluateAll(nodes => nodes.map(node => node.id));
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    for (const fieldId of ids) await expect(page.locator(`label[for="${fieldId}"]`)).toHaveCount(1);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('search-partial-public-desktop.jpg'), fullPage: true, quality: 15 });
+    for (const width of [320, 375]) {
+      await page.setViewportSize({ width, height: 812 });
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      await expectAccessible(page);
+    }
+    await page.screenshot({ path: test.info().outputPath('search-partial-public-mobile.jpg'), fullPage: true, quality: 15 });
+
+    const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const publicPage = await noJs.newPage();
+      await publicPage.goto('/blog/actualite-publique');
+      const cached = await publicPage.reload();
+      expect(cached.headers()['x-prime-cache']).toBe('HIT');
+      await expect(publicPage.locator('header.pb-theme-header form')).toHaveAttribute('action', '/recherche');
+      const changed = await api('/api/v1/settings', 'PATCH', { 'permalinks.search_base': 'trouver-theme' });
+      expect(changed.status, changed.body).toBe(200);
+      const refreshed = await publicPage.goto('/blog/actualite-publique');
+      expect(refreshed.headers()['x-prime-cache']).not.toBe('HIT');
+      await expect(publicPage.locator('header.pb-theme-header form')).toHaveAttribute('action', '/trouver-theme');
+      await expect(publicPage.locator('footer.pb-theme-footer form')).toHaveAttribute('action', '/trouver-theme');
+      const search = publicPage.locator('header.pb-theme-header').getByRole('searchbox', { name: 'Recherche du thème' });
+      await search.focus();
+      await search.fill('Actualité');
+      await publicPage.keyboard.press('Enter');
+      await publicPage.waitForURL(url => url.pathname === '/trouver-theme' && url.searchParams.get('q') === 'Actualité');
+      await expect(publicPage.getByText('Actualité publique', { exact: true }).first()).toBeVisible();
+      await publicPage.goto('/page-introuvable-pb');
+      await expect(publicPage.locator('footer.pb-theme-footer form')).toHaveAttribute('action', '/trouver-theme');
+    } finally { await noJs.close(); }
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (originalSettings) {
+        const restored = await api('/api/v1/settings', 'PATCH', originalSettings);
+        expect(restored.status, restored.body).toBe(200);
+      }
+      if (originalTheme) {
+        await page.goto('/admin/prime-builder/theme');
+        await page.getByLabel('En-tête', { exact: true }).selectOption(originalTheme.header);
+        await page.getByLabel('Pied de page', { exact: true }).selectOption(originalTheme.footer);
+        await page.getByLabel('Contenus exclus', { exact: true }).fill(originalTheme.exclude);
+        await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+      }
+      if (templateId) {
+        const deleted = await api(`/api/prime-builder/v1/templates/${templateId}`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(200);
+      }
+    } finally { page.off('dialog', leave); }
+  }
+});
+
 test('theme breadcrumbs follow public ancestors and real archive contexts without JavaScript', async ({ page, browser }) => {
   test.setTimeout(120_000);
   page.setDefaultTimeout(12_000);

@@ -1876,6 +1876,92 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('action="/recherche"', $persisted->contentHtml);
     }
 
+    public function testSearchFormsInThemePartsUseCurrentUrlAndKeepIndependentIdsAndAssets(): void
+    {
+        $app = $this->activated('admin');
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'theme search', ['*'])['token'];
+        $layout = ['version' => 1, 'elements' => [[
+            'id' => 'outer', 'type' => 'container', 'settings' => [], 'styles' => [], 'children' => [
+                ['id' => 'search1', 'type' => 'search_form', 'settings' => ['search_label' => 'Chercher & trouver', 'placeholder' => 'Un sujet', 'button_text' => 'Trouver'], 'styles' => [], 'children' => []],
+                ['id' => 'search2', 'type' => 'search_form', 'settings' => [], 'styles' => [], 'children' => []],
+            ],
+        ]]];
+        $created = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Recherche du thème', 'kind' => 'section', 'data' => $layout], $token);
+        self::assertSame(201, $created->status(), $created->body());
+        $template = json_decode($created->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $template, 'footer' => $template, 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $hooks = $app->get(Hooks::class);
+        // A real search or a 404 has no entry but should still have usable forms.
+        $page = new PageContext(type: PageContext::TYPE_SEARCH, path: '/recherche', searchQuery: 'public');
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        $footer = $hooks->apply('site.partial', null, 'footer', $page, []);
+        self::assertIsString($header);
+        self::assertIsString($footer);
+        foreach ([$header, $footer] as $html) {
+            self::assertSame(2, substr_count($html, 'action="/recherche"'));
+            self::assertStringContainsString('role="search" aria-label="Chercher &amp; trouver"', $html);
+            self::assertStringContainsString('placeholder="Un sujet"', $html);
+            self::assertStringContainsString('name="q"', $html);
+            self::assertStringNotContainsString('data-pb-live=', $html);
+        }
+        $missing = $hooks->apply('site.partial', null, 'footer', PageContext::notFound('/introuvable'), []);
+        self::assertIsString($missing);
+        self::assertStringContainsString('action="/recherche"', $missing);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/search_form.css'));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+
+        // Core settings changes purge cached pages, so the server-rendered form
+        // follows a changed search base without disabling the page cache.
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $request = Request::create('GET', '/autre-page');
+        self::assertSame(true, $cache->isCacheableRequest($request));
+        $cache->store($request, Response::html('ancien formulaire'));
+        self::assertNotNull($cache->lookup($request));
+        $settings = $app->get(Settings::class);
+        $settings->set('permalinks.search_base', 'trouver-ici');
+        self::assertSame(null, $cache->lookup($request));
+        $updated = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($updated);
+        self::assertSame(2, substr_count($updated, 'action="/trouver-ici"'));
+        $cache->store($request, Response::html('formulaire actualisé'));
+        self::assertNotNull($cache->lookup($request));
+        self::assertSame(true, $settings->delete('permalinks.search_base'));
+        self::assertSame(null, $cache->lookup($request));
+        $reset = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($reset);
+        self::assertSame(2, substr_count($reset, 'action="/recherche"'));
+
+        // The original page and both theme slots may reuse widget IDs. Each form
+        // must still have a distinct input ID and matching label.
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'search1', 'type' => 'search_form', 'settings' => [], 'styles' => [], 'children' => [],
+        ]];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $markup = $header . $entry->contentHtml . $footer;
+        preg_match_all('/id="(pb-search-[a-zA-Z0-9_-]+)"/', $markup, $ids);
+        self::assertSame(5, count($ids[1]));
+        self::assertSame(5, count(array_unique($ids[1])));
+        foreach ($ids[1] as $id) {
+            self::assertSame(1, substr_count($markup, '<label for="' . $id . '">'));
+        }
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/search_form.css'));
+        self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        $settings->set('plugin.prime-builder.theme_partials', []);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/search_form.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+    }
+
     public function testThemeZoneUsesDeclaredCoreZonesAndRefreshesWithoutPersistingTheirContents(): void
     {
         $app = $this->activated('admin');
