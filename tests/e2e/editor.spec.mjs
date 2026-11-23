@@ -1561,6 +1561,125 @@ test('native widget media selected in the real picker stays protected until remo
   }
 });
 
+test('core-generated image variants remain protected while used by a widget', async ({ page, browser }) => {
+  test.setTimeout(150_000);
+  page.setDefaultTimeout(12_000);
+  await login(page);
+  let csrf = null, entryId = null, mediaId = null;
+  const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
+    const response = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.text() };
+  }, { url, method, body, csrf });
+  try {
+    await page.goto(`/admin/prime-builder/edit/${id}`);
+    csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    const uploaded = await page.evaluate(async csrf => {
+      const canvas = document.createElement('canvas'); canvas.width = 800; canvas.height = 600;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#e7f1eb'; ctx.fillRect(0, 0, 800, 600);
+      ctx.fillStyle = '#355f5b'; ctx.beginPath(); ctx.moveTo(0, 520); ctx.lineTo(240, 160); ctx.lineTo(470, 500); ctx.lineTo(640, 280); ctx.lineTo(800, 500); ctx.lineTo(800, 600); ctx.lineTo(0, 600); ctx.fill();
+      ctx.fillStyle = '#f5bb70'; ctx.beginPath(); ctx.arc(620, 130, 58, 0, 2 * Math.PI); ctx.fill();
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const form = new FormData(); form.append('file', blob, 'paysage-variante.png');
+      const response = await fetch('/api/v1/media', { method: 'POST', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' }, body: form });
+      return { status: response.status, body: await response.text() };
+    }, csrf);
+    expect(uploaded.status, uploaded.body).toBe(201);
+    const media = JSON.parse(uploaded.body).data;
+    mediaId = media.id;
+    expect(media.variants.small.path).toMatch(/-480x360\.png$/);
+    const imageUrl = `/uploads/${media.variants.small.path}`;
+    expect(imageUrl).not.toBe(new URL(media.url).pathname);
+    const created = await api('/api/v1/content/page', 'POST', {
+      title: 'Image redimensionnée', slug: 'pb-image-variante', status: 'published', published_at: '2021-01-01 10:00:00',
+      content: { version: 1, blocks: [] },
+    });
+    expect(created.status, created.body).toBe(201);
+    entryId = JSON.parse(created.body).data.id;
+    await page.goto(`/admin/prime-builder/edit/${entryId}`);
+    await page.getByRole('button', { name: 'Ajouter Image', exact: true }).click();
+    const address = page.getByLabel('Adresse URL', { exact: true });
+    await address.fill(imageUrl);
+    await page.getByLabel('Texte alternatif', { exact: true }).fill('Paysage redimensionné');
+    const frame = page.frameLocator('[data-pb-frame]');
+    await expect(frame.locator('.pb-image img')).toHaveAttribute('src', imageUrl);
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('variant-editor.jpg'), fullPage: true, quality: 15 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await showMobilePreview(page, frame, '.pb-image');
+    await expectAccessible(page);
+    await page.screenshot({ path: test.info().outputPath('variant-editor-mobile.jpg'), fullPage: true, quality: 15 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const save = async () => {
+      const saving = page.waitForResponse(response => response.url().endsWith(`/documents/${entryId}`) && response.request().method() === 'PATCH');
+      await page.locator('[data-pb-save]').click();
+      const response = await saving;
+      expect(response.status()).toBe(200);
+      expect((await response.json()).data.content.blocks[0].data.items).toEqual([{ mediaId }]);
+      await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+      const detail = await api(`/api/v1/media/${mediaId}`, 'GET');
+      expect(detail.status, detail.body).toBe(200);
+      expect(JSON.parse(detail.body).data.usages.some(item => item.entry_id === entryId && item.context === 'block')).toBe(true);
+      expect((await api(`/api/v1/media/${mediaId}`, 'DELETE')).status).toBe(409);
+    };
+    await save();
+    const publicPage = await page.context().newPage();
+    try {
+      await publicPage.goto('/pb-image-variante');
+      const image = publicPage.locator('.pb-image img[alt="Paysage redimensionné"]');
+      await expect(image).toHaveAttribute('src', imageUrl);
+      await expect.poll(() => image.evaluate(node => node.naturalWidth)).toBe(480);
+      await expectAccessible(publicPage);
+      await publicPage.screenshot({ path: test.info().outputPath('variant-public.jpg'), fullPage: true, quality: 15 });
+      await publicPage.setViewportSize({ width: 375, height: 812 });
+      await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+      await expectAccessible(publicPage);
+      await publicPage.screenshot({ path: test.info().outputPath('variant-public-mobile.jpg'), fullPage: true, quality: 15 });
+    } finally { await publicPage.close(); }
+    const noJs = await browser.newContext({ javaScriptEnabled: false });
+    try {
+      const fallback = await noJs.newPage();
+      await fallback.goto('/pb-image-variante');
+      const image = fallback.locator('.pb-image img[alt="Paysage redimensionné"]');
+      await expect(image).toHaveAttribute('src', imageUrl);
+      await expect.poll(() => image.evaluate(node => node.naturalWidth)).toBe(480);
+    } finally { await noJs.close(); }
+
+    // WebP companions exist only when the CMS's GD build supports WebP. Exercise
+    // both generated forms when available; the PNG path above is always tested.
+    const webpPaths = [media.variants.small.webp, media.variants._original_webp?.path].filter(path => typeof path === 'string' && path !== '');
+    for (const path of webpPaths) {
+      await address.fill(`/uploads/${path}`);
+      await save();
+      const publicPage = await page.context().newPage();
+      try {
+        await publicPage.goto('/pb-image-variante');
+        const image = publicPage.locator('.pb-image img[alt="Paysage redimensionné"]');
+        await expect(image).toHaveAttribute('src', `/uploads/${path}`);
+        await expect.poll(() => image.evaluate(node => node.naturalWidth)).toBeGreaterThan(0);
+      } finally { await publicPage.close(); }
+    }
+    const empty = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] };
+    const cleared = await api(`/api/prime-builder/v1/documents/${entryId}`, 'PATCH', { content: empty });
+    expect(cleared.status, cleared.body).toBe(200);
+    expect((await api(`/api/v1/media/${mediaId}`, 'DELETE')).status).toBe(204);
+    mediaId = null;
+  } finally {
+    const leave = dialog => dialog.accept();
+    page.on('dialog', leave);
+    try {
+      if (entryId) {
+        await api(`/api/v1/content/page/${entryId}`, 'DELETE');
+        await api(`/api/v1/content/page/${entryId}?force=1`, 'DELETE');
+      }
+      if (mediaId) await api(`/api/v1/media/${mediaId}?force=1`, 'DELETE');
+    } finally { page.off('dialog', leave); }
+  }
+});
+
 test('responsive container controls and unsaved style reset update the preview', async ({ page }) => {
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);

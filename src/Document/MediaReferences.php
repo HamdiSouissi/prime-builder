@@ -11,7 +11,7 @@ use PrimeBuilder\Widgets\Portfolio;
 use PrimeBuilder\Widgets\Slideshow;
 use PrimeBuilder\Widgets\Testimonials;
 
-/** Resolve validated, local original-file URLs in Builder fields to core media IDs. */
+/** Resolve validated, local media URLs in Builder fields to core media IDs. */
 final class MediaReferences
 {
     private readonly string $prefix;
@@ -60,21 +60,78 @@ final class MediaReferences
             }
         }
 
+        // Core's image processor names resized files <stem>-<width>x<height>.<ext>
+        // and WebP companions <stem>.webp. These are only lookup candidates:
+        // the stored variants must confirm the exact path before an ID is used.
+        $candidates = $paths;
+        foreach ($paths as $path) {
+            foreach (self::originalCandidates($path) as $candidate) {
+                $candidates[$candidate] = $candidate;
+            }
+        }
         $ids = [];
         // Both supported CMS versions expose Connection::table and the unique
         // media.disk_path column. Small batches also work with SQLite's bind limit.
-        foreach (array_chunk(array_values($paths), 200) as $chunk) {
-            $rows = $this->db->table('media')->select(['id', 'disk_path'])->whereIn('disk_path', $chunk)->get();
+        foreach (array_chunk(array_values($candidates), 200) as $chunk) {
+            $rows = $this->db->table('media')->select(['id', 'disk_path', 'variants'])->whereIn('disk_path', $chunk)->get();
             foreach ($rows as $row) {
                 $path = $row['disk_path'] ?? null;
                 $id = $row['id'] ?? null;
-                // MySQL's collation can be case-insensitive; require the real path.
-                if (is_string($path) && isset($paths[$path]) && is_numeric($id) && (int) $id > 0) {
+                // MySQL's collation can be case-insensitive; require the real candidate.
+                if (!is_string($path) || !isset($candidates[$path]) || !is_numeric($id) || (int) $id < 1) {
+                    continue;
+                }
+                if (isset($paths[$path])) {
                     $ids[(int) $id] = (int) $id;
+                }
+                $variants = is_string($row['variants'] ?? null) ? json_decode($row['variants'], true) : null;
+                if (!is_array($variants)) {
+                    continue;
+                }
+                foreach ($variants as $variant) {
+                    // Media::normalizeVariants ignores entries without a string path.
+                    if (!is_array($variant) || !is_string($variant['path'] ?? null)) {
+                        continue;
+                    }
+                    foreach ([$variant['path'], $variant['webp'] ?? null] as $variantPath) {
+                        // Media::variantUrl strips leading slashes from stored paths.
+                        if (is_string($variantPath) && isset($paths[ltrim($variantPath, '/')])) {
+                            $ids[(int) $id] = (int) $id;
+                        }
+                    }
                 }
             }
         }
         return array_values($ids);
+    }
+
+    /** @return list<string> Candidate originals for the CMS's generated image filenames. */
+    private static function originalCandidates(string $path): array
+    {
+        if (preg_match('~^(.+)\.(jpg|jpeg|png|gif|webp|avif)$~D', $path, $matches) !== 1) {
+            return [];
+        }
+        $stem = $matches[1];
+        $extension = $matches[2];
+        $stems = [];
+        if (preg_match('~^(.+)-[1-9][0-9]*x[1-9][0-9]*$~D', $stem, $sized) === 1) {
+            $stems[] = $sized[1];
+        }
+        if ($extension === 'webp') {
+            // A WebP URL can also be the original-size companion of any image.
+            $stems[] = $stem;
+        }
+        $extensions = $extension === 'webp' ? ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif'] : [$extension];
+        $candidates = [];
+        foreach ($stems as $base) {
+            foreach ($extensions as $ext) {
+                $candidate = $base . '.' . $ext;
+                if (strlen($candidate) <= 1020 && $candidate !== $path) {
+                    $candidates[$candidate] = $candidate;
+                }
+            }
+        }
+        return array_values($candidates);
     }
 
     /** @param array<string, string> $paths */

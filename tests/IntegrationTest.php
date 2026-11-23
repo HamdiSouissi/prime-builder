@@ -4325,6 +4325,107 @@ final class IntegrationTest extends TestCase
         $db->enableQueryLog(false);
     }
 
+    public function testBuilderTracksCoreImageVariantsWithoutTrustingGuessedPaths(): void
+    {
+        $app = $this->activated('admin');
+        $db = $this->db($app);
+        $db->pdo()->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $db->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $media = $app->get(\Prime\Media\MediaRepository::class);
+        $png = $media->create([
+            'disk_path' => 'variantes/Lac azur.png', 'filename' => 'Lac azur.png', 'original_name' => 'Lac azur.png',
+            'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image',
+            'variants' => [
+                'large' => ['path' => 'variantes/Lac azur-800x600.png', 'webp' => 'variantes/Lac azur-800x600.webp'],
+                '_original_webp' => ['path' => 'variantes/Lac azur.webp'],
+            ],
+        ]);
+        // Core-generated WebP paths may overlap across original extensions.
+        $jpg = $media->create([
+            'disk_path' => 'variantes/Lac azur.jpg', 'filename' => 'Lac azur.jpg', 'original_name' => 'Lac azur.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image',
+            'variants' => [
+                'large' => ['path' => 'variantes/Lac azur-800x600.jpg', 'webp' => 'variantes/Lac azur-800x600.webp'],
+                '_original_webp' => ['path' => 'variantes/Lac azur.webp'],
+            ],
+        ]);
+        $unrelated = $media->create([
+            'disk_path' => 'variantes/Lac azur.jpeg', 'filename' => 'Lac azur.jpeg', 'original_name' => 'Lac azur.jpeg',
+            'extension' => 'jpeg', 'mime_type' => 'image/jpeg', 'kind' => 'image',
+            'variants' => ['small' => ['path' => 'variantes/Lac azur-640x480.jpeg', 'webp' => 'variantes/Lac azur-640x480.webp']],
+        ]);
+        // A requested path may be both an original and another item's variant.
+        $samePath = $media->create([
+            'disk_path' => 'variantes/Lac azur-800x600.png', 'filename' => 'Lac azur-800x600.png', 'original_name' => 'Lac azur-800x600.png',
+            'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image',
+        ]);
+        $cases = [
+            ['/uploads/variantes/Lac%20azur-800x600.png?version=1#image', [$png->id, $samePath->id]],
+            ['/uploads/variantes/Lac%20azur-800x600.webp', [$png->id, $jpg->id]],
+            ['/uploads/variantes/Lac%20azur.webp', [$png->id, $jpg->id]],
+            ['/uploads/variantes/Lac%20azur-640x480.webp', [$unrelated->id]],
+            ['/uploads/variantes/Lac%20azur-999x999.png', []],
+            ['/uploads/variantes/lac%20azur-800x600.png', []],
+            ['https://foreign.test/uploads/variantes/Lac%20azur-800x600.webp', []],
+        ];
+        foreach (['gif', 'webp', 'avif'] as $extension) {
+            $base = 'variantes/paysage-' . $extension;
+            $extra = $media->create([
+                'disk_path' => $base . '.' . $extension, 'filename' => 'paysage-' . $extension . '.' . $extension,
+                'original_name' => 'paysage-' . $extension . '.' . $extension, 'extension' => $extension,
+                'mime_type' => 'image/' . $extension, 'kind' => 'image',
+                'variants' => ['small' => ['path' => $base . '-20x30.' . $extension, 'webp' => $base . '-20x30.webp']],
+            ]);
+            $cases[] = ['/uploads/' . $base . '-20x30.' . $extension, [$extra->id]];
+            $cases[] = ['/uploads/' . $base . '-20x30.webp', [$extra->id]];
+        }
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'variant media', ['*'])['token'];
+        $usage = $app->get(\Prime\Media\MediaUsageRepository::class);
+        $document = $this->document();
+        $node = static fn (string $url): array => ['id' => 'image', 'type' => 'image', 'settings' => ['url' => $url, 'alt' => 'Lac'], 'styles' => [], 'children' => []];
+        foreach ($cases as [$url, $expected]) {
+            $document['blocks'][0]['data']['elements'] = [$node($url)];
+            // A client-supplied index must not manufacture an unrelated usage.
+            $document['blocks'][0]['data']['items'] = [['mediaId' => $unrelated->id]];
+            $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+            self::assertSame(200, $response->status(), $response->body());
+            $entry = $app->get(EntryRepository::class)->find(1);
+            self::assertNotNull($entry);
+            $actual = array_column($entry->decodedContent()['blocks'][0]['data']['items'] ?? [], 'mediaId');
+            sort($actual);
+            sort($expected);
+            self::assertSame($expected, $actual, $url);
+        }
+        $document['blocks'][0]['data']['elements'] = [$node('/uploads/variantes/Lac%20azur-800x600.webp')];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token)->status());
+        self::assertCount(1, $usage->findByMedia($png->id));
+        self::assertCount(1, $usage->findByMedia($jpg->id));
+        self::assertSame([], $usage->findByMedia($unrelated->id));
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $png->id, token: $token)->status());
+        self::assertSame(409, $this->send($app, 'DELETE', '/api/v1/media/' . $jpg->id, token: $token)->status());
+        $document['blocks'][0]['data']['elements'] = [];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        self::assertSame(204, $this->send($app, 'DELETE', '/api/v1/media/' . $png->id, token: $token)->status());
+        self::assertSame(204, $this->send($app, 'DELETE', '/api/v1/media/' . $jpg->id, token: $token)->status());
+
+        // Candidate lookups are batched rather than one query per image.
+        $references = new \PrimeBuilder\Document\MediaReferences($db, '/uploads', 'http://localhost');
+        $validator = new \PrimeBuilder\Document\Validator(new \PrimeBuilder\Widgets\Registry(), $app->get(\Prime\Security\HtmlSanitizer::class), $app->get(BlockRegistry::class), mediaReferences: $references);
+        $nodes = [];
+        for ($i = 0; $i < 201; $i++) {
+            $element = $node('/uploads/missing-' . $i . '-20x30.jpg');
+            $element['id'] = 'image' . $i;
+            $nodes[] = $element;
+        }
+        $db->enableQueryLog();
+        $db->clearQueryLog();
+        $result = $validator->validate(['version' => 1, 'elements' => $nodes]);
+        self::assertSame([], $result['errors']);
+        self::assertArrayNotHasKey('items', $result['data']);
+        self::assertCount(3, $db->queryLog(), '201 variant paths and 201 possible originals use batches of 200');
+        $db->enableQueryLog(false);
+    }
+
     public function testBuilderMediaInsideCoreZoneUsesTheCoreZoneUsageIndex(): void
     {
         $app = $this->activated('admin');

@@ -297,38 +297,38 @@ jobs:
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
       # Temporary transport: the sandbox cannot download the artifact host.
-      - name: Report spacing-editor capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-editor 0
-      - name: Report spacing-editor capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-editor 1
-      - name: Report spacing-editor capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-editor 2
-      - name: Report spacing-editor capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-editor 3
-      - name: Report spacing-editor-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-editor-mobile 0
-      - name: Report spacing-editor-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-editor-mobile 1
-      - name: Report spacing-editor-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-editor-mobile 2
-      - name: Report spacing-editor-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-editor-mobile 3
-      - name: Report spacing-public capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-public 0
-      - name: Report spacing-public capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-public 1
-      - name: Report spacing-public capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-public 2
-      - name: Report spacing-public capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-public 3
-      - name: Report spacing-public-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-public-mobile 0
-      - name: Report spacing-public-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-public-mobile 1
-      - name: Report spacing-public-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-public-mobile 2
-      - name: Report spacing-public-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh spacing-public-mobile 3
+      - name: Report variant-editor capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh variant-editor 0
+      - name: Report variant-editor capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh variant-editor 1
+      - name: Report variant-editor capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh variant-editor 2
+      - name: Report variant-editor capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh variant-editor 3
+      - name: Report variant-editor-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh variant-editor-mobile 0
+      - name: Report variant-editor-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh variant-editor-mobile 1
+      - name: Report variant-editor-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh variant-editor-mobile 2
+      - name: Report variant-editor-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh variant-editor-mobile 3
+      - name: Report variant-public capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh variant-public 0
+      - name: Report variant-public capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh variant-public 1
+      - name: Report variant-public capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh variant-public 2
+      - name: Report variant-public capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh variant-public 3
+      - name: Report variant-public-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh variant-public-mobile 0
+      - name: Report variant-public-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh variant-public-mobile 1
+      - name: Report variant-public-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh variant-public-mobile 2
+      - name: Report variant-public-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh variant-public-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |
