@@ -12,6 +12,7 @@ use Prime\Content\EntryRepository;
 use Prime\Content\TaxonomyRegistry;
 use Prime\Content\TermRepository;
 use Prime\Hooks\Hooks;
+use Prime\Plugins\PluginSettings;
 use Prime\Security\HtmlSanitizer;
 use Prime\Site\Menu\MenuRenderer;
 use Prime\Site\Menu\MenuRepository;
@@ -25,6 +26,8 @@ use Prime\Site\View\EntryViewFactory;
 use Prime\Site\Zone\DynamicBlockRegistry;
 use Prime\Site\Zone\ZoneRepository;
 use Prime\Themes\ThemeManager;
+use PrimeBuilder\Configuration;
+use PrimeBuilder\Styles\Compiler;
 
 /** Read-only, public content provider. Identical bounded queries are shared per request. */
 final class Content
@@ -59,6 +62,7 @@ final class Content
         private readonly ?UserRepository $users = null,
         private readonly ?Hooks $hooks = null,
         private readonly ?TermRepository $terms = null,
+        private readonly ?PluginSettings $pluginSettings = null,
     ) {
     }
 
@@ -271,7 +275,12 @@ final class Content
     /** @param array<string, mixed> $settings */
     private function renderNavigation(array $settings, bool $live, string $path): string
     {
-        return Navigation::render($settings, $this->menus, $live, $path, $this->hooks, $this->publicNavigationItems(...));
+        $mobile = 767;
+        if ($this->pluginSettings !== null) {
+            $tablet = (int) Configuration::get($this->pluginSettings, 'breakpoint_tablet', 1024);
+            $mobile = Compiler::mobileBreakpoint($tablet, (int) Configuration::get($this->pluginSettings, 'breakpoint_mobile', 767));
+        }
+        return Navigation::render($settings, $this->menus, $live, $path, $this->hooks, $this->publicNavigationItems(...), $mobile);
     }
 
     /**

@@ -906,6 +906,7 @@ final class DocumentTest extends TestCase
         $html = (new Renderer(new Registry(), new HtmlSanitizer(), entry: $entry))->render($result['data']);
         self::assertStringContainsString('data-pb-live="/api/prime-builder/v1/documents/1/live"', $html);
         self::assertStringContainsString('<nav class="pb-nav" aria-label="Navigation projets &amp; actualités"', $html);
+        self::assertStringContainsString('data-pb-nav-breakpoint="767"', $html);
         self::assertStringContainsString('href="/"', $html);
         self::assertStringNotContainsString('<b>', $html);
         foreach (['0', '-1', '01', '1.5', '1e3', '1<script>', str_repeat('9', 10)] as $bad) {
@@ -919,6 +920,28 @@ final class DocumentTest extends TestCase
         self::assertSame('/assets/plugins/prime-builder/css/widgets/navigation.css', $definition['style']);
         self::assertSame('/assets/plugins/prime-builder/js/content.js', $definition['script']);
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/navigation.css');
+    }
+
+    public function testNavigationResponsiveCssUsesTheBoundedConfiguredBreakpoint(): void
+    {
+        $navigation = $this->element('navigation', 'primary');
+        $nested = $this->element('container', 'outer');
+        $nested['children'] = [$navigation];
+        $data = ['elements' => [$nested]];
+        $css = (new Compiler(1200, 900))->compile($data);
+        self::assertStringContainsString('@media(max-width:900px)', $css);
+        self::assertStringContainsString('.pb-element[data-pb-id="primary"] > .pb-nav > .pb-nav__list{display:block;margin-top:.5rem}', $css);
+        self::assertStringContainsString('.pb-element[data-pb-id="primary"] > .pb-nav .pb-nav__item{width:100%}', $css);
+        self::assertStringNotContainsString('@media(max-width:767px)', $css);
+        self::assertSame(599, Compiler::mobileBreakpoint(600, 9999));
+        self::assertSame(1999, Compiler::mobileBreakpoint(9999, 9999));
+        self::assertSame(320, Compiler::mobileBreakpoint(1000, -1));
+        self::assertStringContainsString('@media(max-width:599px)', (new Compiler(600, 9999))->compile($data));
+        self::assertStringNotContainsString('pb-nav__list', (new Compiler(1200, 900))->compile(['elements' => [$this->element('heading')]]));
+        $fallback = \PrimeBuilder\Widgets\Navigation::render([], null, false, mobileBreakpoint: 900);
+        self::assertStringContainsString('data-pb-nav-breakpoint="900"', $fallback);
+        self::assertStringContainsString('data-pb-nav-breakpoint="320"', \PrimeBuilder\Widgets\Navigation::render([], null, false, mobileBreakpoint: -1));
+        self::assertStringContainsString('data-pb-nav-breakpoint="1999"', \PrimeBuilder\Widgets\Navigation::render([], null, false, mobileBreakpoint: 9999));
     }
 
     public function testBreadcrumbsRenderSafeSemanticLinksAndConservativeFallback(): void

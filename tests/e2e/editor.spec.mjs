@@ -3911,10 +3911,10 @@ test('navigation uses CMS menus with keyboard disclosures on desktop and mobile'
 });
 
 test('theme navigation renders current public menus with keyboard and no-JavaScript fallbacks', async ({ page, browser }) => {
-  test.setTimeout(150_000);
+  test.setTimeout(180_000);
   page.setDefaultTimeout(12_000);
   await login(page);
-  let csrf = null, templateId = null, createdMenuId = null, originalTheme = null, originalCache = null;
+  let csrf = null, templateId = null, createdMenuId = null, originalTheme = null, originalCache = null, originalBreakpoints = null;
   const pages = [];
   const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
     const response = await fetch(url, {
@@ -3925,6 +3925,14 @@ test('theme navigation renders current public menus with keyboard and no-JavaScr
     return { status: response.status, body: await response.text() };
   }, { url, method, body, csrf });
   const saveMenu = items => api(`/admin/appearance/menus/${createdMenuId}/save`, 'POST', { name: 'Menu thème test', items });
+  const saveBreakpoints = async (tablet, mobile) => {
+    await page.goto('/admin/prime-builder/settings');
+    await page.locator('#pb-tablet').fill(String(tablet));
+    await page.locator('#pb-mobile').fill(String(mobile));
+    const saved = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/admin/prime-builder/settings'));
+    await page.locator('form[action="/admin/prime-builder/settings"] button[type="submit"]').click();
+    expect((await saved).status()).toBe(302);
+  };
   try {
     await page.goto(`/admin/prime-builder/edit/${id}`);
     csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
@@ -3965,6 +3973,15 @@ test('theme navigation renders current public menus with keyboard and no-JavaScr
     const template = await api('/api/prime-builder/v1/templates', 'POST', { name: 'Navigation du thème', kind: 'section', data: layout });
     expect(template.status, template.body).toBe(201);
     templateId = JSON.parse(template.body).data.id;
+    const entryLayout = { version: 1, elements: [
+      { id: 'entry-menu', type: 'navigation', settings: { menu_id: createdMenuId, label: 'Menu dans la page' }, styles: {}, children: [] },
+    ] };
+    const entry = await api('/api/v1/content/page', 'POST', {
+      title: 'Navigation adaptative', slug: 'pb-navigation-adaptative', status: 'published', published_at: '2021-01-01 10:00:00',
+      content: { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: entryLayout }] },
+    });
+    expect(entry.status, entry.body).toBe(201);
+    pages.push(JSON.parse(entry.body).data);
     await page.goto('/admin/prime-builder/theme');
     originalTheme = {
       header: await page.getByLabel('En-tête', { exact: true }).inputValue(),
@@ -4053,6 +4070,122 @@ test('theme navigation renders current public menus with keyboard and no-JavaScr
     await nav.getByRole('button', { name: 'Menu de navigation' }).click();
     await header.screenshot({ path: test.info().outputPath('navigation-partial-mobile.jpg'), quality: 20 });
 
+    // Change the real plugin settings rather than faking matchMedia. Both a
+    // server-rendered theme menu and an entry's live menu must switch at the
+    // same breakpoint as their generated stylesheets.
+    await page.goto('/admin/prime-builder/settings');
+    originalBreakpoints = { tablet: await page.locator('#pb-tablet').inputValue(), mobile: await page.locator('#pb-mobile').inputValue() };
+    await saveBreakpoints(1100, 900);
+    await page.setViewportSize({ width: 850, height: 812 });
+    await page.goto('/pb-navigation-adaptative');
+    const entryNav = page.getByRole('navigation', { name: 'Menu dans la page' });
+    await expect(nav).toHaveAttribute('data-pb-nav-breakpoint', '900');
+    await expect(entryNav).toHaveAttribute('data-pb-nav-breakpoint', '900');
+    const siteMobile = nav.locator('.pb-nav__mobile-toggle');
+    const entryMobile = entryNav.locator('.pb-nav__mobile-toggle');
+    await expect(siteMobile).toBeVisible();
+    await expect(entryMobile).toBeVisible();
+    await siteMobile.focus();
+    await page.keyboard.press('Enter');
+    await expect(siteMobile).toHaveAttribute('aria-expanded', 'true');
+    await entryMobile.focus();
+    await page.keyboard.press('Enter');
+    await expect(entryMobile).toHaveAttribute('aria-expanded', 'true');
+    await expect(nav.locator('.pb-nav__list')).toHaveCSS('display', 'block');
+    await expect(entryNav.locator('.pb-nav__list')).toHaveCSS('display', 'block');
+    await expectAccessible(page);
+    await header.screenshot({ path: test.info().outputPath('navigation-breakpoint-850.jpg'), quality: 20 });
+    // The mobile toggle becomes hidden above the breakpoint; focus must move to
+    // its first link, and that focused link must remain visible when resizing back.
+    await entryMobile.focus();
+    await page.setViewportSize({ width: 901, height: 812 });
+    const entryHome = entryNav.getByRole('link', { name: 'Accueil' });
+    await expect(entryHome).toBeFocused();
+    await page.setViewportSize({ width: 850, height: 812 });
+    await expect(entryMobile).toHaveAttribute('aria-expanded', 'true');
+    await expect(entryHome).toBeVisible();
+    await expect(entryHome).toBeFocused();
+    await siteMobile.focus();
+    await page.keyboard.press('Enter');
+    const home = nav.getByRole('link', { name: 'Accueil' });
+    await home.focus();
+    await page.setViewportSize({ width: 901, height: 812 });
+    await expect(siteMobile).toBeHidden();
+    await expect(entryMobile).toBeHidden();
+    await expect(nav.locator('.pb-nav__list')).toHaveCSS('display', 'flex');
+    await expect(entryNav.locator('.pb-nav__list')).toHaveCSS('display', 'flex');
+    await expect(home).toBeFocused();
+    const noScript900 = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 850, height: 812 }, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const publicPage = await noScript900.newPage();
+      await publicPage.goto('/pb-navigation-adaptative');
+      const themeList = publicPage.locator('header.pb-theme-header .pb-nav__list');
+      const entryList = publicPage.getByRole('navigation', { name: 'Menu dans la page' }).locator('.pb-nav__list');
+      await expect(themeList).toHaveCSS('display', 'block');
+      await expect(entryList).toHaveCSS('display', 'block');
+      await expect(publicPage.locator('header.pb-theme-header').getByRole('link', { name: 'Détails' })).toBeVisible();
+      await expect(entryList.getByRole('link', { name: 'Accueil' })).toBeVisible();
+      await publicPage.setViewportSize({ width: 901, height: 812 });
+      await expect(themeList).toHaveCSS('display', 'flex');
+      await expect(entryList).toHaveCSS('display', 'flex');
+    } finally { await noScript900.close(); }
+    // Even if the fingerprinted layout stylesheet is unavailable, JavaScript
+    // must not hide the list without leaving a visible way to open it.
+    const missingStyles = await browser.newContext({ viewport: { width: 850, height: 812 }, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    let blockedStylesheets = 0;
+    try {
+      await missingStyles.route(/\/prime-builder\/(?:theme|css)\/[^?]+\.css(?:\?.*)?$/, route => { blockedStylesheets++; return route.abort(); });
+      const publicPage = await missingStyles.newPage();
+      await publicPage.goto('/pb-navigation-adaptative');
+      const themeNav = publicPage.locator('header.pb-theme-header').getByRole('navigation', { name: 'Explorer le site' });
+      const menu = themeNav.getByRole('button', { name: 'Menu de navigation' });
+      await expect(menu).toBeVisible();
+      await menu.focus();
+      await publicPage.keyboard.press('Enter');
+      await expect(themeNav.getByRole('link', { name: 'Accueil' })).toBeVisible();
+      const contentMenu = publicPage.getByRole('navigation', { name: 'Menu dans la page' }).getByRole('button', { name: 'Menu de navigation' });
+      await expect(contentMenu).toBeVisible();
+      await contentMenu.focus();
+      await publicPage.keyboard.press('Enter');
+      await expect(publicPage.getByRole('navigation', { name: 'Menu dans la page' }).getByRole('link', { name: 'Accueil' })).toBeVisible();
+      expect(blockedStylesheets).toBeGreaterThanOrEqual(2);
+    } finally { await missingStyles.close(); }
+
+    await saveBreakpoints(1100, 500);
+    await page.setViewportSize({ width: 600, height: 812 });
+    await page.goto('/pb-navigation-adaptative');
+    await expect(nav).toHaveAttribute('data-pb-nav-breakpoint', '500');
+    await expect(entryNav).toHaveAttribute('data-pb-nav-breakpoint', '500');
+    await expect(siteMobile).toBeHidden();
+    await expect(entryMobile).toBeHidden();
+    await expect(nav.locator('.pb-nav__list')).toHaveCSS('display', 'flex');
+    await expect(entryNav.locator('.pb-nav__list')).toHaveCSS('display', 'flex');
+    await expectAccessible(page);
+    await header.screenshot({ path: test.info().outputPath('navigation-breakpoint-600.jpg'), quality: 20 });
+    await page.setViewportSize({ width: 500, height: 812 });
+    await expect(siteMobile).toBeVisible();
+    await expect(entryMobile).toBeVisible();
+    await expect(entryMobile).toHaveAttribute('aria-expanded', 'false');
+    await entryMobile.focus();
+    await page.keyboard.press('Enter');
+    await expect(entryMobile).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Escape');
+    await expect(entryMobile).toBeFocused();
+    await expect(entryMobile).toHaveAttribute('aria-expanded', 'false');
+    const noScript500 = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 600, height: 812 }, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    try {
+      const publicPage = await noScript500.newPage();
+      await publicPage.goto('/pb-navigation-adaptative');
+      const themeList = publicPage.locator('header.pb-theme-header .pb-nav__list');
+      await expect(themeList).toHaveCSS('display', 'flex');
+      await publicPage.setViewportSize({ width: 500, height: 812 });
+      await expect(themeList).toHaveCSS('display', 'block');
+      await expect(publicPage.locator('header.pb-theme-header').getByRole('link', { name: 'Détails' })).toBeVisible();
+    } finally { await noScript500.close(); }
+    await saveBreakpoints(originalBreakpoints.tablet, originalBreakpoints.mobile);
+    originalBreakpoints = null;
+    await page.goto('/blog/actualite-publique');
+
     const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
     try {
       const publicPage = await noJs.newPage();
@@ -4092,6 +4225,9 @@ test('theme navigation renders current public menus with keyboard and no-JavaScr
     const leave = dialog => dialog.accept();
     page.on('dialog', leave);
     try {
+      if (originalBreakpoints) {
+        await saveBreakpoints(originalBreakpoints.tablet, originalBreakpoints.mobile);
+      }
       if (originalTheme) {
         await page.goto('/admin/prime-builder/theme');
         await page.getByLabel('En-tête', { exact: true }).selectOption(originalTheme.header);

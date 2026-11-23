@@ -85,7 +85,7 @@ function navigation(doc, name, nested = true) {
   return { nav, list, item, link, submenu, childLink, childToggle };
 }
 
-function setup(ids = ['one', 'two']) {
+function setup(ids = ['one', 'two'], breakpoint = '', expectedBreakpoint = 767) {
   const media = {
     matches: false, listeners: [],
     addEventListener(type, handler) { assert.equal(type, 'change'); this.listeners.push(handler); },
@@ -93,7 +93,7 @@ function setup(ids = ['one', 'two']) {
   };
   const document = {
     activeElement: null,
-    defaultView: { matchMedia: query => { assert.equal(query, '(max-width: 767px)'); return media; } },
+    defaultView: { matchMedia: query => { assert.equal(query, `(max-width: ${expectedBreakpoint}px)`); return media; } },
     createElement(tag) { return new Element(this, tag); },
     querySelectorAll(selector) { if (selector === themeNavigationSelector) return []; assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },
     getElementById(id) { return [external, layout, ...layout.descendants()].find(node => node.id === id) || null; },
@@ -108,6 +108,7 @@ function setup(ids = ['one', 'two']) {
     Object.defineProperty(node, 'innerHTML', {
       set(value) {
         this.navParts = navigation(document, value);
+        this.navParts.nav.dataset.pbNavBreakpoint = breakpoint;
         this.children = [];
         this.append(this.navParts.nav);
       },
@@ -186,6 +187,32 @@ test('mobile disclosure preserves focused links on resize and Escape closes the 
   media.setMobile(false);
   assert.equal(document.activeElement, link);
   assert.equal(list.hidden, false);
+});
+
+test('navigation uses the configured mobile breakpoint and rejects invalid attributes', async () => {
+  for (const [configured, expected] of [['900', 900], ['500', 500], ['1999', 1999], ['2000', 767], ['1e3', 767], ['320px', 767], ['', 767]]) {
+    const { nodes, media, respond, document } = setup(['one'], configured, expected);
+    respond({ one: 'Configured' });
+    await flush();
+    const { nav, list, link } = nodes[0].navParts;
+    const toggle = mobileButton(nav);
+    assert.equal(list.hidden, false);
+    assert.equal(toggle.hidden, true);
+    media.setMobile(true);
+    assert.equal(toggle.hidden, false);
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(list.hidden, true);
+    toggle.focus(); toggle.click();
+    link.focus();
+    media.setMobile(false);
+    assert.equal(toggle.hidden, true);
+    assert.equal(list.hidden, false);
+    assert.equal(document.activeElement, link);
+    toggle.focus();
+    media.setMobile(true);
+    media.setMobile(false);
+    assert.equal(document.activeElement, link);
+  }
 });
 
 test('server-rendered theme menus are enhanced without a live request and copied live layouts are skipped', () => {

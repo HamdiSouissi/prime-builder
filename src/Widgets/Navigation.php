@@ -15,7 +15,7 @@ final class Navigation
      * @param array<string, mixed> $settings
      * @param (callable(array<mixed>): array<mixed>)|null $publicItems
      */
-    public static function render(array $settings, ?MenuRenderer $menus, bool $live, string $path = '/', ?Hooks $hooks = null, ?callable $publicItems = null): string
+    public static function render(array $settings, ?MenuRenderer $menus, bool $live, string $path = '/', ?Hooks $hooks = null, ?callable $publicItems = null, int $mobileBreakpoint = 767): string
     {
         $label = is_string($settings['label'] ?? null) ? trim(strip_tags($settings['label'])) : '';
         if ($label === '') {
@@ -65,6 +65,7 @@ final class Navigation
                 . Renderer::escape(t('plugin::prime-builder.ui.navigation_home')) . '</a></li></ul>';
         }
         return '<nav class="pb-nav" aria-label="' . Renderer::escape($label) . '" data-pb-navigation'
+            . ' data-pb-nav-breakpoint="' . max(320, min(1999, $mobileBreakpoint)) . '"'
             . ' data-pb-nav-menu="' . Renderer::escape(t('plugin::prime-builder.ui.navigation_mobile')) . '"'
             . ' data-pb-nav-submenu="' . Renderer::escape(t('plugin::prime-builder.ui.navigation_submenu')) . '">'
             . $list . '</nav>';

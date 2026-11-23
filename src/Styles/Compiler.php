@@ -13,7 +13,14 @@ final class Compiler
     public function __construct(int $tablet = 1024, int $mobile = 767)
     {
         $this->tablet = max(600, min(2000, $tablet));
-        $this->mobile = max(320, min($this->tablet - 1, $mobile));
+        $this->mobile = self::mobileBreakpoint($this->tablet, $mobile);
+    }
+
+    /** Match the responsive CSS and the navigation's JavaScript threshold. */
+    public static function mobileBreakpoint(int $tablet, int $mobile): int
+    {
+        $tablet = max(600, min(2000, $tablet));
+        return max(320, min($tablet - 1, $mobile));
     }
 
     /** @param array<string, mixed> $data */
@@ -36,6 +43,13 @@ final class Compiler
             }
             $selector = '.pb-element[data-pb-id="' . $element['id'] . '"]';
             $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
+            if (($element['type'] ?? '') === 'navigation') {
+                // The exact same bounded breakpoint is passed to matchMedia.
+                // Without JS, the server-rendered links remain visible in this layout.
+                $nav = $selector . ' > .pb-nav';
+                $modes['mobile'] .= $nav . ' > .pb-nav__list{display:block;margin-top:.5rem}'
+                    . $nav . ' .pb-nav__item{width:100%}';
+            }
             if (($element['type'] ?? '') === 'container') {
                 $layout = ($settings['layout'] ?? '') === 'grid' ? 'grid' : 'flex';
                 $direction = ($settings['direction'] ?? '') === 'row' ? 'row' : 'column';

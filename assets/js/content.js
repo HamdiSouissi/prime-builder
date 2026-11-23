@@ -98,10 +98,15 @@
     const toggle = doc.createElement('button');
     toggle.type = 'button';
     toggle.className = 'pb-nav__mobile-toggle';
+    toggle.hidden = true;
     toggle.textContent = nav.dataset.pbNavMenu || 'Menu';
     toggle.setAttribute('aria-controls', list.id);
     nav.insertBefore(toggle, list);
-    const mobile = doc.defaultView.matchMedia('(max-width: 767px)');
+    // The server and responsive stylesheet use the same bounded site setting.
+    const rawBreakpoint = nav.dataset.pbNavBreakpoint || '';
+    const value = /^\d{3,4}$/.test(rawBreakpoint) ? Number(rawBreakpoint) : 767;
+    const breakpoint = value >= 320 && value <= 1999 ? value : 767;
+    const mobile = doc.defaultView.matchMedia(`(max-width: ${breakpoint}px)`);
     const setOpen = open => {
       toggle.setAttribute('aria-expanded', String(open));
       list.hidden = !open;
@@ -111,6 +116,8 @@
       const open = !mobile.matches || list.contains(doc.activeElement);
       setOpen(open);
       if (!mobile.matches && doc.activeElement === toggle) list.querySelector('a')?.focus();
+      // The control stays operable even if the generated layout stylesheet fails.
+      toggle.hidden = !mobile.matches;
     };
     toggle.addEventListener('click', () => setOpen(toggle.getAttribute('aria-expanded') !== 'true'));
     mobile.addEventListener('change', synchronize);

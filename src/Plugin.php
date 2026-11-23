@@ -120,6 +120,7 @@ final class Plugin extends AbstractPlugin
             $context->app()->get(\Prime\Auth\UserRepository::class),
             $context->app()->get(Hooks::class),
             $context->app()->get(\Prime\Content\TermRepository::class),
+            $context->settings(),
         );
         $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
         foreach (['settings.updated', 'theme.activated'] as $event) {

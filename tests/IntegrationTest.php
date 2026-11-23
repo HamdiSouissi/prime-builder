@@ -717,6 +717,7 @@ final class IntegrationTest extends TestCase
         self::assertIsString($footer);
         foreach ([$header, $footer] as $html) {
             self::assertStringContainsString('aria-label="Explorer"', $html);
+            self::assertStringContainsString('data-pb-nav-breakpoint="767"', $html);
             self::assertStringContainsString('href="/parent-public/page-publique" class="pb-nav__link" aria-current="page"', $html);
             self::assertStringContainsString('<ul class="pb-nav__submenu">', $html);
             self::assertStringContainsString('>Services</a>', $html);
@@ -738,6 +739,32 @@ final class IntegrationTest extends TestCase
         $hooks->emit('site.assets', $assets, $page);
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/navigation.css'));
         self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
+        self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\\.css)~', $assets->renderStyles(), $defaultStylesheetMatches));
+        $defaultStylesheet = $this->send($app, 'GET', '/prime-builder/theme/' . ($defaultStylesheetMatches[1] ?? ''));
+        self::assertSame(200, $defaultStylesheet->status());
+        self::assertStringContainsString('@media(max-width:767px)', $defaultStylesheet->body());
+
+        // A settings change updates both the server markup and the fingerprinted
+        // stylesheet, with the same bounds as all other responsive controls.
+        $app->get(Settings::class)->set('plugin.prime-builder.configuration', ['breakpoint_tablet' => 1000, 'breakpoint_mobile' => 900]);
+        $responsive = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($responsive);
+        self::assertStringContainsString('data-pb-nav-breakpoint="900"', $responsive);
+        $responsiveAssets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $responsiveAssets, $page);
+        self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\\.css)~', $responsiveAssets->renderStyles(), $stylesheetMatches));
+        self::assertSame(false, ($defaultStylesheetMatches[1] ?? '') === ($stylesheetMatches[1] ?? ''));
+        $responsiveCss = $this->send($app, 'GET', '/prime-builder/theme/' . ($stylesheetMatches[1] ?? ''));
+        self::assertSame(200, $responsiveCss->status());
+        self::assertStringContainsString('@media(max-width:900px)', $responsiveCss->body());
+        self::assertSame($defaultStylesheet->body(), $this->send($app, 'GET', '/prime-builder/theme/' . ($defaultStylesheetMatches[1] ?? ''))->body());
+        self::assertStringContainsString(' > .pb-nav > .pb-nav__list{display:block;margin-top:.5rem}', $responsiveCss->body());
+        $app->get(Settings::class)->set('plugin.prime-builder.configuration', ['breakpoint_tablet' => 600, 'breakpoint_mobile' => 9999]);
+        $bounded = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($bounded);
+        self::assertStringContainsString('data-pb-nav-breakpoint="599"', $bounded);
+        $app->get(Settings::class)->set('plugin.prime-builder.configuration', ['breakpoint_tablet' => 1000, 'breakpoint_mobile' => 900]);
+
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
         self::assertSame(false, $cache->isCacheableRequest(Request::create('GET', '/parent-public/page-publique')));
@@ -753,6 +780,7 @@ final class IntegrationTest extends TestCase
         $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live');
         self::assertSame(200, $live->status(), $live->body());
         $liveMenu = json_decode($live->body(), true)['data']['widgets']['menu'];
+        self::assertStringContainsString('data-pb-nav-breakpoint="900"', $liveMenu);
         self::assertStringNotContainsString('parent-secret', $liveMenu);
         self::assertStringNotContainsString('Ajout privé', $liveMenu);
 
