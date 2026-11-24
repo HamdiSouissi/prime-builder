@@ -321,6 +321,22 @@ jobs:
         run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-mobile-small 2
       - name: Report media-list-editor-mobile-small capture part 3
         run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-mobile-small 3
+      - name: Report media-list-editor-short capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-short 0
+      - name: Report media-list-editor-short capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-short 1
+      - name: Report media-list-editor-short capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-short 2
+      - name: Report media-list-editor-short capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-short 3
+      - name: Report media-list-editor-upload-short capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload-short 0
+      - name: Report media-list-editor-upload-short capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload-short 1
+      - name: Report media-list-editor-upload-short capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload-short 2
+      - name: Report media-list-editor-upload-short capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload-short 3
       - name: Report media-list-editor-upload capture part 0
         run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload 0
       - name: Report media-list-editor-upload capture part 1

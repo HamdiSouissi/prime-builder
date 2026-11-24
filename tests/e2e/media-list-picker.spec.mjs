@@ -122,7 +122,7 @@ test('gallery and image carousel append real media selections without losing exi
         expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${width}px: ${a.name} / ${b.name}`).toBe(true);
       }
     };
-    for (const { width, height } of [{ width: 320, height: 480 }, { width: 320, height: 568 }, { width: 375, height: 667 }, { width: 375, height: 812 }]) {
+    for (const { width, height } of [{ width: 320, height: 400 }, { width: 320, height: 480 }, { width: 320, height: 568 }, { width: 375, height: 667 }, { width: 375, height: 812 }]) {
       await page.setViewportSize({ width, height });
       await assertPickerFits(width, height);
       await accessible(page);
@@ -153,39 +153,56 @@ test('gallery and image carousel append real media selections without losing exi
     await expect(mobileOption).toHaveAttribute('aria-selected', 'true');
     // Clicking a clipped card must not scroll the search and folder controls out of view.
     await assertPickerFits(320, 480);
-    const scrolled = await picker.locator('[data-prime-picker-scroll]').evaluate(body => {
-      body.scrollTop = body.scrollHeight;
-      const bounds = body.getBoundingClientRect();
-      const name = body.querySelector('.pc-media-card__name').getBoundingClientRect();
-      return { scrollTop: body.scrollTop, bodyTop: bounds.top, bodyBottom: bounds.bottom, nameTop: name.top, nameBottom: name.bottom };
-    });
-    expect(scrolled.scrollTop).toBeGreaterThan(0);
-    expect(scrolled.nameTop).toBeGreaterThanOrEqual(scrolled.bodyTop);
-    expect(scrolled.nameBottom).toBeLessThanOrEqual(scrolled.bodyBottom);
-    await assertPickerFits(320, 480);
+    for (const height of [400, 480]) {
+      await page.setViewportSize({ width: 320, height });
+      const scrolled = await picker.locator('[data-prime-picker-scroll]').evaluate(body => {
+        body.scrollTop = body.scrollHeight;
+        const bounds = body.getBoundingClientRect();
+        const names = [...body.querySelectorAll('.pc-media-card__name')].map(name => {
+          const box = name.getBoundingClientRect();
+          return { text: name.textContent, top: box.top, bottom: box.bottom };
+        });
+        return { scrollTop: body.scrollTop, clientHeight: body.clientHeight, scrollHeight: body.scrollHeight, bodyTop: bounds.top, bodyBottom: bounds.bottom, names };
+      });
+      if (height === 400) await picker.screenshot({ path: test.info().outputPath('media-list-editor-short.jpg'), quality: 15 });
+      const detail = `${height}px: ${JSON.stringify(scrolled)}`;
+      expect(scrolled.scrollTop, detail).toBeGreaterThan(0);
+      expect(scrolled.names, detail).toHaveLength(2);
+      for (const name of scrolled.names) {
+        expect(name.top, detail).toBeGreaterThanOrEqual(scrolled.bodyTop);
+        expect(name.bottom, detail).toBeLessThanOrEqual(scrolled.bodyBottom);
+      }
+      await assertPickerFits(320, height);
+    }
     await picker.screenshot({ path: test.info().outputPath('media-list-editor-mobile-small.jpg'), quality: 15 });
 
     // The upload tab must also remain usable at the keyboard when its content exceeds the panel.
+    await page.setViewportSize({ width: 320, height: 400 });
     await picker.getByRole('tab', { name: 'Téléverser' }).focus();
     await page.keyboard.press('Enter');
     const upload = picker.locator('[data-prime-picker-panel="upload"]');
     await expect(upload).toBeVisible();
-    const uploadMetrics = await upload.evaluate(node => ({ height: node.clientHeight, content: node.scrollHeight, overflow: getComputedStyle(node).overflowY }));
-    if (uploadMetrics.content > uploadMetrics.height) expect(['auto', 'scroll']).toContain(uploadMetrics.overflow);
     const fileInput = upload.locator('[data-prime-picker-file-input]');
     await page.keyboard.press('Tab');
     await expect(fileInput).toBeFocused();
     await expect(fileInput).toHaveAccessibleName('Parcourir l’ordinateur');
-    const uploadGeometry = await upload.evaluate(panel => {
-      const bounds = panel.getBoundingClientRect();
-      const label = panel.querySelector('label').getBoundingClientRect();
-      return { top: bounds.top, bottom: bounds.bottom, labelTop: label.top, labelBottom: label.bottom };
-    });
-    // Include the focus outline, not just the label's border box.
-    expect(uploadGeometry.labelTop - 5).toBeGreaterThanOrEqual(uploadGeometry.top);
-    expect(uploadGeometry.labelBottom + 5).toBeLessThanOrEqual(uploadGeometry.bottom);
-    await accessible(page);
-    await picker.screenshot({ path: test.info().outputPath('media-list-editor-upload.jpg'), quality: 15 });
+    for (const height of [400, 480]) {
+      await page.setViewportSize({ width: 320, height });
+      const uploadMetrics = await upload.evaluate(node => ({ height: node.clientHeight, content: node.scrollHeight, overflow: getComputedStyle(node).overflowY }));
+      if (uploadMetrics.content > uploadMetrics.height) expect(['auto', 'scroll']).toContain(uploadMetrics.overflow);
+      const uploadGeometry = await upload.evaluate(panel => {
+        const bounds = panel.getBoundingClientRect();
+        const label = panel.querySelector('label').getBoundingClientRect();
+        return { top: bounds.top, bottom: bounds.bottom, labelTop: label.top, labelBottom: label.bottom };
+      });
+      // Include the focus outline, not just the label's border box.
+      expect(uploadGeometry.labelTop - 5, `${height}px`).toBeGreaterThanOrEqual(uploadGeometry.top);
+      expect(uploadGeometry.labelBottom + 5, `${height}px`).toBeLessThanOrEqual(uploadGeometry.bottom);
+      await expect(fileInput).toBeFocused();
+      await accessible(page);
+      const name = height === 400 ? 'media-list-editor-upload-short.jpg' : 'media-list-editor-upload.jpg';
+      await picker.screenshot({ path: test.info().outputPath(name), quality: 15 });
+    }
     const png = await page.evaluate(() => {
       const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 32;
       const ctx = canvas.getContext('2d'); ctx.fillStyle = '#88445c'; ctx.fillRect(0, 0, 64, 32);
