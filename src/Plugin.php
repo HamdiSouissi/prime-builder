@@ -52,6 +52,7 @@ use PrimeBuilder\Security\EffectiveApiAuthentication;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
+use PrimeBuilder\Styles\ZoneLayouts;
 use PrimeBuilder\Theme\Partials;
 use PrimeBuilder\Widgets\Assets;
 use PrimeBuilder\Widgets\Content;
@@ -108,6 +109,7 @@ final class Plugin extends AbstractPlugin
             $context->app()->get(UrlGenerator::class)->absolute('/'),
         );
         $partials = new Partials($context);
+        $zoneLayouts = new ZoneLayouts($context->app()->get(ThemeManager::class), $context->app()->get(ZoneRepository::class));
         $identity = new SiteIdentity($context->app());
         $content = new Content(
             $context->app()->get(EntryQuery::class),
@@ -362,7 +364,7 @@ final class Plugin extends AbstractPlugin
                 if ($layout === null) {
                     continue;
                 }
-                $css = (new Compiler((int) Configuration::get($context->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767)))->compile($layout);
+                $css = (new Compiler((int) Configuration::get($context->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767)))->compile($layout, legacy: false);
                 $file = substr(hash('sha256', $css), 0, 16) . '.css';
                 (new Snapshots($context->app()->storagePath('prime-builder/styles')))->remember('theme-' . $file, $css);
                 $assets->style('prime-builder-theme-' . $slot, '/prime-builder/theme/' . $file, ['prime-builder-kit']);
@@ -381,6 +383,34 @@ final class Plugin extends AbstractPlugin
                 unset($definitions['share_buttons']['script']);
             }
             Assets::register($assets, $types, $definitions);
+        });
+        // A theme can render a declared zone without an entry or a Builder
+        // widget. Its document CSS must therefore be available at the head,
+        // including for copies inserted after the initial page was rendered.
+        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, $zoneLayouts): void {
+            if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
+                return;
+            }
+            $seen = [];
+            foreach ($assets->resolvedStyles() as $asset) {
+                $seen[explode('?', $asset['url'], 2)[0]] = true;
+            }
+            $compiler = new Compiler((int) Configuration::get($context->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767));
+            $snapshots = new Snapshots($context->app()->storagePath('prime-builder/styles'));
+            foreach ($zoneLayouts->all() as $layout) {
+                $css = $compiler->compile($layout, legacy: false);
+                if ($css === '') {
+                    continue;
+                }
+                $hash = substr(hash('sha256', $css), 0, 16);
+                $url = '/prime-builder/theme/' . $hash . '.css';
+                if (isset($seen[$url])) {
+                    continue;
+                }
+                $snapshots->remember('theme-' . $hash . '.css', $css);
+                $assets->style('prime-builder-zone-' . $hash, $url, ['prime-builder-kit']);
+                $seen[$url] = true;
+            }
         });
         $context->hooks()->filter('site.csp', static function (mixed $directives) use (&$hasMap): mixed {
             if (!$hasMap || !is_array($directives)) {

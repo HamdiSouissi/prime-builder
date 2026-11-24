@@ -30,11 +30,11 @@ final class Compiler
     }
 
     /** @param array<string, mixed> $data */
-    public function compile(array $data): string
+    public function compile(array $data, bool $legacy = true): string
     {
         $modes = ['desktop' => '', 'tablet' => '', 'mobile' => ''];
         $hidden = ['desktop' => '', 'tablet' => '', 'mobile' => ''];
-        $this->walk(is_array($data['elements'] ?? null) ? $data['elements'] : [], $modes, $hidden);
+        $this->walk(is_array($data['elements'] ?? null) ? $data['elements'] : [], $modes, $hidden, Scope::forLayout($data), $legacy);
         // Non-overlapping ranges preserve each element's original display type:
         // an explicit "show" does not have to guess whether it was flex or grid.
         // Negating max-width also covers fractional viewport sizes at zoom.
@@ -51,17 +51,20 @@ final class Compiler
      * @param array<string, string> $modes
      * @param array<string, string> $hidden
      */
-    private function walk(array $elements, array &$modes, array &$hidden): void
+    private function walk(array $elements, array &$modes, array &$hidden, string $owner, bool $legacy): void
     {
         foreach ($elements as $element) {
             if (!is_array($element) || !is_string($element['id'] ?? null) || preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $element['id']) !== 1) {
                 continue;
             }
-            // A live theme zone may contain another Builder document whose IDs
-            // are unrelated to this document. Never apply this document's rules
-            // to a Builder element inside that asynchronously inserted zone.
-            // :where keeps the guard from increasing the selector's specificity.
-            $selector = '.pb-element[data-pb-id="' . $element['id'] . '"]:not(:where(.pb-theme_zone .pb-element))';
+            // Fresh HTML carries its layout's style owner on every Builder node.
+            // Older entry HTML lacks it; keep its styles without applying them to
+            // owned nodes, and retain the old guard for unowned nested zones.
+            // :where keeps both paths at the original selector specificity.
+            $selector = '.pb-element[data-pb-id="' . $element['id'] . '"]';
+            $selector .= $legacy
+                ? ':where([data-pb-owner="' . $owner . '"],:not([data-pb-owner])):not(:where(.pb-theme_zone .pb-element:not([data-pb-owner])))'
+                : ':where([data-pb-owner="' . $owner . '"])';
             $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
             if (($element['type'] ?? '') === 'navigation') {
                 // The exact same bounded breakpoint is passed to matchMedia.
@@ -104,13 +107,13 @@ final class Compiler
                     $inherit = Values::color($values['color'] ?? null) !== null ? 'color:inherit;' : '';
                     $inherit .= Values::length($values['font_size'] ?? null) !== null ? 'font-size:inherit;' : '';
                     if ($inherit !== '') {
-                        // Do not force inherited typography onto a nested
-                        // Builder document, even when its parent is styled.
-                        $modes[$mode] .= $selector . ' :where(h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary):not(:where(.pb-theme_zone .pb-element *)){' . $inherit . '}';
+                        // Do not force typography across any nested Builder
+                        // layout boundary, including copies in theme partials.
+                        $modes[$mode] .= $selector . ' :where(h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary):not(:where(' . $selector . ' .pb-layout *)){' . $inherit . '}';
                     }
                 }
             }
-            $this->walk(is_array($element['children'] ?? null) ? $element['children'] : [], $modes, $hidden);
+            $this->walk(is_array($element['children'] ?? null) ? $element['children'] : [], $modes, $hidden, $owner, $legacy);
         }
     }
 

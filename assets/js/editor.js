@@ -719,9 +719,32 @@ function renderPanel() {
   if (panel === 'settings') renderSettings();
   positionToolbar();
 }
+// A zone or theme partial can contain a separate Builder layout with the same
+// element IDs as the document being edited. Only the reconciled canvas and its
+// own nodes belong to the editor, never descendants of another .pb-layout.
+function previewCanvas(doc) {
+  return doc.querySelector('.pb-layout[data-pb-editor-canvas]');
+}
+function previewNode(doc, id) {
+  const canvas = previewCanvas(doc);
+  if (!canvas) return null;
+  return [...canvas.querySelectorAll(`[data-pb-id="${CSS.escape(id)}"]`)]
+    .find(node => node.closest('.pb-layout') === canvas) || null;
+}
+function previewEventNode(doc, target) {
+  const canvas = previewCanvas(doc);
+  if (!canvas || !target?.closest) return null;
+  let node = target.closest('[data-pb-id]');
+  // Clicking inside a copied layout selects the containing zone widget instead
+  // of a similarly named element in the entry or an unrelated theme partial.
+  while (node && node.closest('.pb-layout') !== canvas) {
+    node = node.parentElement?.closest('[data-pb-id]') || null;
+  }
+  return node && canvas.contains(node) ? node : null;
+}
 function positionToolbar() {
   const doc = frame.contentDocument;
-  const node = selected && doc ? doc.querySelector(`[data-pb-id="${CSS.escape(selected)}"]`) : null;
+  const node = selected && doc ? previewNode(doc, selected) : null;
   if (!node) { toolbar.hidden = true; return; }
   toolbar.querySelector('[data-pb-tool="duplicate"]').disabled = cannotCopyHtml(find(history.present, selected));
   const outer = frame.getBoundingClientRect(), inner = node.getBoundingClientRect();
@@ -815,6 +838,8 @@ function cssColor(value) {
   return typeof value === 'string' && /^#[a-f\d]{3}([a-f\d]{3})?$/i.test(value) ? value : null;
 }
 function applyVisualStyles(doc) {
+  const canvas = previewCanvas(doc);
+  if (!canvas) return;
   const spacingSides = {
     padding_top: ['paddingTop', cssLength], padding_right: ['paddingRight', cssLength],
     padding_bottom: ['paddingBottom', cssLength], padding_left: ['paddingLeft', cssLength],
@@ -823,7 +848,7 @@ function applyVisualStyles(doc) {
   };
   function walk(elements) {
     for (const element of elements) {
-      const node = doc.querySelector(`[data-pb-id="${CSS.escape(element.id)}"]`);
+      const node = previewNode(doc, element.id);
       if (node) {
         node.draggable = true;
         // Recompute display before applying responsive visibility; the previous
@@ -842,11 +867,11 @@ function applyVisualStyles(doc) {
             if (Object.hasOwn(spacingSides, key)) continue;
             if (key in lengths && cssLength(value) !== null) {
               node.style[lengths[key]] = cssLength(value);
-              if (key === 'font_size') node.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary').forEach(child => { child.style.fontSize = 'inherit'; });
+              if (key === 'font_size') node.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary').forEach(child => { if (child.closest('.pb-layout') === canvas) child.style.fontSize = 'inherit'; });
             }
             else if (['color', 'background'].includes(key) && cssColor(value) !== null) {
               node.style[key === 'color' ? 'color' : 'backgroundColor'] = cssColor(value);
-              if (key === 'color') node.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary').forEach(child => { child.style.color = 'inherit'; });
+              if (key === 'color') node.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary').forEach(child => { if (child.closest('.pb-layout') === canvas) child.style.color = 'inherit'; });
             }
             else if (key === 'align' && ['left', 'center', 'right'].includes(value)) node.style.textAlign = value;
             else if (key === 'width' && cssLength(value, true) !== null) node.style.width = cssLength(value, true);
@@ -930,7 +955,7 @@ async function renderPreview(sequence) {
     });
     if (target !== null) {
       const selector = `[data-pb-id="${CSS.escape(target)}"]`;
-      const current = doc.querySelector(selector);
+      const current = previewNode(doc, target);
       const fragment = doc.createElement('template'); fragment.innerHTML = result.data.html;
       const replacement = fragment.content.querySelector(selector);
       if (!current || !replacement || result.data.target !== target) {
@@ -941,12 +966,19 @@ async function renderPreview(sequence) {
       }
       current.replaceWith(replacement);
     } else {
-      const current = doc.querySelector('.pb-layout');
-      if (current) current.outerHTML = result.data.html;
+      const area = doc.querySelector('.aurora-prose');
+      // Prefer Aurora's entry content to an unrelated Builder layout in a
+      // header, sidebar or footer. Keep the existing generic theme fallback.
+      const current = previewCanvas(doc) || (area ? area.querySelector('.pb-layout') : doc.querySelector('.pb-layout'));
+      const fragment = doc.createElement('template'); fragment.innerHTML = result.data.html;
+      const replacement = fragment.content.querySelector('.pb-layout');
+      if (!replacement) return;
+      replacement.dataset.pbEditorCanvas = '';
+      if (current) current.replaceWith(replacement);
       else {
-        const area = doc.querySelector('.aurora-prose') || doc.querySelector('main');
-        if (!area) return;
-        area.innerHTML = result.data.html;
+        const destination = area || doc.querySelector('main');
+        if (!destination) return;
+        destination.replaceChildren(replacement);
       }
     }
     previewNeedsFull = false;
@@ -970,12 +1002,12 @@ function attachFrameEvents() {
   doc.documentElement.dataset.pbEditorPreview = '';
   doc.addEventListener('keydown', shortcuts);
   doc.addEventListener('click', event => {
-    const target = event.target.closest('[data-pb-id]');
+    const target = previewEventNode(doc, event.target);
     if (target) { event.preventDefault(); event.stopPropagation(); selected = target.dataset.pbId; panel = 'settings'; tab = 'content'; renderPanel(); schedulePreview(); }
     else if (event.target.closest('a')) event.preventDefault();
   }, true);
   doc.addEventListener('contextmenu', event => {
-    const target = event.target.closest('[data-pb-id]');
+    const target = previewEventNode(doc, event.target);
     if (!target) return;
     event.preventDefault(); event.stopPropagation();
     selected = target.dataset.pbId; panel = 'settings'; tab = 'content'; renderPanel(); schedulePreview();
@@ -985,7 +1017,7 @@ function attachFrameEvents() {
   doc.addEventListener('pointerdown', () => closeContext());
   doc.addEventListener('scroll', positionToolbar, true);
   doc.addEventListener('dragstart', event => {
-    const target = event.target.closest('[data-pb-id]');
+    const target = previewEventNode(doc, event.target);
     if (!target || !event.dataTransfer) return;
     event.dataTransfer.setData('text/prime-builder-element', target.dataset.pbId);
     event.dataTransfer.effectAllowed = 'move';
@@ -994,7 +1026,7 @@ function attachFrameEvents() {
     if (!builderDrag(event.dataTransfer)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = [...event.dataTransfer.types].includes('text/prime-builder-widget') ? 'copy' : 'move';
-    const target = event.target.closest('[data-pb-id]');
+    const target = previewEventNode(doc, event.target);
     const element = target ? find(history.present, target.dataset.pbId) : null;
     if (target && element) markDrop(target, dropPosition(event, element, target));
     else clearDropMarker();
@@ -1002,7 +1034,7 @@ function attachFrameEvents() {
   doc.addEventListener('drop', event => {
     if (!builderDrag(event.dataTransfer)) return;
     event.preventDefault();
-    const target = event.target.closest('[data-pb-id]');
+    const target = previewEventNode(doc, event.target);
     const element = target ? find(history.present, target.dataset.pbId) : null;
     const position = target && element ? dropPosition(event, element, target).position : 'inside';
     clearDropMarker(); applyDrop(event.dataTransfer, element?.id || null, position, true);

@@ -10,12 +10,14 @@ use Prime\Log\Logger;
 use Prime\Security\HtmlSanitizer;
 use Prime\Site\PageContext;
 use PrimeBuilder\Document\HtmlContent;
+use PrimeBuilder\Styles\Scope;
 use Throwable;
 
 /** Render safe, useful static HTML so saved pages remain readable without this plugin. */
 final class Renderer
 {
     private ?TableOfContents $tableOfContents = null;
+    private string $styleOwner = '';
 
     public function __construct(
         private readonly Registry $registry,
@@ -36,6 +38,7 @@ final class Renderer
     public function render(array $data): string
     {
         $elements = is_array($data['elements'] ?? null) ? $data['elements'] : [];
+        $this->styleOwner = Scope::forLayout($data);
         $this->tableOfContents = $this->containsTableOfContents($elements) ? new TableOfContents($elements) : null;
         $refresh = $this->entry !== null && $this->containsLive($elements)
             ? ' data-pb-live="/api/prime-builder/v1/documents/' . $this->entry->id . '/live"'
@@ -167,7 +170,7 @@ final class Renderer
                 $hidden = ($element['hidden'] ?? false) === true ? ' hidden' : '';
                 $target = $this->tableOfContents?->target($id);
                 $anchor = $target !== null ? ' id="' . self::escape($target) . '" tabindex="-1"' : '';
-                $html .= '<div class="pb-element pb-' . self::escape($type) . '" data-pb-id="' . self::escape($id) . '"' . $anchor . $hidden . '>' . $content . '</div>';
+                $html .= '<div class="pb-element pb-' . self::escape($type) . '" data-pb-owner="' . $this->styleOwner . '" data-pb-id="' . self::escape($id) . '"' . $anchor . $hidden . '>' . $content . '</div>';
             } catch (Throwable $exception) {
                 $this->logger?->error('Prime Builder widget failed', ['widget' => $type, 'message' => $exception->getMessage()]);
             }

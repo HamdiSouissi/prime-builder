@@ -18,6 +18,7 @@ use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
+use PrimeBuilder\Styles\Scope;
 use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Widgets\Archive;
 use PrimeBuilder\Widgets\Assets;
@@ -58,6 +59,7 @@ require_once dirname(__DIR__) . '/src/Document/Validator.php';
 require_once dirname(__DIR__) . '/src/Document/Layout.php';
 require_once dirname(__DIR__) . '/src/Document/Converter.php';
 require_once dirname(__DIR__) . '/src/Styles/Values.php';
+require_once dirname(__DIR__) . '/src/Styles/Scope.php';
 require_once dirname(__DIR__) . '/src/Styles/Compiler.php';
 require_once dirname(__DIR__) . '/src/Styles/Kit.php';
 require_once dirname(__DIR__) . '/src/Styles/Snapshots.php';
@@ -73,6 +75,12 @@ final class DocumentTest extends TestCase
     private function validator(?Registry $registry = null): Validator
     {
         return new Validator($registry ?? new Registry(), new HtmlSanitizer());
+    }
+
+    /** @param array<string, mixed> $layout */
+    private function legacyGuard(array $layout): string
+    {
+        return ':where([data-pb-owner="' . Scope::forLayout($layout) . '"],:not([data-pb-owner])):not(:where(.pb-theme_zone .pb-element:not([data-pb-owner])))';
     }
 
     public function testValidTreeAndCss(): void
@@ -101,12 +109,31 @@ final class DocumentTest extends TestCase
         $zone['styles'] = ['desktop' => ['background' => '#eeeeee']];
         $validated = $this->validator()->validate(['version' => 1, 'elements' => [$heading, $zone]]);
         self::assertSame([], $validated['errors']);
-        $css = (new Compiler(1000, 600))->compile($validated['data']);
-        $guard = ':not(:where(.pb-theme_zone .pb-element))';
-        self::assertStringContainsString('.pb-element[data-pb-id="shared"]' . $guard . '{color:#cc1122;padding-left:40px;}', $css);
-        self::assertStringContainsString('.pb-element[data-pb-id="shared"]' . $guard . ' :where(h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary):not(:where(.pb-theme_zone .pb-element *)){color:inherit;}', $css);
-        self::assertStringContainsString('.pb-element[data-pb-id="shared"]' . $guard . '{display:none!important}', $css);
+        $layout = $validated['data'];
+        $owner = Scope::forLayout($layout);
+        self::assertMatchesRegularExpression('/^[a-f0-9]{24}$/D', $owner);
+        $roundTrip = json_decode((string) json_encode($layout), true);
+        self::assertIsArray($roundTrip);
+        self::assertSame($owner, Scope::forLayout($roundTrip));
+        $changedText = $layout;
+        $changedText['elements'][0]['settings']['text'] = 'Autre texte';
+        self::assertSame($owner, Scope::forLayout($changedText));
+        $differentStyle = $layout;
+        $differentStyle['elements'][0]['styles']['desktop']['color'] = '#33aa55';
+        self::assertNotSame($owner, Scope::forLayout($differentStyle));
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($layout);
+        self::assertStringContainsString('data-pb-owner="' . $owner . '" data-pb-id="shared"', $html);
+        self::assertStringContainsString('data-pb-owner="' . $owner . '" data-pb-id="zone"', $html);
+        $css = (new Compiler(1000, 600))->compile($layout);
+        $guard = ':where([data-pb-owner="' . $owner . '"],:not([data-pb-owner])):not(:where(.pb-theme_zone .pb-element:not([data-pb-owner])))';
+        $selector = '.pb-element[data-pb-id="shared"]' . $guard;
+        self::assertStringContainsString($selector . '{color:#cc1122;padding-left:40px;}', $css);
+        self::assertStringContainsString($selector . ' :where(h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary):not(:where(' . $selector . ' .pb-layout *)){color:inherit;}', $css);
+        self::assertStringContainsString($selector . '{display:none!important}', $css);
         self::assertStringContainsString('.pb-element[data-pb-id="zone"]' . $guard . '{background-color:#eeeeee;}', $css);
+        $strict = (new Compiler(1000, 600))->compile($layout, legacy: false);
+        self::assertStringContainsString('.pb-element[data-pb-id="shared"]:where([data-pb-owner="' . $owner . '"]){color:#cc1122;padding-left:40px;}', $strict);
+        self::assertStringNotContainsString(':not([data-pb-owner])', $strict);
     }
 
     public function testNavigatorLabelsAndHiddenElementsAreValidatedAndRendered(): void
@@ -187,11 +214,12 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('Continuer', $html, 'Visibility is presentation, not access control');
         self::assertStringNotContainsString('data-pb-id="section" hidden', $html);
         $css = (new Compiler(1000, 600))->compile($result['data']);
-        self::assertStringContainsString('.pb-element[data-pb-id="section"]:not(:where(.pb-theme_zone .pb-element)){display:flex;flex-direction:row;}', $css);
-        self::assertStringContainsString('.pb-element[data-pb-id="section"]:not(:where(.pb-theme_zone .pb-element)){display:grid;}', $css);
-        self::assertStringContainsString('@media not all and (max-width:1000px){.pb-element[data-pb-id="section"]:not(:where(.pb-theme_zone .pb-element)){display:none!important}}', $css);
-        self::assertStringContainsString('@media(max-width:1000px){@media not all and (max-width:600px){.pb-element[data-pb-id="section"]:not(:where(.pb-theme_zone .pb-element)){display:none!important}.pb-element[data-pb-id="action"]:not(:where(.pb-theme_zone .pb-element)){display:none!important}}}', $css);
-        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="small"]:not(:where(.pb-theme_zone .pb-element)){display:none!important}}', $css);
+        $guard = $this->legacyGuard($result['data']);
+        self::assertStringContainsString('.pb-element[data-pb-id="section"]' . $guard . '{display:flex;flex-direction:row;}', $css);
+        self::assertStringContainsString('.pb-element[data-pb-id="section"]' . $guard . '{display:grid;}', $css);
+        self::assertStringContainsString('@media not all and (max-width:1000px){.pb-element[data-pb-id="section"]' . $guard . '{display:none!important}}', $css);
+        self::assertStringContainsString('@media(max-width:1000px){@media not all and (max-width:600px){.pb-element[data-pb-id="section"]' . $guard . '{display:none!important}.pb-element[data-pb-id="action"]' . $guard . '{display:none!important}}}', $css);
+        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="small"]' . $guard . '{display:none!important}}', $css);
         $container['styles']['desktop']['visibility'] = 'hide;}body{display:none';
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$container]])['errors']);
         self::assertStringNotContainsString('body{', (new Compiler())->compile(['elements' => [$container]]));
@@ -212,9 +240,10 @@ final class DocumentTest extends TestCase
         self::assertSame([], $result['errors']);
         self::assertSame($node['styles'], $result['data']['elements'][0]['styles']);
         $css = (new Compiler(1000, 600))->compile($result['data']);
-        self::assertStringContainsString('.pb-element[data-pb-id="positioned"]:not(:where(.pb-theme_zone .pb-element)){position:relative;top:-12px;right:1.25rem;z-index:-5;}', $css);
-        self::assertStringContainsString('@media(max-width:1000px){.pb-element[data-pb-id="positioned"]:not(:where(.pb-theme_zone .pb-element)){position:sticky;top:0px;left:-25%;z-index:auto;}}', $css);
-        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="positioned"]:not(:where(.pb-theme_zone .pb-element)){position:static;top:auto;bottom:-0.5em;z-index:1000;}}', $css);
+        $guard = $this->legacyGuard($result['data']);
+        self::assertStringContainsString('.pb-element[data-pb-id="positioned"]' . $guard . '{position:relative;top:-12px;right:1.25rem;z-index:-5;}', $css);
+        self::assertStringContainsString('@media(max-width:1000px){.pb-element[data-pb-id="positioned"]' . $guard . '{position:sticky;top:0px;left:-25%;z-index:auto;}}', $css);
+        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="positioned"]' . $guard . '{position:static;top:auto;bottom:-0.5em;z-index:1000;}}', $css);
         foreach (['static', 'relative', 'absolute', 'fixed', 'sticky'] as $position) {
             $node['styles'] = ['desktop' => ['position' => $position, 'offset_left' => -2000, 'offset_right' => '2000vh', 'z_index' => -1000]];
             $valid = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
@@ -250,9 +279,10 @@ final class DocumentTest extends TestCase
         self::assertSame([], $result['errors']);
         self::assertSame($node['styles'], $result['data']['elements'][0]['styles']);
         $css = (new Compiler(1000, 600))->compile($result['data']);
-        self::assertStringContainsString('.pb-element[data-pb-id="spaced"]:not(:where(.pb-theme_zone .pb-element)){padding:20px;margin:8px;padding-top:12px;padding-bottom:1.5rem;margin-right:-4px;margin-left:auto;}', $css);
-        self::assertStringContainsString('@media(max-width:1000px){.pb-element[data-pb-id="spaced"]:not(:where(.pb-theme_zone .pb-element)){padding:0px;margin:4px;margin-right:0px;}}', $css);
-        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="spaced"]:not(:where(.pb-theme_zone .pb-element)){padding-left:2rem;margin-bottom:-1.25em;}}', $css);
+        $guard = $this->legacyGuard($result['data']);
+        self::assertStringContainsString('.pb-element[data-pb-id="spaced"]' . $guard . '{padding:20px;margin:8px;padding-top:12px;padding-bottom:1.5rem;margin-right:-4px;margin-left:auto;}', $css);
+        self::assertStringContainsString('@media(max-width:1000px){.pb-element[data-pb-id="spaced"]' . $guard . '{padding:0px;margin:4px;margin-right:0px;}}', $css);
+        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="spaced"]' . $guard . '{padding-left:2rem;margin-bottom:-1.25em;}}', $css);
         foreach ([
             ['padding_top', 0, '0px'], ['padding_right', '2000vh', '2000vh'], ['padding_bottom', '0.01rem', '0.01rem'], ['padding_left', 2000, '2000px'],
             ['margin_top', -2000, '-2000px'], ['margin_right', '-2000vw', '-2000vw'], ['margin_bottom', 'auto', 'auto'], ['margin_left', '0px', '0px'],
@@ -1086,9 +1116,10 @@ final class DocumentTest extends TestCase
         $nested['children'] = [$navigation];
         $data = ['elements' => [$nested]];
         $css = (new Compiler(1200, 900))->compile($data);
+        $guard = $this->legacyGuard($data);
         self::assertStringContainsString('@media(max-width:900px)', $css);
-        self::assertStringContainsString('.pb-element[data-pb-id="primary"]:not(:where(.pb-theme_zone .pb-element)) > .pb-nav > .pb-nav__list{display:block;margin-top:.5rem}', $css);
-        self::assertStringContainsString('.pb-element[data-pb-id="primary"]:not(:where(.pb-theme_zone .pb-element)) > .pb-nav .pb-nav__item{width:100%}', $css);
+        self::assertStringContainsString('.pb-element[data-pb-id="primary"]' . $guard . ' > .pb-nav > .pb-nav__list{display:block;margin-top:.5rem}', $css);
+        self::assertStringContainsString('.pb-element[data-pb-id="primary"]' . $guard . ' > .pb-nav .pb-nav__item{width:100%}', $css);
         self::assertStringNotContainsString('@media(max-width:767px)', $css);
         self::assertSame(599, Compiler::mobileBreakpoint(600, 9999));
         self::assertSame(1999, Compiler::mobileBreakpoint(9999, 9999));

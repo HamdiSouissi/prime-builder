@@ -12,11 +12,14 @@ use Prime\Http\Response;
 use Prime\Plugins\PluginContext;
 use Prime\Settings\Settings;
 use Prime\Site\PageContext;
+use Prime\Site\Zone\ZoneRepository;
+use Prime\Themes\ThemeManager;
 use PrimeBuilder\Configuration;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\SavedTemplates;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Snapshots;
+use PrimeBuilder\Styles\ZoneLayouts;
 use PrimeBuilder\Theme\Partials;
 
 /** Manage the real, deliberately limited static header/footer integration. */
@@ -144,7 +147,21 @@ final class ThemeBuilder
                 if ($layout === null) {
                     continue;
                 }
-                $candidate = (new Compiler((int) Configuration::get($this->plugin->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($this->plugin->settings(), 'breakpoint_mobile', 767)))->compile($layout);
+                $candidate = (new Compiler((int) Configuration::get($this->plugin->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($this->plugin->settings(), 'breakpoint_mobile', 767)))->compile($layout, legacy: false);
+                if (hash_equals(substr(hash('sha256', $candidate), 0, 16) . '.css', $file)) {
+                    $css = $candidate;
+                    $persisted = $snapshots->remember('theme-' . $file, $css);
+                    break;
+                }
+            }
+        }
+        if ($css === null) {
+            // If snapshot storage is unavailable, rebuild only a currently
+            // declared zone whose content-addressed CSS matches the request.
+            $zones = new ZoneLayouts($this->plugin->app()->get(ThemeManager::class), $this->plugin->app()->get(ZoneRepository::class));
+            $compiler = new Compiler((int) Configuration::get($this->plugin->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($this->plugin->settings(), 'breakpoint_mobile', 767));
+            foreach ($zones->all() as $layout) {
+                $candidate = $compiler->compile($layout, legacy: false);
                 if (hash_equals(substr(hash('sha256', $candidate), 0, 16) . '.css', $file)) {
                     $css = $candidate;
                     $persisted = $snapshots->remember('theme-' . $file, $css);

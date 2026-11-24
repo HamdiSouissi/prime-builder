@@ -31,6 +31,7 @@ use Prime\Site\View\EntryView;
 use Prime\Themes\ThemeAssetRegistry;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
+use PrimeBuilder\Styles\Scope;
 use PrimeBuilder\Tests\Support\DatabaseFixture;
 use PrimeBuilder\Widgets\Content;
 
@@ -145,8 +146,9 @@ final class IntegrationTest extends TestCase
         $stylesheet = $this->send($app, 'GET', $url);
         self::assertSame(200, $stylesheet->status());
         self::assertSame($css, $stylesheet->body());
-        self::assertStringContainsString('@media not all and (max-width:1000px){.pb-element[data-pb-id="section"]:not(:where(.pb-theme_zone .pb-element)){display:none!important}}', $css);
-        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="section"]:not(:where(.pb-theme_zone .pb-element)){display:none!important}}', $css);
+        $guard = ':where([data-pb-owner="' . Scope::forLayout($layout) . '"],:not([data-pb-owner])):not(:where(.pb-theme_zone .pb-element:not([data-pb-owner])))';
+        self::assertStringContainsString('@media not all and (max-width:1000px){.pb-element[data-pb-id="section"]' . $guard . '{display:none!important}}', $css);
+        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="section"]' . $guard . '{display:none!important}}', $css);
         self::assertStringNotContainsString('@media(max-width:1000px){@media not all', $css);
         $assets = new ThemeAssetRegistry();
         $hooks = $app->get(Hooks::class);
@@ -173,7 +175,8 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\\.css)~', $assets->renderStyles(), $matches));
         $themeStylesheet = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
         self::assertSame(200, $themeStylesheet->status());
-        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]:not(:where(.pb-theme_zone .pb-element)){display:none!important}', $themeStylesheet->body());
+        self::assertSame(1, preg_match('/data-pb-owner="([a-f0-9]{24})"/', $header, $ownerMatches));
+        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]:where([data-pb-owner="' . ($ownerMatches[1] ?? '') . '"]){display:none!important}', $themeStylesheet->body());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
     }
 
@@ -240,7 +243,8 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\\.css)~', $assets->renderStyles(), $matches));
         $themeCss = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
         self::assertSame(200, $themeCss->status());
-        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]:not(:where(.pb-theme_zone .pb-element)){position:relative;top:-12px;left:10%;z-index:-3;}', $themeCss->body());
+        self::assertSame(1, preg_match('/data-pb-owner="([a-f0-9]{24})"/', $header, $ownerMatches));
+        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]:where([data-pb-owner="' . ($ownerMatches[1] ?? '') . '"]){position:relative;top:-12px;left:10%;z-index:-3;}', $themeCss->body());
         self::assertStringContainsString('position:static;top:auto;z-index:2;', $themeCss->body());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
     }
@@ -311,7 +315,8 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\\.css)~', $assets->renderStyles(), $matches));
         $themeCss = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
         self::assertSame(200, $themeCss->status());
-        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]:not(:where(.pb-theme_zone .pb-element)){padding:20px;margin:8px;padding-top:12px;margin-left:auto;}', $themeCss->body());
+        self::assertSame(1, preg_match('/data-pb-owner="([a-f0-9]{24})"/', $header, $ownerMatches));
+        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]:where([data-pb-owner="' . ($ownerMatches[1] ?? '') . '"]){padding:20px;margin:8px;padding-top:12px;margin-left:auto;}', $themeCss->body());
         self::assertStringContainsString('padding-bottom:1.5rem;margin-bottom:-2rem;', $themeCss->body());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
     }
@@ -1967,8 +1972,9 @@ final class IntegrationTest extends TestCase
         self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
         $entry = $app->get(EntryRepository::class)->find(1);
         self::assertNotNull($entry);
-        self::assertStringContainsString('class="pb-element pb-entry_navigation" data-pb-id="adjacent"></div>', $entry->contentHtml);
-        self::assertStringContainsString('class="pb-element pb-entry_author" data-pb-id="author"></div>', $entry->contentHtml);
+        $owner = Scope::forLayout($entry->decodedContent()['blocks'][0]['data']);
+        self::assertStringContainsString('class="pb-element pb-entry_navigation" data-pb-owner="' . $owner . '" data-pb-id="adjacent"></div>', $entry->contentHtml);
+        self::assertStringContainsString('class="pb-element pb-entry_author" data-pb-owner="' . $owner . '" data-pb-id="author"></div>', $entry->contentHtml);
         self::assertStringNotContainsString('Ancien', $entry->contentHtml);
         self::assertStringNotContainsString('Camille', $entry->contentHtml);
         $assets = new ThemeAssetRegistry();
@@ -2464,12 +2470,68 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
     }
 
+    public function testDeclaredZoneLayoutsHaveIndependentDeduplicatedStylesAndRecoverableSnapshots(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $first = ['version' => 1, 'elements' => [[
+            'id' => 'shared', 'type' => 'heading', 'settings' => ['text' => 'Zone'],
+            'styles' => ['desktop' => ['color' => '#178041']], 'children' => [],
+        ]]];
+        $second = $first;
+        $second['elements'][0]['styles']['desktop']['color'] = '#124499';
+        $zoneDocument = ['version' => 1, 'blocks' => [
+            ['id' => 'first', 'type' => 'prime-builder/layout', 'data' => $first],
+            ['id' => 'copy', 'type' => 'prime-builder/layout', 'data' => $first],
+            ['id' => 'second', 'type' => 'prime-builder/layout', 'data' => $second],
+        ]];
+        $zones->save('sidebar', $zoneDocument);
+        $unregistered = $first;
+        $unregistered['elements'][0]['styles']['desktop']['color'] = '#998877';
+        $zones->save('not_declared', ['version' => 1, 'blocks' => [['id' => 'other', 'type' => 'prime-builder/layout', 'data' => $unregistered]]]);
+        $stored = $zones->document('sidebar');
+        $first = $stored['blocks'][0]['data'];
+        $second = $stored['blocks'][2]['data'];
+        $firstCss = (new Compiler())->compile($first, legacy: false);
+        $secondCss = (new Compiler())->compile($second, legacy: false);
+        $firstOwner = Scope::forLayout($first);
+        $secondOwner = Scope::forLayout($second);
+        self::assertNotSame($firstOwner, $secondOwner);
+        self::assertStringContainsString(':where([data-pb-owner="' . $firstOwner . '"])', $firstCss);
+        self::assertStringNotContainsString(':not([data-pb-owner])', $firstCss);
+        $rendered = $zones->renderLive('sidebar', $app->get(\Prime\Site\Zone\DynamicBlockRegistry::class));
+        self::assertSame(2, substr_count($rendered, 'data-pb-owner="' . $firstOwner . '" data-pb-id="shared"'));
+        self::assertSame(1, substr_count($rendered, 'data-pb-owner="' . $secondOwner . '" data-pb-id="shared"'));
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_BLOG));
+        $firstFile = substr(hash('sha256', $firstCss), 0, 16) . '.css';
+        $secondFile = substr(hash('sha256', $secondCss), 0, 16) . '.css';
+        self::assertSame(1, substr_count($assets->renderStyles(), '/prime-builder/theme/' . $firstFile));
+        self::assertSame(1, substr_count($assets->renderStyles(), '/prime-builder/theme/' . $secondFile));
+        $otherCss = (new Compiler())->compile($unregistered, legacy: false);
+        self::assertStringNotContainsString('/prime-builder/theme/' . substr(hash('sha256', $otherCss), 0, 16) . '.css', $assets->renderStyles());
+        $response = $this->send($app, 'GET', '/prime-builder/theme/' . $firstFile);
+        self::assertSame(200, $response->status());
+        self::assertSame($firstCss, $response->body());
+        self::assertStringContainsString('immutable', (string) $response->header('Cache-Control'));
+        $path = $app->storagePath('prime-builder/styles/theme-' . $firstFile);
+        self::assertFileExists($path);
+        self::assertTrue(unlink($path));
+        $regenerated = $this->send($app, 'GET', '/prime-builder/theme/' . $firstFile);
+        self::assertSame(200, $regenerated->status());
+        self::assertSame($firstCss, $regenerated->body());
+        self::assertSame(404, $this->send($app, 'GET', '/prime-builder/theme/0000000000000000.css')->status());
+        $zoneDocument['blocks'][0]['data']['elements'][0]['styles']['desktop']['color'] = '#338855';
+        $zones->save('sidebar', $zoneDocument);
+        self::assertSame($firstCss, $this->send($app, 'GET', '/prime-builder/theme/' . $firstFile)->body(), 'Advertised CSS remains immutable after a zone edit');
+    }
+
     public function testThemeZoneUsesDeclaredCoreZonesAndRefreshesWithoutPersistingTheirContents(): void
     {
         $app = $this->activated('admin');
         $pdo = $this->db($app)->pdo();
-        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
-        $pdo->exec('CREATE TABLE pc_zones (id ' . $idColumn . ', theme VARCHAR(80), slug VARCHAR(80), content LONGTEXT, content_html LONGTEXT, created_at DATETIME, updated_at DATETIME)');
         $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
         $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
         $zoneDocument = ['version' => 1, 'blocks' => [
@@ -4430,8 +4492,6 @@ final class IntegrationTest extends TestCase
     {
         $app = $this->activated('admin');
         $pdo = $this->db($app)->pdo();
-        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
-        $pdo->exec('CREATE TABLE pc_zones (id ' . $idColumn . ', theme VARCHAR(80), slug VARCHAR(80), content LONGTEXT, content_html LONGTEXT, created_at DATETIME, updated_at DATETIME)');
         $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
         $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
         $image = $app->get(\Prime\Media\MediaRepository::class)->create([
@@ -4604,7 +4664,10 @@ final class IntegrationTest extends TestCase
         if (getenv('PB_TEST_MYSQL') === '1') {
             self::assertSame('mysql', $this->db($app)->pdo()->getAttribute(\PDO::ATTR_DRIVER_NAME));
         }
-        $this->db($app)->pdo()->exec('CREATE TABLE pc_plugins (slug VARCHAR(64) PRIMARY KEY, version VARCHAR(64), status VARCHAR(20), manifest_hash VARCHAR(64), last_error TEXT, errored_at DATETIME, installed_at DATETIME, activated_at DATETIME, created_at DATETIME, updated_at DATETIME)');
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_plugins (slug VARCHAR(64) PRIMARY KEY, version VARCHAR(64), status VARCHAR(20), manifest_hash VARCHAR(64), last_error TEXT, errored_at DATETIME, installed_at DATETIME, activated_at DATETIME, created_at DATETIME, updated_at DATETIME)');
+        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $pdo->exec('CREATE TABLE pc_zones (id ' . $idColumn . ', theme VARCHAR(80), slug VARCHAR(80), content LONGTEXT, content_html LONGTEXT, created_at DATETIME, updated_at DATETIME)');
         $this->assets = sys_get_temp_dir() . '/prime_builder_assets_' . bin2hex(random_bytes(4));
         mkdir($this->assets, 0755, true);
         $app->container()->instance(AssetPublisher::class, new AssetPublisher($this->assets, '/assets/plugins'));
