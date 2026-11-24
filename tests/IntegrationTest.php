@@ -4580,7 +4580,13 @@ final class IntegrationTest extends TestCase
 
         // decodedContent() maps bad JSON and JSON scalars to empty blocks; this
         // must not authorize replacing the original bytes, even if HTML exists.
-        foreach (['{"version":1,"blocks":[', '{"version":1,"blocks":[]} trailing', 'null', 'false', '17', '"raw text"', '[{"type":"prime-builder/layout"}]', '{"unexpected":"unrecognized data"}', '{"version":2}', '{"version":"1","blocks":[]}'] as $raw) {
+        foreach ([
+            '{"version":1,"blocks":[', '{"version":1,"blocks":[]} trailing', 'null', 'false', '17', '"raw text"',
+            '[{"type":"prime-builder/layout"}]', '{"unexpected":"unrecognized data"}', '{"version":2}', '{"version":"1","blocks":[]}',
+            '{"version":1,"blocks":null}', '{"version":1,"blocks":"not-a-list"}',
+            '{"version":1,"blocks":{"legacy":{"id":"one","type":"paragraph","data":{"text":"legacy"}}}}',
+            '{"version":1,"blocks":{"2":{"id":"one","type":"paragraph","data":{"text":"legacy"}}}}',
+        ] as $raw) {
             foreach (['', $savedHtml] as $html) {
                 $statement->execute([$raw, $html]);
                 $config = $this->editorConfig($app, 1);
@@ -4596,7 +4602,7 @@ final class IntegrationTest extends TestCase
 
         // The core accepts a blank input, empty roots and omitted version/blocks.
         // Those empty documents can still have a saved HTML snapshot to preserve.
-        foreach (['', " \n\t", '{}', '[]', '{"version":1}', '{"blocks":[]}', '{"version":1,"blocks":[]}'] as $raw) {
+        foreach (['', " \n\t", '{}', '[]', '{"version":1}', '{"blocks":[]}', '{"version":1,"blocks":[]}', '{"version":1,"blocks":{}}'] as $raw) {
             $statement->execute([$raw, $savedHtml]);
             $config = $this->editorConfig($app, 1);
             self::assertSame(false, $config['conversionFailed'], $raw);
