@@ -4586,6 +4586,8 @@ final class IntegrationTest extends TestCase
             '{"version":1,"blocks":null}', '{"version":1,"blocks":"not-a-list"}',
             '{"version":1,"blocks":{"legacy":{"id":"one","type":"paragraph","data":{"text":"legacy"}}}}',
             '{"version":1,"blocks":{"2":{"id":"one","type":"paragraph","data":{"text":"legacy"}}}}',
+            '{"version":1,"blocks":{"0":{"id":"one","type":"paragraph","data":{"text":"legacy"}}}}',
+            '{"version":1,"blocks":{"0":{"id":"one","type":"paragraph","data":{"text":"first"}},"1":{"id":"two","type":"paragraph","data":{"text":"second"}}}}',
         ] as $raw) {
             foreach (['', $savedHtml] as $html) {
                 $statement->execute([$raw, $html]);

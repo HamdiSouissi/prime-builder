@@ -34,20 +34,30 @@ final class Converter
         // non-array blocks and defaults malformed versions. Do not silently
         // turn discarded stored data into an edit. Blank input is accepted by
         // the core and can still have a separately saved HTML snapshot.
-        $raw = json_decode($entry->content, true);
-        if (!is_array($raw)) {
+        // Associative decoding alone turns {"0": ...} into a PHP list, losing
+        // the distinction between an object and the document's block array.
+        $raw = json_decode($entry->content);
+        if (!is_array($raw) && !is_object($raw)) {
             if (trim($entry->content, " \t\r\n") !== '') {
                 return null;
             }
             $raw = [];
         }
+        $raw = (array) $raw;
         if ((array_key_exists('version', $raw) && $raw['version'] !== 1)
             || (!array_key_exists('blocks', $raw) && array_diff_key($raw, ['version' => true]) !== [])) {
             return null;
         }
-        if (array_key_exists('blocks', $raw)
-            && (!is_array($raw['blocks']) || !array_is_list($raw['blocks']) || count($raw['blocks']) !== count($blocks))) {
-            return null;
+        if (array_key_exists('blocks', $raw)) {
+            $rawBlocks = $raw['blocks'];
+            // The core accepts an empty object as empty blocks; preserve that
+            // legacy form, but never normalize a nonempty object into a list.
+            if (is_object($rawBlocks) && get_object_vars($rawBlocks) === []) {
+                $rawBlocks = [];
+            }
+            if (!is_array($rawBlocks) || !array_is_list($rawBlocks) || count($rawBlocks) !== count($blocks)) {
+                return null;
+            }
         }
         $layouts = [];
         // Validate every saved Builder block before attempting the grouped-HTML
