@@ -124,6 +124,10 @@ final class DocumentTest extends TestCase
         $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($layout);
         self::assertStringContainsString('data-pb-owner="' . $owner . '" data-pb-id="shared"', $html);
         self::assertStringContainsString('data-pb-owner="' . $owner . '" data-pb-id="zone"', $html);
+        self::assertStringNotContainsString('data-pb-document=', $html);
+        $entry = \Prime\Content\Entry::fromRow(['id' => 42]);
+        $entryHtml = (new Renderer(new Registry(), new HtmlSanitizer(), entry: $entry))->render($layout);
+        self::assertStringContainsString('<div class="pb-layout" data-pb-document="42"', $entryHtml);
         $css = (new Compiler(1000, 600))->compile($layout);
         $guard = ':where([data-pb-owner="' . $owner . '"],:not([data-pb-owner])):not(:where(.pb-theme_zone .pb-element:not([data-pb-owner])))';
         $selector = '.pb-element[data-pb-id="shared"]' . $guard;

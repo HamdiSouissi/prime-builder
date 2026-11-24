@@ -375,7 +375,10 @@ final class IntegrationTest extends TestCase
         $fullResult = json_decode($full->body(), true)['data'];
         self::assertStringContainsString('Premier', $fullResult['html']);
         self::assertStringContainsString('Second', $fullResult['html']);
+        self::assertStringContainsString('data-pb-document="1"', $fullResult['html']);
         self::assertSame(2, count($fullResult['layout']['elements'][0]['children']));
+        $owner = Scope::forLayout($fullResult['layout']);
+        self::assertStringContainsString('data-pb-owner="' . $owner . '" data-pb-id="first"', $fullResult['html']);
 
         $part = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $data, 'target' => 'first'], $token);
         self::assertSame(200, $part->status(), $part->body());
@@ -383,7 +386,18 @@ final class IntegrationTest extends TestCase
         self::assertSame('first', $partResult['target']);
         self::assertStringContainsString('Premier', $partResult['html']);
         self::assertStringNotContainsString('Second', $partResult['html']);
+        self::assertStringContainsString('data-pb-owner="' . $owner . '" data-pb-id="first"', $partResult['html']);
         self::assertSame(false, isset($partResult['layout']));
+        $changed = $data;
+        $changed['elements'][0]['children'][0]['styles'] = ['desktop' => ['color' => '#123456']];
+        $changedFull = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $changed], $token);
+        self::assertSame(200, $changedFull->status());
+        $changedResult = json_decode($changedFull->body(), true)['data'];
+        $changedOwner = Scope::forLayout($changedResult['layout']);
+        self::assertNotSame($owner, $changedOwner);
+        $changedPart = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $changed, 'target' => 'first'], $token);
+        self::assertSame(200, $changedPart->status());
+        self::assertStringContainsString('data-pb-owner="' . $changedOwner . '" data-pb-id="first"', json_decode($changedPart->body(), true)['data']['html']);
         self::assertSame(422, $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $data, 'target' => 'missing'], $token)->status());
         self::assertSame(422, $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $data, 'target' => ['first']], $token)->status());
 

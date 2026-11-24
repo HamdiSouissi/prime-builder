@@ -34,16 +34,22 @@ final class Renderer
     ) {
     }
 
-    /** @param array<string, mixed> $data */
-    public function render(array $data): string
+    /**
+     * @param array<string, mixed> $data
+     * @param array<string, mixed>|null $styleLayout Full layout when rendering a preview subtree.
+     */
+    public function render(array $data, ?array $styleLayout = null): string
     {
         $elements = is_array($data['elements'] ?? null) ? $data['elements'] : [];
-        $this->styleOwner = Scope::forLayout($data);
+        $this->styleOwner = Scope::forLayout($styleLayout ?? $data);
         $this->tableOfContents = $this->containsTableOfContents($elements) ? new TableOfContents($elements) : null;
+        // The editor can locate a saved entry without assuming a theme's markup.
+        // A zone or theme partial is rendered without an Entry and has no marker.
+        $document = $this->entry !== null && $this->entry->id > 0 ? ' data-pb-document="' . $this->entry->id . '"' : '';
         $refresh = $this->entry !== null && $this->containsLive($elements)
             ? ' data-pb-live="/api/prime-builder/v1/documents/' . $this->entry->id . '/live"'
             : '';
-        return '<div class="pb-layout"' . $refresh . '>' . $this->renderElements($elements, $this->registry->all()) . '</div>';
+        return '<div class="pb-layout"' . $document . $refresh . '>' . $this->renderElements($elements, $this->registry->all()) . '</div>';
     }
 
     /** @param array<mixed> $elements */

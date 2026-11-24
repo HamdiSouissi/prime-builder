@@ -236,6 +236,7 @@ return [
     ],
     'ui' => [
         'conversion_failed' => 'Impossible de convertir ce contenu sans risquer de perdre son HTML enregistré. L’enregistrement est désactivé ; revenez à Prime Editor.',
+        'preview_location_error' => 'Aperçu non actualisé : le contenu du thème ne peut pas être identifié sans ambiguïté. L’enregistrement reste possible, mais vérifiez le résultat sur le site.',
         'original_read_only' => 'Ce contenu d’origine ne peut pas être modifié ici. Vous pouvez le déplacer ou le supprimer.',
         'html_read_only' => 'Le code HTML est en lecture seule pour votre compte. Vous pouvez déplacer ou supprimer cet élément ; sa création et sa modification exigent une permission dédiée.',
         'markup' => 'Code HTML filtré',

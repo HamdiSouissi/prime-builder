@@ -742,6 +742,29 @@ function previewEventNode(doc, target) {
   }
   return node && canvas.contains(node) ? node : null;
 }
+function initialPreviewLocation(doc) {
+  // Themes may identify their content area explicitly. Aurora already has a
+  // known wrapper. Neither a copied entry nor a nested Builder layout is an area.
+  const areas = selector => [...doc.querySelectorAll(selector)]
+    .filter(area => !area.closest('[data-pb-content-copy]') && !area.closest('.pb-layout'));
+  const explicit = areas('[data-pb-editor-content]');
+  if (explicit.length) return explicit.length === 1 ? { area: explicit[0] } : null;
+  const aurora = areas('.aurora-prose');
+  const candidates = selector => [...doc.querySelectorAll(selector)].filter(layout =>
+    !layout.closest('[data-pb-content-copy]') && !layout.parentElement?.closest('.pb-layout'));
+  const entry = CSS.escape(String(config.entryId));
+  const marked = candidates(`.pb-layout[data-pb-document="${entry}"]`);
+  // Older saved layouts with live widgets already identify their entry this way.
+  const live = candidates(`.pb-layout[data-pb-live="/api/prime-builder/v1/documents/${entry}/live"]`);
+  const identified = [...new Set([...marked, ...live])];
+  if (identified.length && aurora.length) {
+    const inside = identified.filter(layout => aurora.some(area => area.contains(layout)));
+    // A wrapper and an entry marker that disagree are not safe to guess between.
+    return inside.length === 1 ? { current: inside[0] } : null;
+  }
+  if (identified.length) return identified.length === 1 ? { current: identified[0] } : null;
+  return aurora.length === 1 ? { area: aurora[0] } : null;
+}
 function positionToolbar() {
   const doc = frame.contentDocument;
   const node = selected && doc ? previewNode(doc, selected) : null;
@@ -941,46 +964,53 @@ async function renderPreview(sequence) {
     if (sequence !== requestNumber) return;
     const doc = frame.contentDocument;
     if (!doc?.head) return;
-    if (!doc.querySelector('[data-pb-base-css]')) {
-      const link = doc.createElement('link'); link.rel = 'stylesheet'; link.href = config.publicCssUrl; link.dataset.pbBaseCss = ''; doc.head.append(link);
-    }
-    if (!doc.querySelector('[data-pb-kit-css]')) {
-      const link = doc.createElement('link'); link.rel = 'stylesheet'; link.href = config.kitCssUrl; link.dataset.pbKitCss = ''; doc.head.append(link);
-    }
-    // The server stylesheet represents the last saved version. Disable it in the
-    // editor iframe so clearing an unsaved value really returns to inheritance.
-    doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
-      const url = new URL(link.href, doc.baseURI);
-      if (url.origin === location.origin && url.pathname.startsWith('/prime-builder/css/')) link.disabled = true;
-    });
     if (target !== null) {
       const selector = `[data-pb-id="${CSS.escape(target)}"]`;
       const current = previewNode(doc, target);
       const fragment = doc.createElement('template'); fragment.innerHTML = result.data.html;
       const replacement = fragment.content.querySelector(selector);
-      if (!current || !replacement || result.data.target !== target) {
+      const owner = replacement?.dataset.pbOwner;
+      if (!current || !replacement || result.data.target !== target || !/^[a-f0-9]{24}$/.test(owner || '')) {
         // The iframe may have reloaded or a third-party widget may have failed.
         // Reconcile the entire canvas rather than silently losing an edit.
         schedulePreview();
         return;
       }
       current.replaceWith(replacement);
+      // A style edit changes the full layout's owner, even when only one node
+      // was rendered. Keep its siblings in that owner, never nested layouts.
+      const synchronizeOwner = elements => {
+        for (const element of elements) {
+          const node = previewNode(doc, element.id);
+          if (node) node.dataset.pbOwner = owner;
+          synchronizeOwner(element.children || []);
+        }
+      };
+      synchronizeOwner(history.present);
     } else {
-      const area = doc.querySelector('.aurora-prose');
-      // Prefer Aurora's entry content to an unrelated Builder layout in a
-      // header, sidebar or footer. Keep the existing generic theme fallback.
-      const current = previewCanvas(doc) || (area ? area.querySelector('.pb-layout') : doc.querySelector('.pb-layout'));
+      const current = previewCanvas(doc);
+      const location = current ? { current } : initialPreviewLocation(doc);
       const fragment = doc.createElement('template'); fragment.innerHTML = result.data.html;
       const replacement = fragment.content.querySelector('.pb-layout');
       if (!replacement) return;
+      // Never replace an unrelated header or all of <main> when the theme's
+      // content cannot be located safely. Saving and the navigator still work.
+      if (!location) { $('[data-pb-preview-warning]').hidden = false; return; }
       replacement.dataset.pbEditorCanvas = '';
-      if (current) current.replaceWith(replacement);
-      else {
-        const destination = area || doc.querySelector('main');
-        if (!destination) return;
-        destination.replaceChildren(replacement);
-      }
+      if (location.current) location.current.replaceWith(replacement);
+      else location.area.replaceChildren(replacement);
+      $('[data-pb-preview-warning]').hidden = true;
     }
+    // Do not change any stylesheet when no safe canvas could be located.
+    if (!doc.querySelector('[data-pb-base-css]')) {
+      const link = doc.createElement('link'); link.rel = 'stylesheet'; link.href = config.publicCssUrl; link.dataset.pbBaseCss = ''; doc.head.append(link);
+    }
+    if (!doc.querySelector('[data-pb-kit-css]')) {
+      const link = doc.createElement('link'); link.rel = 'stylesheet'; link.href = config.kitCssUrl; link.dataset.pbKitCss = ''; doc.head.append(link);
+    }
+    // Keep the saved entry sheet for any copies outside the canvas. The preview
+    // nodes carry the current full layout's owner, so changed styles no longer
+    // match the saved sheet while unedited copies retain their saved appearance.
     previewNeedsFull = false;
     previewTargets.clear();
     syncPreviewWidgetStyles(doc);

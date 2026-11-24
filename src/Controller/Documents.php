@@ -366,7 +366,7 @@ final class Documents
             if ($element === null) {
                 return ApiError::response('validation_failed', 422, $request);
             }
-            return Response::json(['data' => ['target' => $target, 'html' => $renderer->render(['version' => 1, 'elements' => [$element]])]]);
+            return Response::json(['data' => ['target' => $target, 'html' => $renderer->render(['version' => 1, 'elements' => [$element]], $result['data'])]]);
         }
         return Response::json(['data' => ['html' => $renderer->render($result['data']), 'layout' => $result['data']]]);
     }

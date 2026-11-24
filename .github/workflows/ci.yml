@@ -296,55 +296,24 @@ jobs:
         run: npm test 2>&1 | tee /tmp/prime-builder-e2e.log
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
-      # Temporary transport: the sandbox cannot download the artifact host.
-      - name: Report zone-collision-public capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh zone-collision-public 0
-      - name: Report zone-collision-public capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh zone-collision-public 1
-      - name: Report zone-collision-public capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh zone-collision-public 2
-      - name: Report zone-collision-public capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh zone-collision-public 3
-      - name: Report zone-collision-public-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh zone-collision-public-mobile 0
-      - name: Report zone-collision-public-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh zone-collision-public-mobile 1
-      - name: Report zone-collision-public-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh zone-collision-public-mobile 2
-      - name: Report zone-collision-public-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh zone-collision-public-mobile 3
-      - name: Report zone-style-public capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public 0
-      - name: Report zone-style-public capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public 1
-      - name: Report zone-style-public capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public 2
-      - name: Report zone-style-public capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public 3
-      - name: Report zone-style-public-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public-mobile 0
-      - name: Report zone-style-public-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public-mobile 1
-      - name: Report zone-style-public-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public-mobile 2
-      - name: Report zone-style-public-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public-mobile 3
-      - name: Report zone-owned-public capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh zone-owned-public 0
-      - name: Report zone-owned-public capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh zone-owned-public 1
-      - name: Report zone-owned-public capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh zone-owned-public 2
-      - name: Report zone-owned-public capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh zone-owned-public 3
-      - name: Report zone-owned-public-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh zone-owned-public-mobile 0
-      - name: Report zone-owned-public-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh zone-owned-public-mobile 1
-      - name: Report zone-owned-public-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh zone-owned-public-mobile 2
-      - name: Report zone-owned-public-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh zone-owned-public-mobile 3
+      # Temporary transport for the two current editor captures: the sandbox
+      # cannot download the artifact host and GitHub limits job annotations.
+      - name: Report generic-editor-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh generic-editor-desktop 0
+      - name: Report generic-editor-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh generic-editor-desktop 1
+      - name: Report generic-editor-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh generic-editor-desktop 2
+      - name: Report generic-editor-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh generic-editor-desktop 3
+      - name: Report generic-editor-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh generic-editor-mobile 0
+      - name: Report generic-editor-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh generic-editor-mobile 1
+      - name: Report generic-editor-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh generic-editor-mobile 2
+      - name: Report generic-editor-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh generic-editor-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |
