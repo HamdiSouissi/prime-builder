@@ -40,12 +40,11 @@ test('sharing in late zone copies follows the owning entry without leaking conte
       expect(updated.status, updated.body).toBe(200);
     }
 
-    let signalLive;
-    const started = new Promise(resolve => { signalLive = resolve; });
+    let liveStarted = false;
     const gate = new Promise(resolve => { releaseLive = resolve; });
-    await page.route(`**/documents/${entries[0].id}/live`, async route => { signalLive(); await gate; await route.continue(); });
+    await page.route(`**/documents/${entries[0].id}/live`, async route => { liveStarted = true; await gate; await route.continue(); });
     await page.goto(`${entries[0].url}?private_token=browser-secret`);
-    await started;
+    await expect.poll(() => liveStarted, { timeout: 15_000, message: 'The live zone request should start' }).toBe(true);
     const native = page.locator('.aurora-sidebar');
     const copies = page.locator('.pb-layout[data-pb-live] .pb-theme_zone');
     await expect(copies).toHaveCount(2);
