@@ -57,7 +57,11 @@ final class Compiler
             if (!is_array($element) || !is_string($element['id'] ?? null) || preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $element['id']) !== 1) {
                 continue;
             }
-            $selector = '.pb-element[data-pb-id="' . $element['id'] . '"]';
+            // A live theme zone may contain another Builder document whose IDs
+            // are unrelated to this document. Never apply this document's rules
+            // to a Builder element inside that asynchronously inserted zone.
+            // :where keeps the guard from increasing the selector's specificity.
+            $selector = '.pb-element[data-pb-id="' . $element['id'] . '"]:not(:where(.pb-theme_zone .pb-element))';
             $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
             if (($element['type'] ?? '') === 'navigation') {
                 // The exact same bounded breakpoint is passed to matchMedia.
@@ -100,7 +104,9 @@ final class Compiler
                     $inherit = Values::color($values['color'] ?? null) !== null ? 'color:inherit;' : '';
                     $inherit .= Values::length($values['font_size'] ?? null) !== null ? 'font-size:inherit;' : '';
                     if ($inherit !== '') {
-                        $modes[$mode] .= $selector . ' :where(h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary){' . $inherit . '}';
+                        // Do not force inherited typography onto a nested
+                        // Builder document, even when its parent is styled.
+                        $modes[$mode] .= $selector . ' :where(h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary):not(:where(.pb-theme_zone .pb-element *)){' . $inherit . '}';
                     }
                 }
             }

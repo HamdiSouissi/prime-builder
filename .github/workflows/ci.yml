@@ -313,6 +313,22 @@ jobs:
         run: bash builder/tests/e2e/visual-chunks.sh zone-collision-public-mobile 2
       - name: Report zone-collision-public-mobile capture part 3
         run: bash builder/tests/e2e/visual-chunks.sh zone-collision-public-mobile 3
+      - name: Report zone-style-public capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public 0
+      - name: Report zone-style-public capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public 1
+      - name: Report zone-style-public capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public 2
+      - name: Report zone-style-public capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public 3
+      - name: Report zone-style-public-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public-mobile 0
+      - name: Report zone-style-public-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public-mobile 1
+      - name: Report zone-style-public-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public-mobile 2
+      - name: Report zone-style-public-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh zone-style-public-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |

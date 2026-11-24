@@ -145,8 +145,8 @@ final class IntegrationTest extends TestCase
         $stylesheet = $this->send($app, 'GET', $url);
         self::assertSame(200, $stylesheet->status());
         self::assertSame($css, $stylesheet->body());
-        self::assertStringContainsString('@media not all and (max-width:1000px){.pb-element[data-pb-id="section"]{display:none!important}}', $css);
-        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="section"]{display:none!important}}', $css);
+        self::assertStringContainsString('@media not all and (max-width:1000px){.pb-element[data-pb-id="section"]:not(:where(.pb-theme_zone .pb-element)){display:none!important}}', $css);
+        self::assertStringContainsString('@media(max-width:600px){.pb-element[data-pb-id="section"]:not(:where(.pb-theme_zone .pb-element)){display:none!important}}', $css);
         self::assertStringNotContainsString('@media(max-width:1000px){@media not all', $css);
         $assets = new ThemeAssetRegistry();
         $hooks = $app->get(Hooks::class);
@@ -173,7 +173,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\\.css)~', $assets->renderStyles(), $matches));
         $themeStylesheet = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
         self::assertSame(200, $themeStylesheet->status());
-        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]{display:none!important}', $themeStylesheet->body());
+        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]:not(:where(.pb-theme_zone .pb-element)){display:none!important}', $themeStylesheet->body());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
     }
 
@@ -240,7 +240,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\\.css)~', $assets->renderStyles(), $matches));
         $themeCss = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
         self::assertSame(200, $themeCss->status());
-        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]{position:relative;top:-12px;left:10%;z-index:-3;}', $themeCss->body());
+        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]:not(:where(.pb-theme_zone .pb-element)){position:relative;top:-12px;left:10%;z-index:-3;}', $themeCss->body());
         self::assertStringContainsString('position:static;top:auto;z-index:2;', $themeCss->body());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
     }
@@ -311,7 +311,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\\.css)~', $assets->renderStyles(), $matches));
         $themeCss = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
         self::assertSame(200, $themeCss->status());
-        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]{padding:20px;margin:8px;padding-top:12px;margin-left:auto;}', $themeCss->body());
+        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]:not(:where(.pb-theme_zone .pb-element)){padding:20px;margin:8px;padding-top:12px;margin-left:auto;}', $themeCss->body());
         self::assertStringContainsString('padding-bottom:1.5rem;margin-bottom:-2rem;', $themeCss->body());
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
     }
