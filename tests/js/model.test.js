@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { History, add, changedElement, containsWidget, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update } from '../../assets/js/model.js';
+import { History, add, changedElement, containsWidget, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from '../../assets/js/model.js';
+
+test('validated old nodes receive optional defaults without losing other values', () => {
+  const input = [
+    { id: 'empty', type: 'container', settings: null, styles: null, children: null, label: 'Existing' },
+    { id: 'parent', type: 'container', children: [{ id: 'heading', type: 'heading', settings: { text: 'Kept' } }] },
+  ];
+  const before = structuredClone(input);
+  const hydrated = withElementDefaults(input);
+  assert.deepEqual(input, before);
+  assert.deepEqual(hydrated[0], { id: 'empty', type: 'container', settings: {}, styles: {}, children: [], label: 'Existing' });
+  assert.deepEqual(hydrated[1].children[0], { id: 'heading', type: 'heading', settings: { text: 'Kept' }, styles: {}, children: [] });
+  assert.equal(add(hydrated, createElement('heading'), 'empty')[0].children.length, 1);
+  assert.deepEqual(input, before);
+});
 
 test('preview diff selects a single changed subtree and rejects structural or multiple changes', () => {
   const parent = createElement('container'), first = createElement('heading'), second = createElement('text');

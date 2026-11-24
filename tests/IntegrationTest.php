@@ -3352,6 +3352,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, preg_match('~<textarea hidden data-pb-config>(.*?)</textarea>~s', $editor->body(), $matches));
         $config = json_decode(html_entity_decode($matches[1] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8'), true);
         self::assertSame(false, $config['canHtml']);
+        self::assertSame(false, $config['conversionFailed']);
         self::assertSame(true, $config['widgets']['html']['hidden']);
         self::assertSame(true, $config['widgets']['html']['readOnly']);
         self::assertSame(false, isset($config['widgets']['html']['fields']['signature']));
@@ -4384,6 +4385,288 @@ final class IntegrationTest extends TestCase
         self::assertNotNull($original);
         self::assertSame(true, $original['grouped']);
         self::assertSame($groupedHtml, $original['html']);
+    }
+
+    public function testCoreDuplicateWithForeignOriginalIsFlaggedBeforeEditing(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $media = $app->get(\Prime\Media\MediaRepository::class)->create([
+            'disk_path' => 'duplicate/photo.jpg', 'filename' => 'photo.jpg', 'original_name' => 'photo.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image', 'width' => 800, 'height' => 600, 'alt' => 'Image originale',
+        ]);
+        $service = $app->get(\Prime\Content\EntryService::class);
+        $user = $this->user($app, 1);
+        $legacy = ['version' => 1, 'blocks' => [
+            ['id' => 'photo', 'type' => 'image', 'data' => ['mediaId' => $media->id, 'alt' => 'Image originale']],
+        ]];
+        $service->update(1, ['content' => $legacy], $user);
+        $config = $this->editorConfig($app, 1);
+        self::assertSame(false, $config['conversionFailed']);
+        self::assertSame('original_content', $config['document']['blocks'][0]['data']['elements'][0]['children'][0]['type']);
+        $token = $this->tokens($app)->issue($user, 'duplicate original', ['*'])['token'];
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $config['document'], 'source_hash' => $config['sourceHash']], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $repository = $app->get(EntryRepository::class);
+        $source = $repository->find(1);
+        self::assertNotNull($source);
+        self::assertStringContainsString('/uploads/duplicate/photo.jpg', $source->contentHtml);
+        self::assertSame(false, $this->editorConfig($app, 1)['conversionFailed']);
+
+        // Core duplicate() does not provide provenance or the destination ID to
+        // the validation hook. The copied payload must not render as new HTML.
+        $copy = $service->duplicate(1, $user);
+        self::assertSame('draft', $copy->status);
+        self::assertStringNotContainsString('/uploads/duplicate/photo.jpg', $copy->contentHtml);
+        $copyBefore = $copy->content;
+        $copyConfig = $this->editorConfig($app, $copy->id);
+        self::assertSame(true, $copyConfig['conversionFailed']);
+        self::assertSame(false, $copyConfig['converted']);
+        $blockedScreen = $this->send($app, 'GET', '/admin/prime-builder/edit/' . $copy->id);
+        self::assertSame(200, $blockedScreen->status());
+        self::assertStringContainsString('data-pb-app data-pb-blocked', $blockedScreen->body());
+        self::assertStringContainsString('data-pb-conversion-warning role="alert">', $blockedScreen->body());
+        self::assertStringContainsString('data-pb-save disabled>', $blockedScreen->body());
+        self::assertStringContainsString('data-pb-status disabled>', $blockedScreen->body());
+        $validScreen = $this->send($app, 'GET', '/admin/prime-builder/edit/1');
+        self::assertStringContainsString('data-pb-conversion-warning role="alert" hidden>', $validScreen->body());
+        self::assertStringContainsString('data-pb-save>', $validScreen->body());
+        self::assertSame($copyBefore, $repository->find($copy->id)?->content);
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/' . $copy->id, ['content' => $copy->decodedContent()], $token)->status());
+        self::assertSame(422, $this->send($app, 'POST', '/api/prime-builder/v1/documents/' . $copy->id . '/render', ['data' => $copy->decodedContent()['blocks'][0]['data']], $token)->status());
+        // A stale or custom Builder client must not silently replace the broken
+        // copy with a valid but empty layout either, even without a source hash.
+        $empty = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => []]]]];
+        $refused = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/' . $copy->id, ['content' => $empty], $token);
+        self::assertSame(422, $refused->status());
+        self::assertSame([t('plugin::prime-builder.ui.conversion_failed')], json_decode($refused->body(), true)['error']['fields']['content']);
+        self::assertSame($copyBefore, $repository->find($copy->id)?->content);
+        self::assertSame($source->content, $repository->find(1)?->content);
+        self::assertSame($source->contentHtml, $repository->find(1)?->contentHtml);
+
+        // The API reports the refusal in the caller's language, without
+        // weakening the usual ownership check for a different contributor.
+        $pdo->exec("UPDATE pc_users SET locale = 'en' WHERE id = 1");
+        $englishToken = $this->tokens($app)->issue($this->user($app, 1), 'English editor', ['*'])['token'];
+        $english = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/' . $copy->id, ['content' => $empty], $englishToken);
+        self::assertSame(422, $english->status());
+        self::assertSame([t('plugin::prime-builder.ui.conversion_failed', [], 'en')], json_decode($english->body(), true)['error']['fields']['content']);
+        self::assertStringContainsString('Saving in Prime Builder is disabled', $english->body());
+        $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.edit')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $contributor = $this->user($app, 2);
+        $otherToken = $this->tokens($app)->issue($contributor, 'other editor', ['*'])['token'];
+        self::assertSame(404, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/' . $copy->id, ['content' => $empty], $otherToken)->status());
+        $app->get(\Prime\Auth\Auth::class)->login($contributor);
+        self::assertSame(404, $this->send($app, 'GET', '/admin/prime-builder/edit/' . $copy->id)->status());
+        self::assertSame($copyBefore, $repository->find($copy->id)?->content);
+    }
+
+    public function testExistingBuilderLayoutIsValidatedWithoutDiscardingInvalidData(): void
+    {
+        $app = $this->activated('admin');
+        $originals = \PrimeBuilder\Widgets\OriginalContent::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($originals);
+        // A payload with no media_ids is also the format saved before media tracking.
+        $payload = $originals->protect(1, 'saved-document', '<div data-legacy="group">Groupe conservé</div>', true);
+        self::assertNotNull($payload);
+        self::assertSame([], $originals->open($payload)['media_ids'] ?? null);
+        $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => [
+            'version' => 1, 'elements' => [[
+                'id' => 'group', 'type' => 'original_group', 'settings' => ['payload' => $payload], 'styles' => [], 'children' => [],
+            ]],
+        ]]]];
+        $user = $this->user($app, 1);
+        $token = $this->tokens($app)->issue($user, 'grouped original', ['*'])['token'];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $repository = $app->get(EntryRepository::class);
+        $source = $repository->find(1);
+        self::assertNotNull($source);
+        self::assertStringContainsString('Groupe conservé', $source->contentHtml);
+        $reopened = $this->editorConfig($app, 1);
+        self::assertSame(false, $reopened['conversionFailed']);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $reopened['document'], 'source_hash' => $reopened['sourceHash']], $token)->status());
+        $source = $repository->find(1);
+        self::assertNotNull($source);
+        self::assertSame($payload, $source->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['payload']);
+        self::assertStringContainsString('Groupe conservé', $source->contentHtml);
+
+        $copy = $app->get(\Prime\Content\EntryService::class)->duplicate(1, $user);
+        self::assertStringNotContainsString('Groupe conservé', $copy->contentHtml);
+        self::assertSame(true, $this->editorConfig($app, $copy->id)['conversionFailed']);
+        self::assertSame($source->content, $repository->find(1)?->content);
+
+        // A broken seal, relabelled group, unsupported widget or malformed
+        // layout must not be silently normalised away when the editor opens.
+        $tampered = $source->decodedContent();
+        $tampered['blocks'][0]['data']['elements'][0]['settings']['payload'] .= 'x';
+        $relabelled = $source->decodedContent();
+        $relabelled['blocks'][0]['data']['elements'][0]['type'] = 'original_content';
+        $unknown = $source->decodedContent();
+        $unknown['blocks'][0]['data']['elements'][] = ['id' => 'removed', 'type' => 'unavailable_widget', 'settings' => [], 'styles' => [], 'children' => []];
+        $badVersion = $source->decodedContent();
+        $badVersion['version'] = 2;
+        $malformed = $source->decodedContent();
+        $malformed['blocks'][0]['data'] = null;
+        $notElements = $source->decodedContent();
+        $notElements['blocks'][0]['data']['elements'] = 'not-an-array';
+        $badChildren = $source->decodedContent();
+        $badChildren['blocks'][0]['data']['elements'][0]['children'] = 'not-an-array';
+        $missingType = $source->decodedContent();
+        unset($missingType['blocks'][0]['type']);
+        $missingData = $source->decodedContent();
+        unset($missingData['blocks'][0]['data']);
+        $badVersionType = $source->decodedContent();
+        $badVersionType['version'] = '2';
+        $filteredBlock = $source->decodedContent();
+        $filteredBlock['blocks'][] = 'invalid-block';
+        $statement = $this->db($app)->pdo()->prepare('UPDATE pc_entries SET content = ? WHERE id = 1');
+        foreach ([$tampered, $relabelled, $unknown, $badVersion, $malformed, $notElements, $badChildren, $missingType, $missingData, $badVersionType, $filteredBlock] as $invalid) {
+            $serialized = (string) json_encode($invalid, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $statement->execute([$serialized]);
+            $config = $this->editorConfig($app, 1);
+            self::assertSame(true, $config['conversionFailed']);
+            self::assertSame(false, $config['converted']);
+            $replacement = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => []]]]];
+            self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $replacement], $token)->status());
+            $current = $repository->find(1);
+            self::assertNotNull($current);
+            self::assertSame($serialized, $current->content);
+            self::assertSame($source->contentHtml, $current->contentHtml);
+        }
+    }
+
+    public function testStoredBuilderWithOptionalElementPropertiesOmittedIsStillValid(): void
+    {
+        $app = $this->activated('admin');
+        $document = ['version' => 1, 'blocks' => [['id' => 'layout', 'type' => 'prime-builder/layout', 'data' => [
+            'version' => 1, 'elements' => [
+                ['id' => 'empty', 'type' => 'container', 'settings' => null, 'styles' => null, 'children' => null],
+                ['id' => 'parent', 'type' => 'container', 'children' => [['id' => 'minimal', 'type' => 'heading']]],
+            ],
+        ]]]];
+        $raw = (string) json_encode($document);
+        $statement = $this->db($app)->pdo()->prepare('UPDATE pc_entries SET content = ? WHERE id = 1');
+        $statement->execute([$raw]);
+        $config = $this->editorConfig($app, 1);
+        self::assertSame(false, $config['conversionFailed']);
+        self::assertSame($document, $config['document']);
+        self::assertSame($raw, $app->get(EntryRepository::class)->find(1)?->content);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'optional properties', ['*'])['token'];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $config['document'], 'source_hash' => $config['sourceHash']], $token)->status());
+        $saved = $app->get(EntryRepository::class)->find(1);
+        $elements = $saved->decodedContent()['blocks'][0]['data']['elements'];
+        self::assertSame([], $elements[0]['settings']);
+        self::assertSame([], $elements[0]['styles']);
+        self::assertSame([], $elements[0]['children']);
+        self::assertSame([], $elements[1]['children'][0]['settings']);
+    }
+
+    public function testCorruptStoredJsonIsNotOverwrittenButEmptyDocumentsKeepSeparateHtml(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $repository = $app->get(EntryRepository::class);
+        $originals = \PrimeBuilder\Widgets\OriginalContent::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($originals);
+        $statement = $pdo->prepare('UPDATE pc_entries SET content = ?, content_html = ? WHERE id = 1');
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'raw document guard', ['*'])['token'];
+        $replacement = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => []]]]];
+        $savedHtml = '<p data-legacy="standalone">Contenu sauvegardé séparément</p>';
+
+        // decodedContent() maps bad JSON and JSON scalars to empty blocks; this
+        // must not authorize replacing the original bytes, even if HTML exists.
+        foreach (['{"version":1,"blocks":[', '{"version":1,"blocks":[]} trailing', 'null', 'false', '17', '"raw text"', '[{"type":"prime-builder/layout"}]', '{"unexpected":"unrecognized data"}', '{"version":2}', '{"version":"1","blocks":[]}'] as $raw) {
+            foreach (['', $savedHtml] as $html) {
+                $statement->execute([$raw, $html]);
+                $config = $this->editorConfig($app, 1);
+                self::assertSame(true, $config['conversionFailed'], $raw);
+                self::assertSame(false, $config['converted'], $raw);
+                self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $replacement], $token)->status(), $raw);
+                $entry = $repository->find(1);
+                self::assertNotNull($entry);
+                self::assertSame($raw, $entry->content);
+                self::assertSame($html, $entry->contentHtml);
+            }
+        }
+
+        // The core accepts a blank input, empty roots and omitted version/blocks.
+        // Those empty documents can still have a saved HTML snapshot to preserve.
+        foreach (['', " \n\t", '{}', '[]', '{"version":1}', '{"blocks":[]}', '{"version":1,"blocks":[]}'] as $raw) {
+            $statement->execute([$raw, $savedHtml]);
+            $config = $this->editorConfig($app, 1);
+            self::assertSame(false, $config['conversionFailed'], $raw);
+            self::assertSame(true, $config['converted'], $raw);
+            $element = $config['document']['blocks'][0]['data']['elements'][0];
+            self::assertSame('original_group', $element['type']);
+            self::assertSame($savedHtml, $originals->open($element['settings']['payload'])['html'] ?? null);
+            self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $config['document'], 'source_hash' => $config['sourceHash']], $token)->status(), $raw);
+            $saved = $repository->find(1);
+            self::assertNotNull($saved);
+            self::assertStringContainsString($savedHtml, $saved->contentHtml);
+        }
+        foreach (['', '{"version":1,"blocks":[]}'] as $raw) {
+            $statement->execute([$raw, '']);
+            $config = $this->editorConfig($app, 1);
+            self::assertSame(false, $config['conversionFailed'], $raw);
+            self::assertSame([], $config['document']['blocks'][0]['data']['elements']);
+            self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $config['document']], $token)->status(), $raw);
+        }
+    }
+
+    public function testMixedDocumentCannotHideInvalidBuilderLayoutBehindGroupedFallback(): void
+    {
+        $app = $this->activated('admin');
+        $originals = \PrimeBuilder\Widgets\OriginalContent::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($originals);
+        $valid = $originals->protect(1, 'saved-document', '<p>Fragment conservé</p>', true);
+        $foreign = $originals->protect(2, 'saved-document', '<p>Autre entrée privée</p>', true);
+        self::assertNotNull($valid);
+        self::assertNotNull($foreign);
+        $document = ['version' => 1, 'blocks' => [
+            ['id' => 'unavailable', 'type' => 'missing/block', 'data' => []],
+            ['id' => 'builder', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => [[
+                'id' => 'group', 'type' => 'original_group', 'settings' => ['payload' => $valid], 'styles' => [], 'children' => [],
+            ]]]],
+        ]];
+        // The saved output has no reproducible individual boundaries, forcing
+        // the converter's grouped fallback rather than the per-block loop.
+        $html = '<p>Instantané complet conservé</p>';
+        $statement = $this->db($app)->pdo()->prepare('UPDATE pc_entries SET content = ?, content_html = ? WHERE id = 1');
+        $statement->execute([(string) json_encode($document), $html]);
+        $validConfig = $this->editorConfig($app, 1);
+        self::assertSame(false, $validConfig['conversionFailed']);
+        self::assertSame(true, $validConfig['converted']);
+        $group = $validConfig['document']['blocks'][0]['data']['elements'][0];
+        self::assertSame('original_group', $group['type']);
+        self::assertSame($html, $originals->open($group['settings']['payload'])['html'] ?? null);
+
+        // A foreign seal or unknown widget must never be replaced with a new
+        // grouped seal of incomplete HTML, even when boundaries cannot be found.
+        $invalid = $document;
+        $invalid['blocks'][1]['data']['elements'][0]['settings']['payload'] = $foreign;
+        $unknown = $document;
+        $unknown['blocks'][1]['data']['elements'][] = ['id' => 'unknown', 'type' => 'missing_widget', 'settings' => [], 'styles' => [], 'children' => []];
+        $badVersion = $document;
+        $badVersion['version'] = 2;
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'mixed layout', ['*'])['token'];
+        $replacement = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => []]]]];
+        foreach ([$invalid, $unknown, $badVersion] as $case) {
+            $serialized = (string) json_encode($case);
+            $statement->execute([$serialized, $html]);
+            $config = $this->editorConfig($app, 1);
+            self::assertSame(true, $config['conversionFailed']);
+            self::assertSame(false, $config['converted']);
+            self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $replacement], $token)->status());
+            $entry = $app->get(EntryRepository::class)->find(1);
+            self::assertNotNull($entry);
+            self::assertSame($serialized, $entry->content);
+            self::assertSame($html, $entry->contentHtml);
+        }
     }
 
     public function testConvertedOriginalsKeepCoreMediaReferencesUntilRemoved(): void

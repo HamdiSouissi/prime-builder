@@ -235,7 +235,7 @@ return [
         'anchor' => 'Ancre',
     ],
     'ui' => [
-        'conversion_failed' => 'Impossible de convertir ce contenu sans risquer de perdre son HTML enregistré. L’enregistrement est désactivé ; revenez à Prime Editor.',
+        'conversion_failed' => 'Ce contenu n’est pas valide pour cette entrée ou ne peut pas être converti sans risque de perte. L’enregistrement dans Prime Builder est désactivé ; vérifiez le contenu d’origine et vos sauvegardes.',
         'preview_location_error' => 'Aperçu non actualisé : le contenu du thème ne peut pas être identifié sans ambiguïté. L’enregistrement reste possible, mais vérifiez le résultat sur le site.',
         'original_read_only' => 'Ce contenu d’origine ne peut pas être modifié ici. Vous pouvez le déplacer ou le supprimer.',
         'html_read_only' => 'Le code HTML est en lecture seule pour votre compte. Vous pouvez déplacer ou supprimer cet élément ; sa création et sa modification exigent une permission dédiée.',

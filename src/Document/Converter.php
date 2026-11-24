@@ -30,7 +30,51 @@ final class Converter
     {
         $document = $entry->decodedContent();
         $blocks = $document['blocks'];
-        if (count($blocks) === 1 && $blocks[0]['type'] === 'prime-builder/layout') {
+        // The CMS decoder maps corrupt/scalar JSON to empty blocks, filters
+        // non-array blocks and defaults malformed versions. Do not silently
+        // turn discarded stored data into an edit. Blank input is accepted by
+        // the core and can still have a separately saved HTML snapshot.
+        $raw = json_decode($entry->content, true);
+        if (!is_array($raw)) {
+            if (trim($entry->content, " \t\r\n") !== '') {
+                return null;
+            }
+            $raw = [];
+        }
+        if ((array_key_exists('version', $raw) && $raw['version'] !== 1)
+            || (!array_key_exists('blocks', $raw) && array_diff_key($raw, ['version' => true]) !== [])) {
+            return null;
+        }
+        if (array_key_exists('blocks', $raw)
+            && (!is_array($raw['blocks']) || !array_is_list($raw['blocks']) || count($raw['blocks']) !== count($blocks))) {
+            return null;
+        }
+        $layouts = [];
+        // Validate every saved Builder block before attempting the grouped-HTML
+        // fallback. A core duplicate may contain fragments bound to its source;
+        // grouping its incomplete rendered output would otherwise hide that loss.
+        foreach ($blocks as $index => $block) {
+            if (!$this->usableBlock($block)) {
+                return null;
+            }
+            if ($block['type'] !== 'prime-builder/layout') {
+                continue;
+            }
+            $data = Layout::fromDocument(['blocks' => [$block]]);
+            if ($document['version'] !== 1 || $data === null) {
+                return null;
+            }
+            try {
+                $validated = (new Validator($this->registry, $this->sanitizer, $this->blocks, $this->originals, $entry->id))->validate($data);
+                if ($validated['errors'] !== []) {
+                    return null;
+                }
+                $layouts[$index] = $validated['data'];
+            } catch (Throwable) {
+                return null;
+            }
+        }
+        if (count($blocks) === 1 && isset($layouts[0])) {
             return $document;
         }
         if ($blocks === []) {
@@ -56,11 +100,11 @@ final class Converter
                 $type = $block['type'];
                 $data = $block['data'];
                 if ($type === 'prime-builder/layout') {
-                    $existing = (new Validator($this->registry, $this->sanitizer, $this->blocks, $this->originals, $entry->id))->validate($data);
-                    if ($existing['errors'] !== [] || !is_array($existing['data']['elements'] ?? null)) {
+                    $elements = $layouts[$index]['elements'] ?? null;
+                    if (!is_array($elements)) {
                         return null;
                     }
-                    foreach ($existing['data']['elements'] as $element) {
+                    foreach ($elements as $element) {
                         $children[] = $element;
                     }
                     continue;
@@ -106,6 +150,12 @@ final class Converter
         } catch (Throwable) {
             return null;
         }
+    }
+
+    /** @param array<string, mixed> $block */
+    private function usableBlock(array $block): bool
+    {
+        return is_string($block['type'] ?? null) && $block['type'] !== '' && is_array($block['data'] ?? null);
     }
 
     /**

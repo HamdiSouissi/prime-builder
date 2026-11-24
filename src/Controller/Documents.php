@@ -256,6 +256,7 @@ final class Documents
         $html = $this->plugin->views()->render('prime-builder::admin/builder', [
             'entry' => $entry,
             'canTemplates' => $config['canTemplates'],
+            'conversionFailed' => $config['conversionFailed'],
             'configJson' => json_encode($config, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) ?: '{}',
             'cssUrl' => $this->plugin->url('css/editor.css'),
             'jsUrl' => $this->plugin->url('js/editor.js'),
@@ -289,8 +290,23 @@ final class Documents
         if (!is_array($data)) {
             return ApiError::response('validation_failed', 422, $request);
         }
+        $registry = new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class));
+        $sanitizer = $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class);
+        $coreBlocks = $this->plugin->app()->get(BlockRegistry::class);
+        $originals = OriginalContent::fromAppKey($this->plugin->app()->config()->get('app.key'));
+        try {
+            $editable = (new Converter($coreBlocks, $sanitizer, $registry, $originals))->convert($entry) !== null;
+        } catch (\Throwable) {
+            $editable = false;
+        }
+        if (!$editable) {
+            // Enforce the editor's fail-closed state for stale/custom clients as
+            // well: a valid empty replacement must not silently erase bad data.
+            $message = t('plugin::prime-builder.ui.conversion_failed', [], ApiError::locale($request));
+            return ApiError::response('validation_failed', 422, $request, ['fields' => ['content' => [$message]]]);
+        }
         // The CMS block validator has no entry context; enforce entry binding here too.
-        $validator = new Validator(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->app()->get(BlockRegistry::class), OriginalContent::fromAppKey($this->plugin->app()->config()->get('app.key')), $entry->id);
+        $validator = new Validator($registry, $sanitizer, $coreBlocks, $originals, $entry->id);
         $validated = $validator->validate($data);
         if ($validated['errors'] !== []) {
             return ApiError::response('validation_failed', 422, $request, ['fields' => ['content' => $validated['errors']]]);

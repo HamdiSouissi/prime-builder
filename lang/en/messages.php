@@ -235,7 +235,7 @@ return [
         'anchor' => 'Anchor',
     ],
     'ui' => [
-        'conversion_failed' => 'This content cannot be converted without risking loss of saved HTML. Saving is disabled; return to Prime Editor.',
+        'conversion_failed' => 'This content is not valid for this entry or cannot be converted without risking data loss. Saving in Prime Builder is disabled; check the original content and your backups.',
         'preview_location_error' => 'Preview not updated: the theme content cannot be identified unambiguously. You can still save, but check the result on the site.',
         'original_read_only' => 'This original content cannot be edited here. You can move or delete it.',
         'html_read_only' => 'HTML is read-only for your account. You can move or delete this element; creating or changing it requires a dedicated permission.',

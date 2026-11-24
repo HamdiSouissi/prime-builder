@@ -1,6 +1,16 @@
 /** Immutable tree operations shared by the editor and its tests. */
 export const clone = value => structuredClone(value);
 export function id() { return `pb_${globalThis.crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`; }
+// Only fill optional node fields on an already validated tree. This is not a
+// validator: failed conversions must never be passed to the editable model.
+export function withElementDefaults(elements) {
+  return elements.map(element => ({
+    ...element,
+    settings: element.settings ?? {},
+    styles: element.styles ?? {},
+    children: withElementDefaults(element.children ?? []),
+  }));
+}
 export function createElement(type) {
   const defaults = {
     container: { layout: 'flex', direction: 'column', columns: 1 }, heading: { level: 2 },

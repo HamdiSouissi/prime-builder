@@ -6,6 +6,7 @@ declare(strict_types=1);
 /** @var \Prime\Content\Entry $entry */
 /** @var string $configJson */
 /** @var bool $canTemplates */
+/** @var bool $conversionFailed */
 /** @var string $cssUrl */
 /** @var string $jsUrl */
 ?>
@@ -21,13 +22,13 @@ declare(strict_types=1);
 </head>
 <body>
 <a class="pb-skip" href="#pb-canvas"><?= $this->e(t('plugin::prime-builder.ui.skip')) ?></a>
-<div class="pb-app" data-pb-app>
+<div class="pb-app" data-pb-app<?= $conversionFailed ? ' data-pb-blocked' : '' ?>>
     <textarea hidden data-pb-config><?= $this->e($configJson) ?></textarea>
     <header class="pb-topbar">
         <div class="pb-brand"><span class="pb-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16v4H4zm0 7h7v7H4zm10 0h6v3h-6zm0 5h6v2h-6z" fill="currentColor"/></svg></span><span><strong><?= $this->e(t('plugin::prime-builder.menu')) ?></strong><small><?= $this->e($entry->title) ?></small></span></div>
-        <div class="pb-top-actions"><button type="button" class="pb-button pb-button-quiet" data-pb-command-open aria-haspopup="dialog"><?= $this->e(t('plugin::prime-builder.ui.commands')) ?> <span aria-hidden="true"><?= $this->e(t('plugin::prime-builder.ui.command_hint')) ?></span></button><span class="pb-save-state" data-pb-save-state aria-live="polite"></span><a class="pb-button pb-button-quiet" href="<?= $this->e($entry->editUrl()) ?>"><?= $this->e(t('plugin::prime-builder.ui.back')) ?></a><button type="button" class="pb-button pb-button-primary" data-pb-save><?= $this->e(t('plugin::prime-builder.ui.save')) ?></button></div>
+        <div class="pb-top-actions"><button type="button" class="pb-button pb-button-quiet" data-pb-command-open aria-haspopup="dialog"><?= $this->e(t('plugin::prime-builder.ui.commands')) ?> <span aria-hidden="true"><?= $this->e(t('plugin::prime-builder.ui.command_hint')) ?></span></button><span class="pb-save-state" data-pb-save-state aria-live="polite"></span><a class="pb-button pb-button-quiet" data-pb-return href="<?= $this->e($entry->editUrl()) ?>"><?= $this->e(t('plugin::prime-builder.ui.back')) ?></a><button type="button" class="pb-button pb-button-primary" data-pb-save<?= $conversionFailed ? ' disabled' : '' ?>><?= $this->e(t('plugin::prime-builder.ui.save')) ?></button></div>
     </header>
-    <p class="pb-conversion-warning" data-pb-conversion-warning role="alert" hidden><?= $this->e(t('plugin::prime-builder.ui.conversion_failed')) ?></p>
+    <p class="pb-conversion-warning" data-pb-conversion-warning role="alert"<?= $conversionFailed ? '' : ' hidden' ?>><?= $this->e(t('plugin::prime-builder.ui.conversion_failed')) ?></p>
     <p class="pb-conversion-warning" data-pb-preview-warning role="alert" hidden><?= $this->e(t('plugin::prime-builder.ui.preview_location_error')) ?></p>
     <p class="pb-conversion-warning" data-pb-group-warning role="status" aria-live="polite" hidden><?= $this->e(t('plugin::prime-builder.ui.original_group_warning')) ?></p>
     <div class="pb-workspace">
@@ -47,7 +48,7 @@ declare(strict_types=1);
             <section class="pb-panel-content" data-pb-library-panel hidden>
                 <h2><?= $this->e(t('plugin::prime-builder.ui.library')) ?></h2>
                 <p class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.library_intro')) ?></p>
-                <div class="pb-library-actions"><?php if ($canTemplates): ?><label class="pb-library-import"><?= $this->e(t('plugin::prime-builder.ui.import')) ?><input type="file" accept="application/json,.json" data-pb-import></label><?php endif; ?><button type="button" data-pb-export><?= $this->e(t('plugin::prime-builder.ui.export')) ?></button></div>
+                <div class="pb-library-actions"><?php if ($canTemplates): ?><label class="pb-library-import"><?= $this->e(t('plugin::prime-builder.ui.import')) ?><input type="file" accept="application/json,.json" data-pb-import<?= $conversionFailed ? ' disabled' : '' ?>></label><?php endif; ?><button type="button" data-pb-export<?= $conversionFailed ? ' disabled' : '' ?>><?= $this->e(t('plugin::prime-builder.ui.export')) ?></button></div>
                 <p class="pb-intro"><?= $this->e(t('plugin::prime-builder.ui.import_help')) ?></p>
                 <div data-pb-library-list></div>
             </section>
@@ -80,7 +81,7 @@ declare(strict_types=1);
         <button type="button" role="menuitem" tabindex="-1" data-pb-context="remove"><?= $this->e(t('plugin::prime-builder.ui.remove')) ?></button>
     </div>
     <span class="pb-sr-only" data-pb-live aria-live="polite"></span>
-    <footer class="pb-bottombar"><div><button type="button" class="pb-icon-button" data-pb-undo title="<?= $this->e(t('plugin::prime-builder.ui.undo')) ?>" aria-label="<?= $this->e(t('plugin::prime-builder.ui.undo')) ?>">↶</button><button type="button" class="pb-icon-button" data-pb-redo title="<?= $this->e(t('plugin::prime-builder.ui.redo')) ?>" aria-label="<?= $this->e(t('plugin::prime-builder.ui.redo')) ?>">↷</button><button type="button" class="pb-history-open" data-pb-history-open aria-haspopup="dialog"><?= $this->e(t('plugin::prime-builder.ui.history')) ?></button><a href="/admin/content/<?= $this->e(rawurlencode($entry->type)) ?>/<?= $this->e((string) $entry->id) ?>/revisions"><?= $this->e(t('plugin::prime-builder.ui.revisions')) ?></a></div><div><label for="pb-status"><?= $this->e(t('plugin::prime-builder.ui.document_status')) ?></label><select id="pb-status" data-pb-status></select><label data-pb-schedule-wrap hidden><?= $this->e(t('plugin::prime-builder.ui.schedule_date')) ?> <input type="datetime-local" data-pb-schedule></label><span class="pb-status-indicator" aria-hidden="true"></span></div></footer>
+    <footer class="pb-bottombar"><div><button type="button" class="pb-icon-button" data-pb-undo<?= $conversionFailed ? ' disabled' : '' ?> title="<?= $this->e(t('plugin::prime-builder.ui.undo')) ?>" aria-label="<?= $this->e(t('plugin::prime-builder.ui.undo')) ?>">↶</button><button type="button" class="pb-icon-button" data-pb-redo<?= $conversionFailed ? ' disabled' : '' ?> title="<?= $this->e(t('plugin::prime-builder.ui.redo')) ?>" aria-label="<?= $this->e(t('plugin::prime-builder.ui.redo')) ?>">↷</button><button type="button" class="pb-history-open" data-pb-history-open aria-haspopup="dialog"><?= $this->e(t('plugin::prime-builder.ui.history')) ?></button><a href="/admin/content/<?= $this->e(rawurlencode($entry->type)) ?>/<?= $this->e((string) $entry->id) ?>/revisions"><?= $this->e(t('plugin::prime-builder.ui.revisions')) ?></a></div><div><label for="pb-status"><?= $this->e(t('plugin::prime-builder.ui.document_status')) ?></label><select id="pb-status" data-pb-status<?= $conversionFailed ? ' disabled' : '' ?>></select><label data-pb-schedule-wrap hidden><?= $this->e(t('plugin::prime-builder.ui.schedule_date')) ?> <input type="datetime-local" data-pb-schedule<?= $conversionFailed ? ' disabled' : '' ?>></label><span class="pb-status-indicator" aria-hidden="true"></span></div></footer>
 </div>
 <dialog class="pb-command-dialog" data-pb-commands aria-labelledby="pb-command-title">
     <div class="pb-command-head"><h2 id="pb-command-title"><?= $this->e(t('plugin::prime-builder.ui.commands')) ?></h2><button type="button" data-pb-command-close aria-label="<?= $this->e(t('plugin::prime-builder.ui.close')) ?>">×</button></div>

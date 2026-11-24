@@ -1,4 +1,4 @@
-import { History, add, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update } from './model.js';
+import { History, add, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -14,7 +14,10 @@ const $$ = selector => [...root.querySelectorAll(selector)];
 const originalBlocks = config.document.blocks || [];
 const savedLayout = originalBlocks.find(block => block.type === 'prime-builder/layout');
 const foreign = Boolean(config.conversionFailed) || (originalBlocks.length > 0 && (!savedLayout || originalBlocks.length !== 1));
-let history = new History(savedLayout?.data?.elements || [], 100, ui.history_initial);
+// Failed conversions may contain arbitrary or malformed data. Do not feed it
+// into the editable tree: it remains untouched in the saved entry instead.
+const initialElements = !foreign && Array.isArray(savedLayout?.data?.elements) ? withElementDefaults(savedLayout.data.elements) : [];
+let history = new History(initialElements, 100, ui.history_initial);
 let selected = null;
 let device = 'desktop';
 let tab = 'content';
@@ -126,7 +129,7 @@ function renderWidgets() {
     for (const [type, definition] of definitions) {
       const card = document.createElement('div'); card.className = 'pb-widget-card';
       const button = document.createElement('button'); button.type = 'button'; button.className = 'pb-widget';
-      button.draggable = true; button.setAttribute('aria-label', `${ui.add} ${definition.label}`);
+      button.disabled = foreign; button.draggable = !foreign; button.setAttribute('aria-label', `${ui.add} ${definition.label}`);
       button.append(text('span', defaults[type] || '◇', 'pb-widget-icon'), text('span', definition.label));
       button.addEventListener('click', () => addWidget(type));
       button.addEventListener('dragstart', event => { event.dataTransfer.setData('text/prime-builder-widget', type); event.dataTransfer.effectAllowed = 'copy'; });
@@ -345,7 +348,9 @@ function renderLibrary() {
     const card = document.createElement('div'); card.className = 'pb-template-card';
     const info = document.createElement('div'); info.append(text('strong', template.name), text('small', template.kind === 'page' ? ui.page_template : ui.section_template));
     const button = text('button', ui.insert); button.type = 'button'; button.setAttribute('aria-label', `${ui.insert} ${template.name}`);
-    if (!config.canHtml && hasHtml(template.elements)) { button.disabled = true; button.title = ui.html_read_only; }
+    if (foreign || (!config.canHtml && hasHtml(template.elements))) {
+      button.disabled = true; button.title = foreign ? ui.conversion_failed : ui.html_read_only;
+    }
     button.addEventListener('click', () => insertTemplate(template));
     const actions = document.createElement('div'); actions.className = 'pb-template-actions'; actions.append(button);
     if (config.canTemplates && template.id) {
@@ -430,7 +435,7 @@ if (templateDialog) {
   });
 }
 async function importDocument(file) {
-  if (!config.canTemplates) return;
+  if (!config.canTemplates || !ensureLayout()) return;
   if (!file || file.size > 1048576) { await showMessage(ui.invalid_import); return; }
   try {
     const input = JSON.parse(await file.text());
@@ -1128,7 +1133,17 @@ async function restoreLocalDraft() {
   } catch { /* Unavailable or corrupt local drafts do not block editing. */ }
 }
 if (config.converted && !foreign) { dirty = true; $('[data-pb-save-state]').textContent = ui.unsaved_short; }
-if (foreign) { $('[data-pb-conversion-warning]').hidden = false; $('[data-pb-save]').disabled = true; status.disabled = true; }
+if (foreign) {
+  root.dataset.pbBlocked = '';
+  $('[data-pb-conversion-warning]').hidden = false;
+  $('[data-pb-save]').disabled = true;
+  status.disabled = true; schedule.disabled = true;
+  $$('[data-pb-undo], [data-pb-redo], [data-pb-export], [data-pb-import]').forEach(control => { control.disabled = true; });
+  // Empty/disabled panels can still scroll and need their own keyboard focus.
+  for (const [selector, label] of [['[data-pb-navigator-panel]', ui.navigator], ['[data-pb-library-panel]', ui.library]]) {
+    const content = $(selector); content.tabIndex = 0; content.setAttribute('aria-label', label);
+  }
+}
 restoreLocalDraft();
 $('[data-pb-search]').addEventListener('input', renderWidgets);
 $('[data-pb-import]')?.addEventListener('change', event => { importDocument(event.target.files?.[0]); event.target.value = ''; });
@@ -1242,16 +1257,16 @@ const commandSearch = document.querySelector('[data-pb-command-search]');
 function renderCommands() {
   const target = document.querySelector('[data-pb-command-list]'); target.replaceChildren();
   const commands = [
-    [ui.save, save], [ui.undo, undo], [ui.redo, redo], [ui.history, openHistory],
-    [ui.widgets, () => { panel = 'widgets'; renderPanel(); }],
-    [ui.navigator, () => { panel = 'navigator'; renderPanel(); }],
-    [ui.library, () => { panel = 'library'; renderPanel(); }],
-    ...Object.entries(config.widgets).filter(([, definition]) => !definition.hidden).map(([type, definition]) => [`${ui.add} ${definition.label}`, () => addWidget(type)]),
+    [ui.save, save, foreign], [ui.undo, undo, foreign], [ui.redo, redo, foreign], [ui.history, openHistory, false],
+    [ui.widgets, () => { panel = 'widgets'; renderPanel(); }, false],
+    [ui.navigator, () => { panel = 'navigator'; renderPanel(); }, false],
+    [ui.library, () => { panel = 'library'; renderPanel(); }, false],
+    ...Object.entries(config.widgets).filter(([, definition]) => !definition.hidden).map(([type, definition]) => [`${ui.add} ${definition.label}`, () => addWidget(type), foreign]),
   ];
   const filter = commandSearch.value.trim().toLocaleLowerCase();
-  for (const [label, action] of commands) {
+  for (const [label, action, disabled] of commands) {
     if (!label.toLocaleLowerCase().includes(filter)) continue;
-    const button = text('button', label); button.type = 'button';
+    const button = text('button', label); button.type = 'button'; button.disabled = disabled;
     button.addEventListener('click', () => { commandDialog.close(); action(); }); target.append(button);
   }
   if (!target.children.length) target.append(text('p', ui.command_empty, 'pb-empty'));
