@@ -7,13 +7,19 @@
     template.innerHTML = html;
     const ids = new Map();
     const used = new Set();
+    const unique = base => {
+      let next = base, suffix = 2;
+      // A theme, another zone or the original entry can already own a generated
+      // target. Reserve both HTML IDs and image-map names before inserting.
+      while (used.has(next) || document.getElementById(next) ||
+        [...document.getElementsByName(next)].some(node => node.tagName.toLowerCase() === 'map')) next = `${base}-${suffix++}`;
+      used.add(next);
+      return next;
+    };
     for (const element of template.content.querySelectorAll('[id]')) {
       const old = element.id;
       if (!old) continue;
-      const base = `pb-zone-${widgetId}-${old}`;
-      let next = base, suffix = 2;
-      while (used.has(next)) next = `${base}-${suffix++}`;
-      used.add(next);
+      const next = unique(`pb-zone-${widgetId}-${old}`);
       if (!ids.has(old)) ids.set(old, next);
       element.id = next;
     }
@@ -22,7 +28,7 @@
     for (const map of template.content.querySelectorAll('map[name]')) {
       const old = map.getAttribute('name');
       if (!old) continue;
-      const next = `pb-zone-${widgetId}-map-${++mapNumber}`;
+      const next = unique(`pb-zone-${widgetId}-map-${++mapNumber}`);
       if (!maps.has(old)) maps.set(old, next);
       map.setAttribute('name', next);
     }
