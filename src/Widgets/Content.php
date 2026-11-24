@@ -45,6 +45,10 @@ final class Content
     /** @var array<int, true> */
     private array $renderingEntryContent = [];
 
+    // Core renders a zone with no Entry, even when the zone is being copied by
+    // a live widget in an entry. This context is scoped to that rendering only.
+    private ?Entry $zoneShareEntry = null;
+
     public function __construct(
         private readonly EntryQuery $query,
         private readonly ContentTypeRegistry $types,
@@ -735,6 +739,7 @@ final class Content
     /** @param array<string, mixed> $settings */
     public function shareButtons(array $settings, ?Entry $entry): string
     {
+        $entry ??= $this->zoneShareEntry;
         $url = $entry !== null ? $this->urls->absolute($this->urls->entryUrl($entry)) : '';
         return ShareButtons::render($settings, $url);
     }
@@ -757,7 +762,7 @@ final class Content
     }
 
     /** @param array<string, mixed> $settings */
-    public function themeZone(array $settings, bool $live): string
+    public function themeZone(array $settings, bool $live, ?Entry $entry = null): string
     {
         $slug = is_string($settings['zone'] ?? null) ? $settings['zone'] : '';
         if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/D', $slug) !== 1) {
@@ -770,7 +775,15 @@ final class Content
         if ($this->themes === null || $this->zones === null || !isset($this->themes->zones()[$slug])) {
             return '';
         }
-        return $this->zones->renderLive($slug, $this->dynamicBlocks);
+        $previous = $this->zoneShareEntry;
+        $this->zoneShareEntry = $entry;
+        try {
+            return $this->zones->renderLive($slug, $this->dynamicBlocks);
+        } finally {
+            // A native zone or another entry rendered later must never inherit
+            // this URL, including when a zone renderer throws.
+            $this->zoneShareEntry = $previous;
+        }
     }
 
     /** @param array<string, mixed> $settings */

@@ -2784,6 +2784,71 @@ final class IntegrationTest extends TestCase
         self::assertSame(200, $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live')->status());
     }
 
+    public function testZoneShareUsesItsOwningEntryOnlyWhileRenderingTheLiveCopy(): void
+    {
+        $app = $this->activated('admin');
+        $this->db($app)->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $zone = ['version' => 1, 'blocks' => [[
+            'id' => 'builder', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => [[
+                'id' => 'share', 'type' => 'share_buttons', 'settings' => ['message' => 'Bonjour & merci', 'linkedin' => 'hide'], 'styles' => [], 'children' => [],
+            ]]],
+        ]]];
+        $zones->save('sidebar', $zone);
+        // A zone rendered directly by the CMS has no entry context and must not
+        // accidentally inherit a previous live copy's URL.
+        self::assertStringNotContainsString('data-pb-share-service', $zones->renderLive('sidebar'));
+
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'zone share', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'zone', 'type' => 'theme_zone', 'settings' => ['zone' => 'sidebar'], 'styles' => [], 'children' => [],
+        ]];
+        foreach ([1, 2] as $id) {
+            $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/' . $id, ['content' => $document], $token);
+            self::assertSame(200, $saved->status(), $saved->body());
+        }
+        $urls = $app->get(UrlGenerator::class);
+        $expected = [];
+        foreach ([1, 2] as $id) {
+            $entry = $app->get(EntryRepository::class)->find($id);
+            self::assertNotNull($entry);
+            $expected[$id] = $urls->absolute($urls->entryUrl($entry));
+            self::assertStringNotContainsString('data-pb-share-service', $entry->contentHtml, 'Saved HTML must not freeze the zone');
+            $live = $this->send($app, 'GET', '/api/prime-builder/v1/documents/' . $id . '/live');
+            self::assertSame(200, $live->status(), $live->body());
+            self::assertStringContainsString('no-store', (string) $live->header('Cache-Control'));
+            $html = json_decode($live->body(), true)['data']['widgets']['zone'];
+            self::assertStringContainsString('data-pb-share data-pb-share-message="Bonjour &amp; merci"', $html);
+            self::assertStringContainsString('facebook.com/sharer/sharer.php?u=' . rawurlencode($expected[$id]), $html);
+            self::assertStringNotContainsString('linkedin.com', $html);
+            self::assertStringNotContainsString('data-pb-share-service', $zones->renderLive('sidebar'), 'Zone context must be cleared after each rendering');
+        }
+        self::assertNotSame($expected[1], $expected[2]);
+        $app->get(\Prime\Auth\Auth::class)->logout();
+        self::assertSame(404, $this->send($app, 'GET', '/api/prime-builder/v1/documents/2/live')->status());
+        self::assertSame(200, $this->send($app, 'GET', '/api/prime-builder/v1/documents/1/live')->status());
+        self::assertStringNotContainsString('data-pb-share-service', $zones->renderLive('sidebar'));
+    }
+
+    public function testZoneShareContextIsClearedWhenZoneRenderingFails(): void
+    {
+        $app = $this->activated('admin');
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $content = $app->get(Content::class);
+        $this->db($app)->pdo()->exec('DROP TABLE pc_zones');
+        $failure = null;
+        try {
+            $content->themeZone(['zone' => 'sidebar'], true, $entry);
+        } catch (\Throwable $exception) {
+            $failure = $exception;
+        }
+        self::assertInstanceOf(\Throwable::class, $failure);
+        self::assertStringNotContainsString('data-pb-share-service', $content->shareButtons([], null));
+        self::assertStringContainsString('pb-share-message', $content->shareButtons([], null));
+    }
+
     public function testMapAssetsAndCspAreScopedToThePageAndRespectFrameDenials(): void
     {
         $app = $this->activated(null);
@@ -3465,6 +3530,49 @@ final class IntegrationTest extends TestCase
         self::assertSame(404, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', [
             'node' => 'contact', 'name' => 'Nom', 'email' => 'a@example.test', 'message' => 'Bonjour', 'website' => '', 'token' => $token,
         ])->status());
+    }
+
+    public function testContactFormRejectsPagesWithUnreachableAncestors(): void
+    {
+        $app = $this->activated(null);
+        $this->publishContactForm($app);
+        $pdo = $this->db($app)->pdo();
+        $grandparent = $this->insertGridEntry($pdo, 'page', 'published', 'Grand-parent', 'grand-parent-contact', 1);
+        $parent = $this->insertGridEntry($pdo, 'page', 'published', 'Parent', 'parent-contact', 1, $grandparent);
+        $child = $this->insertGridEntry($pdo, 'page', 'published', 'Enfant', 'enfant-contact', 1, $parent);
+        $source = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($source);
+        $pdo->prepare('UPDATE pc_entries SET content = ? WHERE id = ?')->execute([$source->content, $child]);
+        $path = '/api/prime-builder/v1/forms/' . $child;
+        $start = $this->formRequest($app, 'GET', $path . '/start?node=contact');
+        self::assertSame(200, $start->status(), $start->body());
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $ip = '198.51.100.20';
+        $body = [
+            'node' => 'contact', 'name' => 'Nom', 'email' => 'a@example.test', 'message' => 'Bonjour', 'website' => '',
+            'token' => $tokens->issue($child, 'contact', $ip, time() - 4),
+        ];
+        // A once-valid token must cease to work immediately if any parent is no
+        // longer reachable, even if the child itself remains published.
+        foreach ([
+            ["UPDATE pc_entries SET status = 'draft' WHERE id = " . $grandparent],
+            ["UPDATE pc_entries SET status = 'published', published_at = '2099-01-01 00:00:00' WHERE id = " . $grandparent],
+            ["UPDATE pc_entries SET published_at = '2020-01-01 00:00:00', parent_id = " . $child . ' WHERE id = ' . $grandparent],
+            ['UPDATE pc_entries SET parent_id = 0 WHERE id = ' . $grandparent, 'UPDATE pc_entries SET parent_id = 999999 WHERE id = ' . $child],
+            ['UPDATE pc_entries SET parent_id = ' . $parent . ' WHERE id = ' . $child, "UPDATE pc_entries SET type = 'post' WHERE id = " . $parent],
+        ] as $invalid) {
+            foreach ($invalid as $statement) {
+                $pdo->exec($statement);
+            }
+            self::assertSame(404, $this->formRequest($app, 'GET', $path . '/start?node=contact', ip: $ip)->status());
+            self::assertSame(404, $this->formRequest($app, 'POST', $path . '/submit', $body, $ip)->status());
+        }
+        self::assertSame(0, $this->db($app)->table('prime_builder_submissions')->count());
+        $pdo->exec("UPDATE pc_entries SET type = 'page' WHERE id = " . $parent);
+        self::assertSame(200, $this->formRequest($app, 'GET', $path . '/start?node=contact', ip: $ip)->status());
+        self::assertSame(201, $this->formRequest($app, 'POST', $path . '/submit', $body, $ip)->status());
+        self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->count());
     }
 
     public function testContactFormValidatesAndProtectsRealAnonymousSubmissions(): void

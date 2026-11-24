@@ -8,17 +8,16 @@ use Prime\Admin\AdminContext;
 use Prime\Api\ApiError;
 use Prime\Auth\Auth;
 use Prime\Auth\User;
-use Prime\Content\ContentTypeRegistry;
 use Prime\Content\Entry;
 use Prime\Content\EntryRepository;
 use Prime\Http\Request;
 use Prime\Http\Response;
 use Prime\Plugins\PluginContext;
-use Prime\Site\UrlResolver;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
 use PrimeBuilder\Forms\Tokens;
+use PrimeBuilder\Widgets\Content;
 
 /** A first, deliberately fixed contact form and its protected submission inbox. */
 final class ContactForms
@@ -155,11 +154,9 @@ final class ContactForms
             return false;
         }
         $entry = $this->plugin->app()->get(EntryRepository::class)->find($entryId, false);
-        if (!$entry instanceof Entry || !UrlResolver::isPubliclyVisible($entry)) {
-            return false;
-        }
-        $type = $this->plugin->app()->get(ContentTypeRegistry::class)->get($entry->type);
-        if ($type === null || !$type->public) {
+        // A published page can still be unreachable below a draft, future,
+        // missing or cyclic ancestor. Check again on both start and submit.
+        if (!$entry instanceof Entry || !$this->plugin->app()->get(Content::class)->publiclyAccessibleEntry($entry)) {
             return false;
         }
         $layout = Layout::fromDocument($entry->decodedContent());

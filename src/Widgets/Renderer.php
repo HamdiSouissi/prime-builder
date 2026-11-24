@@ -134,7 +134,7 @@ final class Renderer
                         }
                     } elseif ($type === 'theme_zone') {
                         try {
-                            $output[$id] = $this->content->themeZone($settings, true);
+                            $output[$id] = $this->content->themeZone($settings, true, $this->entry);
                         } catch (Throwable $exception) {
                             $this->logger?->error('Prime Builder theme zone failed', ['message' => $exception->getMessage()]);
                             $output[$id] = '';
@@ -270,7 +270,7 @@ final class Renderer
                 ? ($this->content?->shareButtonsInPage($settings, $this->pageContext) ?? ShareButtons::render($settings, '', false))
                 : ($this->content?->shareButtons($settings, $this->entry) ?? ShareButtons::render($settings, '')),
             'table_of_contents' => ($this->tableOfContents ?? new TableOfContents([]))->render($settings),
-            'theme_zone' => $this->content?->themeZone($settings, $this->live) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>',
+            'theme_zone' => $this->content?->themeZone($settings, $this->live, $this->entry) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>',
             'form' => $this->renderForm($settings, $id),
             'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry, is_string($settings['block_anchor'] ?? null) ? $settings['block_anchor'] : null),
             'original_content' => $this->renderOriginal($settings, false),
