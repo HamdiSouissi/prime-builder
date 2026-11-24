@@ -343,6 +343,37 @@ final class DocumentTest extends TestCase
         self::assertSame('', (new Compiler())->compile(['elements' => [$node]]));
     }
 
+    public function testResponsiveShadowPresetsAreAllowlistedAndCompiled(): void
+    {
+        $node = $this->element('button', 'shadowed');
+        $node['settings'] = ['text' => 'Découvrir', 'url' => '/'];
+        $node['styles'] = [
+            'desktop' => ['box_shadow' => 'soft'],
+            'tablet' => ['box_shadow' => 'strong'],
+            'mobile' => ['box_shadow' => 'none'],
+        ];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame($node['styles'], $result['data']['elements'][0]['styles']);
+        $selector = '.pb-element[data-pb-id="shadowed"]' . $this->legacyGuard($result['data']);
+        $css = (new Compiler(1000, 600))->compile($result['data']);
+        self::assertStringContainsString($selector . '{box-shadow:0 2px 8px rgba(0,0,0,.15);}', $css);
+        self::assertStringContainsString('@media(max-width:1000px){' . $selector . '{box-shadow:0 12px 32px rgba(0,0,0,.28);}}', $css);
+        self::assertStringContainsString('@media(max-width:600px){' . $selector . '{box-shadow:none;}}', $css);
+        foreach (['none' => 'none', 'soft' => '0 2px 8px rgba(0,0,0,.15)', 'medium' => '0 6px 20px rgba(0,0,0,.2)', 'strong' => '0 12px 32px rgba(0,0,0,.28)'] as $preset => $expected) {
+            $node['styles'] = ['desktop' => ['box_shadow' => $preset]];
+            $valid = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+            self::assertSame([], $valid['errors']);
+            self::assertStringContainsString('box-shadow:' . $expected . ';', (new Compiler())->compile($valid['data']));
+        }
+        // Client-supplied CSS and unknown presets are rejected even if the compiler is called directly.
+        foreach (['soft;display:none', '0 0 8px red', 'inherit', '__proto__', 1, true, null, []] as $bad) {
+            $node['styles'] = ['desktop' => ['box_shadow' => $bad]];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+            self::assertSame('', (new Compiler())->compile(['elements' => [$node]]));
+        }
+    }
+
     public function testKitColorReferencesAndTypedLengthUnitsAreValidatedAndCompiled(): void
     {
         $node = $this->element();

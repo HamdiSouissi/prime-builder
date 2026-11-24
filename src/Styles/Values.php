@@ -56,6 +56,18 @@ final class Values
         return is_string($value) && in_array($value, ['none', 'solid', 'dashed', 'dotted', 'double'], true) ? $value : null;
     }
 
+    /** Presets expand to fixed declarations; user-supplied CSS is never interpolated. */
+    public static function boxShadow(mixed $value): ?string
+    {
+        return match ($value) {
+            'none' => 'none',
+            'soft' => '0 2px 8px rgba(0,0,0,.15)',
+            'medium' => '0 6px 20px rgba(0,0,0,.2)',
+            'strong' => '0 12px 32px rgba(0,0,0,.28)',
+            default => null,
+        };
+    }
+
     public static function color(mixed $value): ?string
     {
         if (!is_string($value)) {

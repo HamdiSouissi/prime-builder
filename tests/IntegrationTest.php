@@ -393,6 +393,72 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
     }
 
+    public function testResponsiveShadowPresetsPersistThroughBothApisAndThemeCopies(): void
+    {
+        $app = $this->activated('admin');
+        $app->get(Settings::class)->set('plugin.prime-builder.configuration', ['breakpoint_tablet' => 1000, 'breakpoint_mobile' => 600]);
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Ombre', $config['ui']['box_shadow']);
+        self::assertSame('Légère', $config['ui']['shadow_soft']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'shadow', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'shadowed', 'type' => 'button', 'settings' => ['text' => 'Ombre', 'url' => '/'],
+            'styles' => ['desktop' => ['box_shadow' => 'soft'], 'tablet' => ['box_shadow' => 'strong'], 'mobile' => ['box_shadow' => 'none']],
+            'children' => [],
+        ]];
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $layout = $entry->decodedContent()['blocks'][0]['data'];
+        self::assertSame($document['blocks'][0]['data']['elements'][0]['styles'], $layout['elements'][0]['styles']);
+        self::assertStringNotContainsString('style=', $entry->contentHtml);
+        $css = (new Compiler(1000, 600))->compile($layout);
+        $url = '/prime-builder/css/1-' . substr(hash('sha256', $css), 0, 16) . '.css';
+        self::assertSame($css, $this->send($app, 'GET', $url)->body());
+        self::assertStringContainsString('box-shadow:0 2px 8px rgba(0,0,0,.15);', $css);
+        self::assertStringContainsString('box-shadow:0 12px 32px rgba(0,0,0,.28);', $css);
+        self::assertStringContainsString('box-shadow:none;', $css);
+        $hooks = $app->get(Hooks::class);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringContainsString($url, $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
+        foreach (['soft;display:none', '0 0 8px red', '__proto__'] as $bad) {
+            $invalid = $document;
+            $invalid['blocks'][0]['data']['elements'][0]['styles']['desktop']['box_shadow'] = $bad;
+            self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $invalid], $token)->status());
+            self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $invalid], $token)->status());
+        }
+        self::assertSame($entry->content, $app->get(EntryRepository::class)->find(1)?->content);
+        $document['blocks'][0]['data']['elements'][0]['styles']['mobile']['box_shadow'] = 'medium';
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $layout = $entry->decodedContent()['blocks'][0]['data'];
+        self::assertSame('medium', $layout['elements'][0]['styles']['mobile']['box_shadow']);
+        $template = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Ombre', 'kind' => 'section', 'data' => $layout], $token);
+        self::assertSame(201, $template->status(), $template->body());
+        $templateId = json_decode($template->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $templateId, 'footer' => '', 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry);
+        $header = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($header);
+        self::assertSame(1, preg_match('/data-pb-id="([a-zA-Z0-9_-]+)"/', $header, $idMatches));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\\.css)~', $assets->renderStyles(), $matches));
+        $themeCss = $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''));
+        self::assertSame(200, $themeCss->status());
+        self::assertSame(1, preg_match('/data-pb-owner="([a-f0-9]{24})"/', $header, $ownerMatches));
+        self::assertStringContainsString('.pb-element[data-pb-id="' . ($idMatches[1] ?? '') . '"]:where([data-pb-owner="' . ($ownerMatches[1] ?? '') . '"]){box-shadow:0 2px 8px rgba(0,0,0,.15);}', $themeCss->body());
+        self::assertStringContainsString('box-shadow:0 6px 20px rgba(0,0,0,.2);', $themeCss->body());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
+    }
+
     public function testPlainTextSeparatesRenderedElementsAndNormalizesWhitespace(): void
     {
         $app = $this->activated(null);

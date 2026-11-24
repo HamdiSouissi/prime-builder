@@ -3,6 +3,8 @@ import { History, add, changedElement, containsWidget, createElement, duplicate,
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
 const ui = config.ui;
+// Keep these fixed declarations in sync with Values::boxShadow; no user CSS is interpolated.
+const shadowPresets = Object.freeze({ none: 'none', soft: '0 2px 8px rgba(0,0,0,.15)', medium: '0 6px 20px rgba(0,0,0,.2)', strong: '0 12px 32px rgba(0,0,0,.28)' });
 function newElement(type) {
   const element = createElement(type);
   const defaults = config.widgetDefaults?.[type];
@@ -649,7 +651,8 @@ function renderSettings() {
     const schemas = tab === 'style'
       ? { color: { type: 'color' }, background: { type: 'color' }, font_size: { type: 'length' }, align: { type: 'enum', values: ['left', 'center', 'right'] },
         border_style: { type: 'enum', values: ['none', 'solid', 'dashed', 'dotted', 'double'], option_labels: { none: ui.border_none, solid: ui.border_solid, dashed: ui.border_dashed, dotted: ui.border_dotted, double: ui.border_double } },
-        border_width: { type: 'integer', min: 0, max: 100 }, border_color: { type: 'color' }, radius: { type: 'length' } }
+        border_width: { type: 'integer', min: 0, max: 100 }, border_color: { type: 'color' }, radius: { type: 'length' },
+        box_shadow: { type: 'enum', values: Object.keys(shadowPresets), option_labels: { none: ui.shadow_none, soft: ui.shadow_soft, medium: ui.shadow_medium, strong: ui.shadow_strong } } }
       : { padding: { type: 'length' },
         padding_top: { type: 'length' }, padding_right: { type: 'length' }, padding_bottom: { type: 'length' }, padding_left: { type: 'length' },
         margin: { type: 'length' },
@@ -690,7 +693,7 @@ function renderSettings() {
         // rebuilding the controls or moving keyboard focus.
         sourceHints.forEach(updateHint => updateHint(styles));
       });
-      const warningText = name === 'visibility' ? ui.visibility_warning : name === 'position' ? ui.position_warning : name === 'border_style' ? ui.border_help : null;
+      const warningText = name === 'visibility' ? ui.visibility_warning : name === 'position' ? ui.position_warning : name === 'border_style' ? ui.border_help : name === 'box_shadow' ? ui.shadow_help : null;
       const warning = warningText ? text('small', warningText, 'pb-inherit-hint') : null;
       if (warning) warning.id = id();
       field.querySelectorAll('input,select,textarea').forEach(control => control.setAttribute('aria-describedby', warning ? `${hint.id} ${warning.id}` : hint.id));
@@ -908,6 +911,7 @@ function applyVisualStyles(doc) {
             else if (key === 'border_style' && ['none', 'solid', 'dashed', 'dotted', 'double'].includes(value)) node.style.borderStyle = value;
             else if (key === 'border_width' && Number.isInteger(value) && value >= 0 && value <= 100) node.style.borderWidth = `${value}px`;
             else if (key === 'border_color' && cssColor(value) !== null) node.style.borderColor = cssColor(value);
+            else if (key === 'box_shadow' && typeof value === 'string' && Object.hasOwn(shadowPresets, value)) node.style.boxShadow = shadowPresets[value];
             else if (key === 'width' && cssLength(value, true) !== null) node.style.width = cssLength(value, true);
             else if (key === 'position' && ['static', 'relative', 'absolute', 'fixed', 'sticky'].includes(value)) node.style.position = value;
             else if (['offset_top', 'offset_right', 'offset_bottom', 'offset_left'].includes(key) && cssOffset(value) !== null) node.style[key.slice(7)] = cssOffset(value);

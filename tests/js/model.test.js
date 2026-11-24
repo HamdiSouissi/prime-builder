@@ -175,6 +175,16 @@ test('border overrides inherit independently and clearing them preserves explici
   assert.equal(desktop.tablet, undefined);
   assert.equal(cleared.mobile.border_style, 'none');
 });
+test('shadow presets inherit and explicit none differs from clearing an override', () => {
+  const desktop = setResponsiveStyle({}, 'desktop', 'box_shadow', 'soft');
+  const tablet = setResponsiveStyle(desktop, 'tablet', 'box_shadow', 'none');
+  assert.deepEqual(inheritedStyle(tablet, 'tablet', 'box_shadow'), { mode: 'desktop', value: 'soft' });
+  assert.deepEqual(inheritedStyle(tablet, 'mobile', 'box_shadow'), { mode: 'tablet', value: 'none' });
+  const cleared = setResponsiveStyle(tablet, 'tablet', 'box_shadow', undefined);
+  assert.deepEqual(inheritedStyle(cleared, 'mobile', 'box_shadow'), { mode: 'desktop', value: 'soft' });
+  assert.equal(tablet.tablet.box_shadow, 'none');
+  assert.deepEqual(cleared, desktop);
+});
 test('per-side spacing follows the cascade of side and all-sides values at each breakpoint', () => {
   const styles = {
     desktop: { padding_top: 12, padding: 20, margin: '8px', margin_left: 'auto' },

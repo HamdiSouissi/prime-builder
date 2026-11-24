@@ -143,6 +143,10 @@ final class Compiler
             $style = Values::borderStyle($value);
             return $style !== null ? 'border-style:' . $style . ';' : '';
         }
+        if ($key === 'box_shadow') {
+            $shadow = Values::boxShadow($value);
+            return $shadow !== null ? 'box-shadow:' . $shadow . ';' : '';
+        }
         if ($key === 'align' && is_string($value) && in_array($value, ['left', 'center', 'right'], true)) {
             return 'text-align:' . $value . ';';
         }
