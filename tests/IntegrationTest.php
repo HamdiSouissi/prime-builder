@@ -2336,13 +2336,24 @@ final class IntegrationTest extends TestCase
             ['id' => 'toc', 'type' => 'table_of_contents', 'settings' => ['label' => 'Plan de la page'], 'styles' => [], 'children' => []],
             ['id' => 'first', 'type' => 'heading', 'settings' => ['text' => 'Introduction', 'level' => 2], 'styles' => [], 'children' => []],
             ['id' => 'second', 'type' => 'heading', 'settings' => ['text' => 'Détails', 'level' => 3], 'styles' => [], 'children' => []],
+            ['id' => 'cta', 'type' => 'call_to_action', 'settings' => ['title' => 'Projet & avenir', 'level' => 4], 'styles' => [], 'children' => []],
+            ['id' => 'review', 'type' => 'review', 'settings' => ['title' => 'Notre avis', 'level' => 3], 'styles' => [], 'children' => []],
         ];
         self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
         $entry = $app->get(EntryRepository::class)->find(1);
         self::assertNotNull($entry);
         self::assertStringContainsString('aria-label="Plan de la page"', $entry->contentHtml);
         self::assertStringContainsString('<a href="#pb-toc-first">Introduction</a><ol><li><a href="#pb-toc-second">Détails</a>', $entry->contentHtml);
+        self::assertStringContainsString('<a href="#pb-toc-cta">Projet &amp; avenir</a>', $entry->contentHtml);
+        self::assertStringContainsString('data-pb-id="cta" id="pb-toc-cta" tabindex="-1"', $entry->contentHtml);
+        self::assertStringContainsString('<a href="#pb-toc-review">Notre avis</a>', $entry->contentHtml);
         self::assertStringContainsString('id="pb-toc-first" tabindex="-1"', $entry->contentHtml);
+        $document['blocks'][0]['data']['elements'][3]['settings']['title'] = 'Nouvel intitulé';
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        $previewBody = json_decode($preview->body(), true);
+        self::assertIsArray($previewBody);
+        self::assertStringContainsString('<a href="#pb-toc-cta">Nouvel intitulé</a>', $previewBody['data']['html']);
         $assets = new ThemeAssetRegistry();
         $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/table_of_contents.css'));
@@ -2352,6 +2363,38 @@ final class IntegrationTest extends TestCase
         $assets = new ThemeAssetRegistry();
         $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $other));
         self::assertStringNotContainsString('/assets/plugins/prime-builder/css/widgets/table_of_contents.css', $assets->renderStyles());
+    }
+
+    public function testTableOfContentsStaticWidgetTitlesKeepSeparateTargetsInThemeParts(): void
+    {
+        $app = $this->activated('admin');
+        $elements = [
+            ['id' => 'toc', 'type' => 'table_of_contents', 'settings' => ['label' => 'Sommaire du thème'], 'styles' => [], 'children' => []],
+            ['id' => 'cta', 'type' => 'call_to_action', 'settings' => ['title' => 'Projet partagé', 'level' => 3], 'styles' => [], 'children' => []],
+            ['id' => 'review', 'type' => 'review', 'settings' => ['title' => 'Avis partagé', 'level' => 4], 'styles' => [], 'children' => []],
+        ];
+        $snapshot = ['id' => str_repeat('a', 32), 'name' => 'Modèle partagé', 'elements' => $elements];
+        $app->get(Settings::class)->set('plugin.prime-builder.theme_partials', ['header' => $snapshot, 'footer' => $snapshot, 'exclude' => []]);
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry);
+        $hooks = $app->get(Hooks::class);
+        $targets = [];
+        foreach (['header', 'footer'] as $slot) {
+            $part = $hooks->apply('site.partial', null, $slot, $page, []);
+            self::assertIsString($part);
+            self::assertSame(1, preg_match('~href="#(pb-toc-pbt_' . $slot . '_[a-f0-9]{24})">Projet partagé</a>~', $part, $matches));
+            $target = $matches[1] ?? '';
+            $targets[] = $target;
+            self::assertStringContainsString('id="' . $target . '" tabindex="-1"', $part);
+            self::assertSame(1, substr_count($part, 'id="' . $target . '"'));
+            self::assertStringContainsString('>Avis partagé</a>', $part);
+        }
+        self::assertCount(2, array_unique($targets));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/table_of_contents.css'));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/table_of_contents.js', $assets->renderScripts());
     }
 
     public function testSearchFormPersistsUsableHtmlAndRefreshesTheCoreSearchPath(): void

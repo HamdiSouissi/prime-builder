@@ -296,23 +296,23 @@ jobs:
         run: npm test 2>&1 | tee /tmp/prime-builder-e2e.log
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
-      # Temporary transport for the new duplicate-warning captures: GitHub caps annotations per job.
-      - name: Report duplicate-warning-desktop capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh duplicate-warning-desktop 0
-      - name: Report duplicate-warning-desktop capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh duplicate-warning-desktop 1
-      - name: Report duplicate-warning-desktop capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh duplicate-warning-desktop 2
-      - name: Report duplicate-warning-desktop capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh duplicate-warning-desktop 3
-      - name: Report duplicate-warning-mobile capture part 0
-        run: bash builder/tests/e2e/visual-chunks.sh duplicate-warning-mobile 0
-      - name: Report duplicate-warning-mobile capture part 1
-        run: bash builder/tests/e2e/visual-chunks.sh duplicate-warning-mobile 1
-      - name: Report duplicate-warning-mobile capture part 2
-        run: bash builder/tests/e2e/visual-chunks.sh duplicate-warning-mobile 2
-      - name: Report duplicate-warning-mobile capture part 3
-        run: bash builder/tests/e2e/visual-chunks.sh duplicate-warning-mobile 3
+      # Temporary transport for the new table-of-contents captures: GitHub caps annotations per job.
+      - name: Report toc-widget-public-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh toc-widget-public-desktop 0
+      - name: Report toc-widget-public-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh toc-widget-public-desktop 1
+      - name: Report toc-widget-public-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh toc-widget-public-desktop 2
+      - name: Report toc-widget-public-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh toc-widget-public-desktop 3
+      - name: Report toc-widget-public-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh toc-widget-public-mobile 0
+      - name: Report toc-widget-public-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh toc-widget-public-mobile 1
+      - name: Report toc-widget-public-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh toc-widget-public-mobile 2
+      - name: Report toc-widget-public-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh toc-widget-public-mobile 3
       - name: Report browser test output on failure
         if: failure()
         run: |

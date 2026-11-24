@@ -1584,6 +1584,78 @@ final class DocumentTest extends TestCase
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/table_of_contents.css');
     }
 
+    public function testTableOfContentsIncludesStaticWidgetTitlesOnlyWhenTheyRender(): void
+    {
+        $toc = $this->element('table_of_contents', 'toc');
+        $toc['settings'] = ['label' => 'Plan', 'min_level' => 2, 'max_level' => 6];
+        $anchor = $this->element('anchor', 'manual');
+        $anchor['settings'] = ['anchor' => 'pb-toc-card'];
+        $cases = [
+            'card' => ['title' => 'Carte & conseil'],
+            'icon_box' => ['title' => 'Boîte icône'],
+            'image_box' => ['title' => 'Boîte image'],
+            'form' => ['title' => 'Contact'],
+            'call_to_action' => ['title' => 'Agir ensemble', 'level' => 4],
+            'price_table' => ['title' => 'Offre', 'level' => 5],
+            'price_list' => ['title' => 'Tarifs', 'level' => 3],
+            'review' => ['title' => 'Avis', 'level' => 2],
+            'countdown' => ['title' => 'Échéance', 'level' => 4, 'deadline' => '2030-01-02T03:04'],
+        ];
+        $elements = [$toc, $anchor];
+        foreach ($cases as $type => $settings) {
+            $node = $this->element($type, $type);
+            $node['settings'] = $settings;
+            $elements[] = $node;
+        }
+        $empty = $this->element('price_table', 'empty-title');
+        $empty['settings'] = ['title' => ''];
+        $noDeadline = $this->element('countdown', 'no-deadline');
+        $noDeadline['settings'] = ['title' => 'Échéance sans date'];
+        $defaultCountdown = $this->element('countdown', 'default-countdown');
+        $defaultCountdown['settings'] = ['deadline' => '2030-01-02T03:04'];
+        $zero = $this->element('price_table', 'zero-title');
+        $zero['settings'] = ['title' => '0'];
+        $hidden = $this->element('container', 'hidden-parent');
+        $hidden['hidden'] = true;
+        $hiddenChild = $this->element('review', 'hidden-review');
+        $hiddenChild['settings'] = ['title' => 'Avis masqué'];
+        $hidden['children'] = [$hiddenChild];
+        $elements = [...$elements, $empty, $noDeadline, $defaultCountdown, $zero, $hidden];
+        $validated = $this->validator()->validate(['version' => 1, 'elements' => $elements]);
+        self::assertSame([], $validated['errors']);
+        $renderer = new Renderer(new Registry(), new HtmlSanitizer());
+        $html = $renderer->render($validated['data']);
+        foreach ($cases as $type => $settings) {
+            $target = 'pb-toc-' . $type . ($type === 'card' ? '-2' : '');
+            $label = Renderer::escape($settings['title']);
+            $level = $settings['level'] ?? (in_array($type, ['card', 'icon_box', 'image_box', 'form'], true) ? 3 : 2);
+            self::assertStringContainsString('<a href="#' . $target . '">' . $label . '</a>', $html, $type);
+            self::assertStringContainsString('data-pb-id="' . $type . '" id="' . $target . '" tabindex="-1"', $html, $type);
+            self::assertStringContainsString('<h' . $level . '>' . $label . '</h' . $level . '>', $html, $type);
+        }
+        $defaultLabel = Renderer::escape(t('plugin::prime-builder.widgets.countdown'));
+        self::assertStringContainsString('<a href="#pb-toc-default-countdown">' . $defaultLabel . '</a>', $html);
+        self::assertStringContainsString('<h2>' . $defaultLabel . '</h2>', $html);
+        self::assertStringContainsString('<a href="#pb-toc-zero-title">0</a>', $html);
+        self::assertStringNotContainsString('href="#pb-toc-empty-title"', $html);
+        self::assertStringNotContainsString('href="#pb-toc-no-deadline"', $html);
+        self::assertStringNotContainsString('href="#pb-toc-hidden-review"', $html);
+        self::assertStringNotContainsString('Échéance sans date</a>', $html);
+        self::assertStringNotContainsString('Avis masqué</a>', $html);
+        $withoutToc = $renderer->render(['version' => 1, 'elements' => array_slice($validated['data']['elements'], 1)]);
+        self::assertStringNotContainsString('id="pb-toc-call_to_action"', $withoutToc);
+        self::assertStringContainsString('<h4>Agir ensemble</h4>', $withoutToc);
+
+        $elements[0]['settings']['min_level'] = 4;
+        $elements[0]['settings']['max_level'] = 5;
+        $filtered = $renderer->render($this->validator()->validate(['version' => 1, 'elements' => $elements])['data']);
+        self::assertStringContainsString('href="#pb-toc-call_to_action"', $filtered);
+        self::assertStringContainsString('href="#pb-toc-price_table"', $filtered);
+        self::assertStringContainsString('href="#pb-toc-countdown"', $filtered);
+        self::assertStringNotContainsString('href="#pb-toc-card-2"', $filtered);
+        self::assertStringNotContainsString('href="#pb-toc-review"', $filtered);
+    }
+
     public function testThemeZoneValidatesTheSlugAndHasAReadableFallback(): void
     {
         $node = $this->element('theme_zone');

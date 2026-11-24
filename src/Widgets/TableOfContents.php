@@ -6,7 +6,7 @@ namespace PrimeBuilder\Widgets;
 
 use Prime\Support\Str;
 
-/** A static table of the document's own heading widgets, usable without JavaScript. */
+/** A static table of supported headings in the document, usable without JavaScript. */
 final class TableOfContents
 {
     /** @var list<array{anchor: string, level: int, text: string}> */
@@ -99,6 +99,21 @@ final class TableOfContents
                 if (is_array($data)) {
                     $text = Str::plainText(is_string($data['text'] ?? null) ? $data['text'] : '');
                     $level = in_array($data['level'] ?? null, [2, 3, 4], true) ? $data['level'] : 2;
+                }
+            } elseif (in_array($type, ['card', 'icon_box', 'image_box', 'form'], true)) {
+                // These widgets render a single optional h3 from the title.
+                $text = is_string($settings['title'] ?? null) ? trim($settings['title']) : '';
+                $level = 3;
+            } elseif (in_array($type, ['call_to_action', 'price_table', 'price_list', 'review'], true)) {
+                $text = is_string($settings['title'] ?? null) ? trim($settings['title']) : '';
+                $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
+            } elseif ($type === 'countdown') {
+                // Without a valid deadline the renderer shows a prompt instead of a heading.
+                $deadline = is_string($settings['deadline'] ?? null) ? $settings['deadline'] : '';
+                if (Countdown::canonical($deadline) !== null) {
+                    $text = is_string($settings['title'] ?? null) && trim($settings['title']) !== ''
+                        ? trim($settings['title']) : t('plugin::prime-builder.widgets.countdown');
+                    $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
                 }
             }
             if (is_string($id) && preg_match('/^[a-zA-Z0-9_-]{1,64}$/D', $id) === 1 && trim($text) !== '') {
