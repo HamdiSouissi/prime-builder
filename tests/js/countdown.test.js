@@ -29,13 +29,17 @@ function run(widgets, instant) {
   let now = Date.parse(instant);
   let callback = null;
   let listener = null;
+  let fragmentListener = null;
   let intervals = 0;
   let clears = 0;
   class FakeDate extends Date { static now() { return now; } }
   const document = {
     hidden: false,
     querySelectorAll: () => widgets,
-    addEventListener(type, handler) { if (type === 'visibilitychange') listener = handler; },
+    addEventListener(type, handler) {
+      if (type === 'visibilitychange') listener = handler;
+      if (type === 'prime-builder:fragment') fragmentListener = handler;
+    },
     removeEventListener(type, handler) { if (type === 'visibilitychange' && listener === handler) listener = null; },
   };
   runInNewContext(script, {
@@ -48,6 +52,7 @@ function run(widgets, instant) {
     setTime(iso) { now = Date.parse(iso); },
     tick() { callback?.(); },
     visibility() { listener?.(); },
+    fragment(widgets) { fragmentListener?.({ target: { querySelectorAll: () => widgets } }); },
     get intervals() { return intervals; },
     get clears() { return clears; },
     get listening() { return listener !== null; },
@@ -108,5 +113,30 @@ test('expired deadlines show their status immediately; malformed widgets stay as
   assert.equal(invalid.values.hidden, true);
   assert.equal(incomplete.values.hidden, true);
   assert.equal(clock.intervals, 0);
+  assert.equal(clock.listening, false);
+});
+
+test('late countdowns share and restart the timer after expiry without duplicate intervals', () => {
+  const clock = run([], '2030-01-01T00:00:00Z');
+  const first = widget('2030-01-01T00:00:02Z', 'First finished');
+  clock.fragment([first]);
+  clock.fragment([first]);
+  assert.equal(first.values.hidden, false);
+  assert.equal(clock.intervals, 1);
+  assert.equal(clock.listening, true);
+  clock.setTime('2030-01-01T00:00:02Z');
+  clock.tick();
+  assert.equal(first.status.textContent, 'First finished');
+  assert.equal(clock.clears, 1);
+  assert.equal(clock.listening, false);
+  const second = widget('2030-01-01T00:00:05Z', 'Second finished');
+  clock.fragment([first, second]);
+  clock.fragment([second]);
+  assert.equal(clock.intervals, 2);
+  assert.deepEqual(counts(second), ['0', '0', '0', '3']);
+  clock.setTime('2030-01-01T00:00:05Z');
+  clock.tick();
+  assert.equal(second.status.textContent, 'Second finished');
+  assert.equal(clock.clears, 2);
   assert.equal(clock.listening, false);
 });

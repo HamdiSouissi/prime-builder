@@ -21,6 +21,7 @@ function setup(slideCount = 2) {
     append(node) { this.controls = node; },
   };
   const document = {
+    addEventListener() {},
     querySelectorAll: () => [carousel],
     createElement(tag) {
       return {

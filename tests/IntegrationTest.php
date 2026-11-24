@@ -2542,6 +2542,196 @@ final class IntegrationTest extends TestCase
         self::assertSame($firstCss, $this->send($app, 'GET', '/prime-builder/theme/' . $firstFile)->body(), 'Advertised CSS remains immutable after a zone edit');
     }
 
+    public function testSavedDeclaredZonesBypassPageCacheEvenWhenEmpty(): void
+    {
+        $app = $this->activated('admin');
+        $this->db($app)->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $request = Request::create('GET', '/zone-cache-probe');
+        self::assertTrue($cache->isCacheableRequest($request));
+        $cache->store($request, Response::html('old cached page'));
+        $cached = $cache->lookup($request);
+        self::assertNotNull($cached);
+        self::assertSame('HIT', $cached->header('X-Prime-Cache'));
+        $zones->save('not_declared', ['version' => 1, 'blocks' => []]);
+        self::assertTrue($cache->isCacheableRequest($request), 'Undeclared zones do not change the active theme');
+        $zones->save('sidebar', ['version' => 1, 'blocks' => []]);
+        self::assertFalse($cache->isCacheableRequest($request), 'A saved zone can change native output and assets without a cache-purge event');
+        self::assertNull($cache->lookup($request), 'The filter must run before reading an already cached page');
+        $zone = ['version' => 1, 'blocks' => [['id' => 'text', 'type' => 'paragraph', 'data' => ['text' => 'Fresh zone']]]];
+        $zones->save('sidebar', $zone);
+        self::assertFalse($cache->isCacheableRequest($request));
+        $zones->save('sidebar', ['version' => 1, 'blocks' => []]);
+        self::assertFalse($cache->isCacheableRequest($request), 'Clearing a zone must not resurrect an older cache entry');
+        self::assertNull($cache->lookup($request));
+    }
+
+    public function testSavedZonesAndPageCacheFollowRealThemeActivations(): void
+    {
+        $app = $this->activated(null);
+        $this->db($app)->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $themes = $app->get(\Prime\Themes\ThemeManager::class);
+        $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $request = Request::create('GET', '/zone-theme-cache');
+        $suffix = bin2hex(random_bytes(4));
+        $slug = 'pb-cache-' . $suffix;
+        $namespace = 'PbCacheTheme' . $suffix;
+        $themeDir = $themes->themesPath() . '/' . $slug;
+        mkdir($themeDir . '/src', 0755, true);
+        file_put_contents($themeDir . '/theme.json', json_encode([
+            'slug' => $slug, 'name' => 'Cache fixture', 'version' => '1.0.0',
+            'namespace' => $namespace, 'main' => $namespace . '\\Theme', 'zones' => ['sidebar' => 'Sidebar'],
+        ], JSON_THROW_ON_ERROR));
+        file_put_contents($themeDir . '/src/Theme.php', '<?php namespace ' . $namespace . '; final class Theme extends \\Prime\\Themes\\AbstractTheme {}');
+        try {
+            self::assertTrue($cache->isCacheableRequest($request));
+            $cache->store($request, Response::html('cached before zone and theme switch'));
+            self::assertNotNull($cache->lookup($request));
+            $zones->save('sidebar', ['version' => 1, 'blocks' => []]);
+            self::assertFalse($cache->isCacheableRequest($request));
+
+            // A real CMS theme activation purges the old theme's page cache. A
+            // different theme with no saved zones is cacheable again.
+            $themes->activate($slug);
+            self::assertSame($slug, $themes->active()->slug);
+            self::assertTrue($cache->isCacheableRequest($request));
+            self::assertNull($cache->lookup($request));
+            $cache->store($request, Response::html('page of the other theme'));
+            self::assertNotNull($cache->lookup($request));
+
+            $themes->activate('aurora');
+            self::assertFalse($cache->isCacheableRequest($request));
+            $themes->activate($slug);
+            self::assertTrue($cache->isCacheableRequest($request));
+            self::assertNull($cache->lookup($request), 'Switching back must not resurrect a cached page from the first activation');
+        } finally {
+            AssetPublisher::deleteDirectory($themeDir);
+            $app->get(\Prime\Themes\ThemeAssetPublisher::class)->unpublish($slug);
+        }
+    }
+
+    public function testZoneCacheCheckFailsClosedIfZoneReadFails(): void
+    {
+        $app = $this->activated(null);
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $this->db($app)->pdo()->exec('DROP TABLE pc_zones');
+        self::assertFalse($cache->isCacheableRequest(Request::create('GET', '/zone-read-failure')));
+    }
+
+    public function testActivationPurgesCachedPagesWithoutRelyingOnNoticeSettings(): void
+    {
+        $app = $this->activated(null);
+        $info = $app->get(PluginManager::class)->get('prime-builder');
+        self::assertNotNull($info);
+        self::assertNotNull($info->manifest);
+        // A non-persistent notice facade isolates the explicit purge from the
+        // incidental settings.updated event produced by the welcome notice.
+        $context = new \Prime\Plugins\PluginContext(
+            manifest: $info->manifest,
+            directory: $info->directory,
+            app: $app,
+            hooks: $app->get(Hooks::class),
+            router: $app->get(\Prime\Http\Router::class),
+            views: $app->get(\Prime\View\View::class),
+            adminMenu: $app->get(\Prime\Admin\Menu\AdminMenu::class),
+            capabilities: $app->get(\Prime\Auth\Capabilities::class),
+            settings: $app->get(Settings::class),
+            db: $this->db($app),
+            assetPublisher: $app->get(AssetPublisher::class),
+            notices: new \Prime\Admin\Notices(),
+            pluginLogger: $app->get(\Prime\Log\Logger::class),
+        );
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $request = Request::create('GET', '/builder-activation-cache');
+        $cache->store($request, Response::html('page before plugin activation'));
+        self::assertNotNull($cache->lookup($request));
+        (new \PrimeBuilder\Plugin())->activate($context);
+        self::assertNull($cache->lookup($request));
+    }
+
+    public function testDeactivationPurgesCachedPagesEvenWithoutTheWelcomeNotice(): void
+    {
+        $app = $this->activated(null);
+        // Removing the notice itself normally purges the cache through the CMS
+        // settings hook. Deactivation must not depend on that incidental event.
+        $app->get(\Prime\Admin\Notices::class)->remove('plugin.prime-builder.welcome');
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $request = Request::create('GET', '/builder-cache-lifecycle');
+        $cache->store($request, Response::html('page with plugin assets'));
+        self::assertNotNull($cache->lookup($request));
+        $app->get(PluginManager::class)->deactivate('prime-builder');
+        self::assertNull($cache->lookup($request), 'Deactivation must not serve cached plugin markup or asset links');
+    }
+
+    public function testDeclaredZoneWidgetAssetsAndMapCspAreConditionalAndDeduplicated(): void
+    {
+        $app = $this->activated('admin');
+        $this->db($app)->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $hooks = $app->get(Hooks::class);
+        $page = new PageContext(type: PageContext::TYPE_BLOG);
+        $tabs = [
+            'id' => 'zone_tabs', 'type' => 'tabs', 'settings' => ['title_1' => 'First', 'title_2' => 'Second'],
+            'styles' => [], 'children' => [],
+        ];
+        $map = [
+            'id' => 'zone_map', 'type' => 'map', 'settings' => ['latitude' => '48.79', 'longitude' => '2.45', 'zoom' => 12],
+            'styles' => [], 'children' => [],
+        ];
+        $layout = ['version' => 1, 'elements' => [[
+            'id' => 'container', 'type' => 'container', 'settings' => ['layout' => 'flex', 'direction' => 'column'],
+            'styles' => [], 'children' => [$tabs, $map],
+        ]]];
+        $zoneDocument = ['version' => 1, 'blocks' => [
+            ['id' => 'first', 'type' => 'prime-builder/layout', 'data' => $layout],
+            ['id' => 'second', 'type' => 'prime-builder/layout', 'data' => $layout],
+        ]];
+        $zones->save('not_declared', $zoneDocument);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringNotContainsString('/css/widgets/map.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/js/tabs.js', $assets->renderScripts());
+        self::assertSame(['default-src' => "'self'"], $hooks->apply('site.csp', ['default-src' => "'self'"]));
+
+        $zones->save('sidebar', $zoneDocument);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        foreach (['tabs', 'map'] as $type) {
+            self::assertSame(1, substr_count($assets->renderStyles(), '/css/widgets/' . $type . '.css'));
+            self::assertSame(1, substr_count($assets->renderScripts(), '/js/' . $type . '.js'));
+        }
+        self::assertSame(['default-src' => "'self'", 'frame-src' => "'self' https://www.openstreetmap.org"], $hooks->apply('site.csp', ['default-src' => "'self'"]));
+        self::assertSame(['frame-src' => "'none'"], $hooks->apply('site.csp', ['frame-src' => "'none'"]));
+
+        // The same types in an entry and several zone layouts still load once.
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data'] = $layout;
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        foreach (['tabs', 'map'] as $type) {
+            self::assertSame(1, substr_count($assets->renderStyles(), '/css/widgets/' . $type . '.css'));
+            self::assertSame(1, substr_count($assets->renderScripts(), '/js/' . $type . '.js'));
+        }
+
+        $zones->save('sidebar', ['version' => 1, 'blocks' => []]);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringNotContainsString('/css/widgets/map.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/js/tabs.js', $assets->renderScripts());
+        self::assertSame(['default-src' => "'self'"], $hooks->apply('site.csp', ['default-src' => "'self'"]));
+    }
+
     public function testThemeZoneUsesDeclaredCoreZonesAndRefreshesWithoutPersistingTheirContents(): void
     {
         $app = $this->activated('admin');

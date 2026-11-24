@@ -14,6 +14,17 @@ final class ZoneLayouts
     {
     }
 
+    /** A saved zone can affect any page, even after its document is cleared. */
+    public function hasSavedDeclaredZone(): bool
+    {
+        foreach (array_keys($this->themes->zones()) as $slug) {
+            if ($this->zones->find($slug) !== null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** @return list<array<string, mixed>> */
     public function all(): array
     {

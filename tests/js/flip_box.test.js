@@ -8,6 +8,7 @@ const script = readFileSync(new URL('../../assets/js/flip_box.js', import.meta.u
 function setup() {
   const boxes = [];
   const document = {
+    addEventListener() {},
     activeElement: null,
     querySelectorAll: () => boxes,
     getElementById(id) {

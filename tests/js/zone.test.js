@@ -46,11 +46,13 @@ function runZone() {
     },
   };
   const inserted = [];
+  const events = [];
   const zone = {
     dataset: { pbId: 'zone1' },
     classList: { contains: name => name === 'pb-theme_zone' },
     closest: () => null,
     replaceChildren(content) { assert.equal(content, fragment); inserted.push(...nodes); },
+    dispatchEvent(event) { events.push({ type: event.type, bubbles: event.bubbles, inserted: inserted.length }); },
   };
   const layout = {
     dataset: { pbLive: '/api/prime-builder/v1/documents/7/live' },
@@ -61,9 +63,10 @@ function runZone() {
     },
   };
   const document = {
+    addEventListener() {},
     querySelectorAll(selector) {
       if (selector === '.pb-layout[data-pb-live]') return [layout];
-      if (selector === '.pb-theme-header .pb-navigation[data-pb-id], .pb-theme-footer .pb-navigation[data-pb-id]') return [];
+      if (selector === '.pb-navigation[data-pb-id]') return [];
       throw new Error(`unsupported selector: ${selector}`);
     },
     getElementById(id) { return [...external, ...inserted].find(node => node.id === id) || null; },
@@ -75,15 +78,17 @@ function runZone() {
   };
   runInNewContext(script, {
     document, window: { location: { search: '' } }, URLSearchParams, queueMicrotask,
+    CustomEvent: class { constructor(type, options) { this.type = type; this.bubbles = options.bubbles; } },
     fetch: async () => ({ ok: true, json: async () => ({ data: { widgets: { zone1: 'live zone' } } }) }),
   });
-  return { external, nodes, inserted };
+  return { external, nodes, inserted, events };
 }
 
 test('live zone IDs and map names avoid existing page targets and retain local references', async () => {
-  const { external, nodes, inserted } = runZone();
+  const { external, nodes, inserted, events } = runZone();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(inserted.length, nodes.length);
+  assert.deepEqual(events, [{ type: 'prime-builder:fragment', bubbles: true, inserted: nodes.length }]);
   const allIds = [...external, ...nodes].map(node => node.id).filter(Boolean);
   assert.equal(new Set(allIds).size, allIds.length);
   const allNames = [...external, ...nodes].filter(node => node.tagName === 'MAP').map(node => node.getAttribute('name'));

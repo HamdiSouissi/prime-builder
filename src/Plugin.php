@@ -212,16 +212,23 @@ final class Plugin extends AbstractPlugin
             return '<' . $name . ' class="pb-theme-' . $name . '">' . $renderer->render($layout) . '</' . $name . '>';
         });
         // Contextual snapshots depend on routes, terms, profiles, media and other
-        // entries. Core has no complete invalidation events for all dependencies,
-        // so favour freshness over page caching while any such widget is installed.
-        $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable) use ($partials): mixed {
-            if ($cacheable === true && $partials->usesAnyWidget([
-                'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image',
-                'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'navigation', 'share_buttons',
-            ])) {
+        // entries. Core has no complete invalidation events for all dependencies.
+        // Zone saves also have no page-purge event, so bypass before cache lookup
+        // whenever a declared zone has been saved, including after it is cleared.
+        $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable) use ($partials, $zoneLayouts): mixed {
+            if ($cacheable !== true) {
+                return $cacheable;
+            }
+            try {
+                return !$zoneLayouts->hasSavedDeclaredZone() && !$partials->usesAnyWidget([
+                    'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image',
+                    'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'navigation', 'share_buttons',
+                ]);
+            } catch (\Throwable) {
+                // The hook engine isolates exceptions; never let a failed zone
+                // read silently authorize a stale cached response.
                 return false;
             }
-            return $cacheable;
         });
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
             if ($menu instanceof AdminMenu) {
@@ -296,7 +303,8 @@ final class Plugin extends AbstractPlugin
             return $schedule;
         });
         // The CSP hook runs after site.assets during a page render. Reset on every page,
-        // then include only the exact map origin if a map occurs in the entry or partials.
+        // then include only the exact map origin if a map occurs in the entry,
+        // partials, or a zone declared by the active theme.
         $hasMap = false;
         $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, &$hasMap): void {
             if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
@@ -322,21 +330,7 @@ final class Plugin extends AbstractPlugin
             if (!$page->isPreview && $type !== null && $type->public && \Prime\Site\UrlResolver::isPubliclyVisible($page->entry)) {
                 $snapshots->remember($file, $css);
             }
-            $types = [];
-            $collect = static function (array $elements) use (&$collect, &$types): void {
-                foreach ($elements as $element) {
-                    if (!is_array($element)) {
-                        continue;
-                    }
-                    if (is_string($element['type'] ?? null)) {
-                        $types[$element['type']] = true;
-                    }
-                    if (is_array($element['children'] ?? null)) {
-                        $collect($element['children']);
-                    }
-                }
-            };
-            $collect(is_array($data['elements'] ?? null) ? $data['elements'] : []);
+            $types = Assets::collectTypes(is_array($data['elements'] ?? null) ? $data['elements'] : []);
             $hasMap = isset($types['map']);
             Assets::register($assets, $types, (new Registry($context->app()->get(Hooks::class)))->all());
             $assets->style('prime-builder-document', '/prime-builder/css/' . $file, ['prime-builder-kit']);
@@ -346,19 +340,6 @@ final class Plugin extends AbstractPlugin
                 return;
             }
             $types = [];
-            $collect = static function (array $elements) use (&$collect, &$types): void {
-                foreach ($elements as $element) {
-                    if (!is_array($element)) {
-                        continue;
-                    }
-                    if (is_string($element['type'] ?? null)) {
-                        $types[$element['type']] = true;
-                    }
-                    if (is_array($element['children'] ?? null)) {
-                        $collect($element['children']);
-                    }
-                }
-            };
             foreach (['header', 'footer'] as $slot) {
                 $layout = $partials->layout($slot, $page);
                 if ($layout === null) {
@@ -368,7 +349,7 @@ final class Plugin extends AbstractPlugin
                 $file = substr(hash('sha256', $css), 0, 16) . '.css';
                 (new Snapshots($context->app()->storagePath('prime-builder/styles')))->remember('theme-' . $file, $css);
                 $assets->style('prime-builder-theme-' . $slot, '/prime-builder/theme/' . $file, ['prime-builder-kit']);
-                $collect(is_array($layout['elements'] ?? null) ? $layout['elements'] : []);
+                $types += Assets::collectTypes(is_array($layout['elements'] ?? null) ? $layout['elements'] : []);
             }
             $hasMap = $hasMap || isset($types['map']);
             $definitions = $registry->all();
@@ -385,9 +366,9 @@ final class Plugin extends AbstractPlugin
             Assets::register($assets, $types, $definitions);
         });
         // A theme can render a declared zone without an entry or a Builder
-        // widget. Its document CSS must therefore be available at the head,
-        // including for copies inserted after the initial page was rendered.
-        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, $zoneLayouts): void {
+        // widget. Its styles and widget assets must therefore be available at
+        // the head, including for copies inserted after the initial page render.
+        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, $zoneLayouts, $registry, &$hasMap): void {
             if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
                 return;
             }
@@ -397,7 +378,9 @@ final class Plugin extends AbstractPlugin
             }
             $compiler = new Compiler((int) Configuration::get($context->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767));
             $snapshots = new Snapshots($context->app()->storagePath('prime-builder/styles'));
+            $types = [];
             foreach ($zoneLayouts->all() as $layout) {
+                $types += Assets::collectTypes(is_array($layout['elements'] ?? null) ? $layout['elements'] : []);
                 $css = $compiler->compile($layout, legacy: false);
                 if ($css === '') {
                     continue;
@@ -411,6 +394,8 @@ final class Plugin extends AbstractPlugin
                 $assets->style('prime-builder-zone-' . $hash, $url, ['prime-builder-kit']);
                 $seen[$url] = true;
             }
+            $hasMap = $hasMap || isset($types['map']);
+            Assets::register($assets, $types, $registry->all());
         });
         $context->hooks()->filter('site.csp', static function (mixed $directives) use (&$hasMap): mixed {
             if (!$hasMap || !is_array($directives)) {
@@ -455,11 +440,15 @@ final class Plugin extends AbstractPlugin
     public function activate(PluginContext $context): void
     {
         $context->notices()->add(id: 'welcome', type: Notice::TYPE_SUCCESS, title: 'plugin::prime-builder.notice.title', message: 'plugin::prime-builder.notice.message', capability: 'prime_builder.edit', dismissible: true);
+        $context->app()->get(\Prime\Cache\CacheManager::class)->clearPages();
     }
 
     public function deactivate(PluginContext $context): void
     {
         $context->notices()->remove('welcome');
+        // Once the hooks are removed, a page cached before the bypass could
+        // otherwise resurrect markup or asset URLs belonging to this plugin.
+        $context->app()->get(\Prime\Cache\CacheManager::class)->clearPages();
     }
 
     public function uninstall(PluginContext $context): void

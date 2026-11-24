@@ -21,16 +21,24 @@
     } catch { /* Keep the current public path. */ }
   }
   const url = encodeURIComponent(publicUrl);
-  for (const share of document.querySelectorAll('[data-pb-share]')) {
-    const message = encodeURIComponent((share.dataset.pbShareMessage || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim());
-    for (const link of share.querySelectorAll('[data-pb-share-service]')) {
-      const href = {
-        facebook: `https://www.facebook.com/sharer/sharer.php?u=${url}`,
-        linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${url}`,
-        x: `https://twitter.com/intent/tweet?url=${url}&text=${message}`,
-        email: `mailto:?subject=${message}&body=${url}`,
-      }[link.dataset.pbShareService];
-      if (href) link.setAttribute('href', href);
+  const initialize = root => {
+    const widgets = [...root.querySelectorAll('[data-pb-share]')];
+    if (root.matches?.('[data-pb-share]')) widgets.unshift(root);
+    for (const share of widgets) {
+      const message = encodeURIComponent((share.dataset.pbShareMessage || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim());
+      for (const link of share.querySelectorAll('[data-pb-share-service]')) {
+        const href = {
+          facebook: `https://www.facebook.com/sharer/sharer.php?u=${url}`,
+          linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${url}`,
+          x: `https://twitter.com/intent/tweet?url=${url}&text=${message}`,
+          email: `mailto:?subject=${message}&body=${url}`,
+        }[link.dataset.pbShareService];
+        if (href) link.setAttribute('href', href);
+      }
     }
-  }
+  };
+  initialize(document);
+  document.addEventListener('prime-builder:fragment', event => {
+    if (typeof event.target?.querySelectorAll === 'function') initialize(event.target);
+  });
 })();

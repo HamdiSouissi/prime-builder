@@ -18,6 +18,7 @@ function portfolio(categories) {
 }
 function setup(...portfolios) {
   const document = {
+    addEventListener() {},
     querySelectorAll: () => portfolios,
     createElement(tag) {
       return {

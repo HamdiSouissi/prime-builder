@@ -15,6 +15,7 @@ function setup(location, message = 'Bonjour & merci', canonical = null) {
     querySelectorAll(selector) { assert.equal(selector, '[data-pb-share-service]'); return links; },
   };
   const document = {
+    addEventListener() {},
     head: { querySelector(selector) { assert.equal(selector, 'link[rel~="canonical"]'); return canonical === null ? null : { getAttribute: name => name === 'href' ? canonical : null }; } },
     querySelectorAll(selector) { assert.equal(selector, '[data-pb-share]'); return [share]; },
   };

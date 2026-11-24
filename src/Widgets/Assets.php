@@ -19,6 +19,32 @@ final class Assets
     }
 
     /**
+     * Collect types from a layout, including descendants, once per type.
+     *
+     * @param array<mixed> $elements
+     * @return array<string, true>
+     */
+    public static function collectTypes(array $elements): array
+    {
+        $types = [];
+        $walk = static function (array $nodes) use (&$walk, &$types): void {
+            foreach ($nodes as $node) {
+                if (!is_array($node)) {
+                    continue;
+                }
+                if (is_string($node['type'] ?? null)) {
+                    $types[$node['type']] = true;
+                }
+                if (is_array($node['children'] ?? null)) {
+                    $walk($node['children']);
+                }
+            }
+        };
+        $walk($elements);
+        return $types;
+    }
+
+    /**
      * @param array<string, true> $types
      * @param array<string, array<string, mixed>> $definitions
      */

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
 const script = readFileSync(new URL('../../assets/js/content.js', import.meta.url), 'utf8');
-const themeNavigationSelector = '.pb-theme-header .pb-navigation[data-pb-id], .pb-theme-footer .pb-navigation[data-pb-id]';
+const themeNavigationSelector = '.pb-navigation[data-pb-id]';
 
 // The small DOM double exercises the actual public script without adding a test dependency.
 class Element {
@@ -92,6 +92,7 @@ function setup(ids = ['one', 'two'], breakpoint = '', expectedBreakpoint = 767) 
     setMobile(value) { this.matches = value; for (const handler of this.listeners) handler(); },
   };
   const document = {
+    addEventListener() {},
     activeElement: null,
     defaultView: { matchMedia: query => { assert.equal(query, `(max-width: ${expectedBreakpoint}px)`); return media; } },
     createElement(tag) { return new Element(this, tag); },
@@ -218,6 +219,7 @@ test('navigation uses the configured mobile breakpoint and rejects invalid attri
 test('server-rendered theme menus are enhanced without a live request and copied live layouts are skipped', () => {
   const media = { matches: true, addEventListener() {} };
   const document = {
+    addEventListener() {},
     activeElement: null,
     defaultView: { matchMedia: () => media },
     createElement(tag) { return new Element(this, tag); },
@@ -257,6 +259,7 @@ test('server-rendered theme menus are enhanced without a live request and copied
 
 test('breadcrumb refresh waits for focus to leave its saved fallback', async () => {
   const document = {
+    addEventListener() {},
     activeElement: null,
     querySelectorAll(selector) { if (selector === themeNavigationSelector) return []; assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },
   };
@@ -289,6 +292,7 @@ test('breadcrumb refresh waits for focus to leave its saved fallback', async () 
 test('identity and entry widget refresh waits while a fallback contains focus', async () => {
   for (const type of ['site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author']) {
     const document = {
+    addEventListener() {},
       activeElement: null,
       querySelectorAll(selector) { if (selector === themeNavigationSelector) return []; assert.equal(selector, '.pb-layout[data-pb-live]'); return [layout]; },
     };

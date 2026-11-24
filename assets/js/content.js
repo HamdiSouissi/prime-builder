@@ -159,12 +159,21 @@
     });
     node.addEventListener('focusout', onFocusOut);
   };
-  // Theme parts contain a fresh server-rendered menu, without a live endpoint.
-  // A copied entry can contain its own live layout inside the part: leave that
-  // fallback alone until the corresponding response has actually arrived.
-  for (const node of document.querySelectorAll('.pb-theme-header .pb-navigation[data-pb-id], .pb-theme-footer .pb-navigation[data-pb-id]')) {
-    if (!node.closest('.pb-layout[data-pb-live]')) enhanceNavigation(node);
-  }
+  // Server-rendered theme parts and native zones have no live endpoint of their
+  // own. Do not pre-empt the refresh of a separate entry layout inside them.
+  const enhanceStaticNavigations = root => {
+    const nodes = [...root.querySelectorAll('.pb-navigation[data-pb-id]')];
+    if (root.matches?.('.pb-navigation[data-pb-id]')) nodes.unshift(root);
+    for (const node of nodes) {
+      const pending = node.closest('.pb-layout[data-pb-live]');
+      if (pending && (root === document || root.contains(pending))) continue;
+      enhanceNavigation(node);
+    }
+  };
+  enhanceStaticNavigations(document);
+  document.addEventListener('prime-builder:fragment', event => {
+    if (typeof event.target?.querySelectorAll === 'function') enhanceStaticNavigations(event.target);
+  });
   const requests = new Map();
   for (const layout of document.querySelectorAll('.pb-layout[data-pb-live]')) {
     const url = layout.dataset.pbLive;
@@ -199,6 +208,8 @@
           const copy = node.closest('[data-pb-content-copy]')?.dataset.pbContentCopy || '';
           const scope = /^pbc-[a-f0-9]{24}$/.test(copy) ? `${copy}-${node.dataset.pbId}` : node.dataset.pbId;
           node.replaceChildren(zoneFragment(html, scope));
+          // Widget scripts can enhance this subtree after its live HTML arrives.
+          node.dispatchEvent(new CustomEvent('prime-builder:fragment', { bubbles: true }));
         }
         else if (node.classList.contains('pb-navigation')) replaceWhenUnfocused(node, () => { node.innerHTML = html; enhanceNavigation(node); });
         else if (deferred) replaceWhenUnfocused(node, () => { node.innerHTML = html; });

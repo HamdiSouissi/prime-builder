@@ -2,19 +2,9 @@
 (() => {
   const units = ['day', 'hour', 'minute', 'second'];
   const pending = [];
-  for (const widget of document.querySelectorAll('[data-pb-countdown]')) {
-    const deadline = Date.parse(widget.dataset.pbDeadline || '');
-    const values = widget.querySelector('[data-pb-countdown-values]');
-    const status = widget.querySelector('[data-pb-countdown-status]');
-    const fields = units.map(unit => ({
-      value: widget.querySelector(`[data-pb-countdown-value="${unit}"]`),
-      label: widget.querySelector(`[data-pb-countdown-label="${unit}"]`),
-    }));
-    if (!Number.isFinite(deadline) || !values || !status || fields.some(field => !field.value || !field.label)) continue;
-    pending.push({ widget, deadline, values, status, fields });
-  }
-
+  const enhanced = new WeakSet();
   let timer = null;
+
   function update() {
     const now = Date.now();
     for (let index = pending.length - 1; index >= 0; index--) {
@@ -36,14 +26,35 @@
       item.values.hidden = false;
     }
     if (pending.length === 0) {
-      if (timer !== null) clearInterval(timer);
+      if (timer !== null) { clearInterval(timer); timer = null; }
       document.removeEventListener('visibilitychange', onVisibility);
     }
   }
   function onVisibility() { if (!document.hidden) update(); }
-  update();
-  if (pending.length) {
-    timer = setInterval(update, 1000);
-    document.addEventListener('visibilitychange', onVisibility);
+  function initialize(root) {
+    const widgets = [...root.querySelectorAll('[data-pb-countdown]')];
+    if (root.matches?.('[data-pb-countdown]')) widgets.unshift(root);
+    for (const widget of widgets) {
+      if (enhanced.has(widget)) continue;
+      const deadline = Date.parse(widget.dataset.pbDeadline || '');
+      const values = widget.querySelector('[data-pb-countdown-values]');
+      const status = widget.querySelector('[data-pb-countdown-status]');
+      const fields = units.map(unit => ({
+        value: widget.querySelector(`[data-pb-countdown-value="${unit}"]`),
+        label: widget.querySelector(`[data-pb-countdown-label="${unit}"]`),
+      }));
+      if (!Number.isFinite(deadline) || !values || !status || fields.some(field => !field.value || !field.label)) continue;
+      enhanced.add(widget);
+      pending.push({ widget, deadline, values, status, fields });
+    }
+    update();
+    if (pending.length && timer === null) {
+      timer = setInterval(update, 1000);
+      document.addEventListener('visibilitychange', onVisibility);
+    }
   }
+  initialize(document);
+  document.addEventListener('prime-builder:fragment', event => {
+    if (typeof event.target?.querySelectorAll === 'function') initialize(event.target);
+  });
 })();
