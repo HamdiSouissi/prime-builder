@@ -98,6 +98,8 @@ return [
         'adjusted' => 'Values were adjusted automatically; review the settings',
         'legacy_auth' => 'Prime CMS 1.0.1 token security',
         'legacy_auth_warning' => 'API protection depends on this plugin being active and can conflict with other extensions; upgrade Prime CMS to 1.0.2 or a fixed version.',
+        'legacy_loader' => 'Prime CMS 1.0.1 extension loading',
+        'legacy_loader_warning' => 'Concurrent requests can incorrectly isolate an active extension, making it and its routes unavailable, including the builder’s API protection. Upgrade Prime CMS to 1.0.2 or a fixed version.',
         'label' => 'Prime Builder',
         'active' => 'Active',
     ],

@@ -1478,10 +1478,15 @@ test('native widget media selected in the real picker stays protected until remo
         await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
         await expectAccessible(page);
         await picker.screenshot({ path: test.info().outputPath('widget-media-editor-mobile.jpg'), quality: 15 });
-        await page.setViewportSize({ width: 1440, height: 900 });
+        const dialogBox = await picker.boundingBox();
+        const confirmBox = await picker.locator('[data-prime-picker-confirm]').boundingBox();
+        expect(confirmBox.x).toBeGreaterThanOrEqual(dialogBox.x);
+        expect(confirmBox.x + confirmBox.width).toBeLessThanOrEqual(dialogBox.x + dialogBox.width);
       }
+      // The single-image picker must also be confirmable at the mobile width.
       await picker.locator('[data-prime-picker-confirm]').click();
       await expect(picker).toBeHidden();
+      if (capture) await page.setViewportSize({ width: 1440, height: 900 });
       await expect(page.getByLabel('Texte alternatif', { exact: true })).toHaveValue('Paysage de la médiathèque');
       await expect(page.getByLabel('Largeur', { exact: true })).toHaveValue('320');
       await expect(page.getByLabel('Hauteur', { exact: true })).toHaveValue('200');

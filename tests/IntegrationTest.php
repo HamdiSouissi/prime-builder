@@ -90,14 +90,35 @@ final class IntegrationTest extends TestCase
         self::assertSame('ok', $checks[1]['status']);
         self::assertSame('ok', $checks[2]['status']);
         $legacyStatus = null;
+        $loaderCheck = null;
         if (is_array($checks)) {
             foreach ($checks as $check) {
                 if (is_array($check) && ($check['id'] ?? '') === 'prime-builder.legacy-auth') {
                     $legacyStatus = $check['status'] ?? null;
                 }
+                if (is_array($check) && ($check['id'] ?? '') === 'prime-builder.legacy-loader') {
+                    $loaderCheck = $check;
+                }
             }
         }
-        self::assertSame(version_compare($app->version(), '1.0.2', '<') ? 'warning' : null, $legacyStatus);
+        $legacyCms = version_compare($app->version(), '1.0.2', '<');
+        self::assertSame($legacyCms ? 'warning' : null, $legacyStatus);
+        if ($legacyCms) {
+            self::assertIsArray($loaderCheck);
+            self::assertSame('warning', $loaderCheck['status']);
+            self::assertStringContainsString('requêtes simultanées', (string) $loaderCheck['value']);
+            self::assertStringContainsString('isolée à tort', (string) $loaderCheck['value']);
+        } else {
+            self::assertNull($loaderCheck);
+        }
+        $system = $this->send($app, 'GET', '/admin/tools/system');
+        self::assertSame(200, $system->status(), $system->body());
+        if ($legacyCms) {
+            self::assertStringContainsString('data-prime-check="prime-builder.legacy-loader" data-status="warning"', $system->body());
+            self::assertStringContainsString('requêtes simultanées', $system->body());
+        } else {
+            self::assertStringNotContainsString('prime-builder.legacy-loader', $system->body());
+        }
         $app->get(Settings::class)->set('plugin.prime-builder.breakpoint_tablet', 600);
         $app->get(Settings::class)->set('plugin.prime-builder.breakpoint_mobile', 767);
         $checks = $app->get(Hooks::class)->apply('system.checks', []);

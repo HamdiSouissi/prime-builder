@@ -98,6 +98,8 @@ return [
         'adjusted' => 'Valeurs ajustées automatiquement ; vérifiez les réglages',
         'legacy_auth' => 'Sécurité des jetons Prime CMS 1.0.1',
         'legacy_auth_warning' => 'La protection API dépend du plugin actif et peut entrer en conflit avec d’autres extensions ; mettez Prime CMS à jour vers 1.0.2 ou une version corrigée.',
+        'legacy_loader' => 'Chargement des extensions Prime CMS 1.0.1',
+        'legacy_loader_warning' => 'Lors de requêtes simultanées, une extension active peut être isolée à tort, disparaître et rendre ses routes indisponibles, y compris la protection API du constructeur. Mettez Prime CMS à jour vers 1.0.2 ou une version corrigée.',
         'label' => 'Prime Builder',
         'active' => 'Actif',
     ],

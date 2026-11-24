@@ -432,6 +432,7 @@ final class Plugin extends AbstractPlugin
             $checks[] = ['id' => 'prime-builder.breakpoints', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.breakpoints'), 'status' => $breakpointsValid ? 'ok' : 'warning', 'value' => t($breakpointsValid ? 'plugin::prime-builder.system.valid' : 'plugin::prime-builder.system.adjusted')];
             if (version_compare($context->app()->version(), '1.0.2', '<')) {
                 $checks[] = ['id' => 'prime-builder.legacy-auth', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.legacy_auth'), 'status' => 'warning', 'value' => t('plugin::prime-builder.system.legacy_auth_warning')];
+                $checks[] = ['id' => 'prime-builder.legacy-loader', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.legacy_loader'), 'status' => 'warning', 'value' => t('plugin::prime-builder.system.legacy_loader_warning')];
             }
             return $checks;
         });

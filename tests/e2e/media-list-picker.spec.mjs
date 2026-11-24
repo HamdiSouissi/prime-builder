@@ -23,7 +23,7 @@ test('gallery and image carousel append real media selections without losing exi
     expect(result.violations.filter(v => ['serious', 'critical'].includes(v.impact)).map(v => ({ id: v.id, targets: v.nodes.map(node => node.target) }))).toEqual([]);
   };
   const media = [];
-  let entryId = null;
+  let entryId = null, uploadedId = null;
   try {
     for (const [name, alt, color] of [['picker-montagne.png', 'Montagne & ciel', '#28613f'], ['picker-ocean.png', 'Océan & soleil', '#254b83']]) {
       const uploaded = await page.evaluate(async ({ csrf, name, color }) => {
@@ -83,18 +83,141 @@ test('gallery and image carousel append real media selections without losing exi
     }
     await accessible(page);
     await picker.screenshot({ path: test.info().outputPath('media-list-editor-desktop.jpg'), quality: 15 });
-    await page.setViewportSize({ width: 375, height: 812 });
-    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
-    await accessible(page);
-    await picker.screenshot({ path: test.info().outputPath('media-list-editor-mobile.jpg'), quality: 15 });
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await picker.locator('[data-prime-picker-confirm]').focus();
+    const assertPickerFits = async (width, height) => {
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      const geometry = await picker.evaluate(dialog => {
+        const bounds = dialog.getBoundingClientRect();
+        const controls = [...dialog.querySelectorAll('[data-prime-picker-summary], .pc-media-picker__footer [data-prime-picker-close], [data-prime-picker-confirm]')].map(node => {
+          const box = node.getBoundingClientRect();
+          return { name: node.textContent.trim(), left: box.left, right: box.right, top: box.top, bottom: box.bottom, clientWidth: node.clientWidth, scrollWidth: node.scrollWidth };
+        });
+        const library = dialog.querySelector('[data-prime-picker-panel="library"]').getBoundingClientRect();
+        const toolbar = dialog.querySelector('.pc-media-picker__toolbar').getBoundingClientRect();
+        const filters = [...dialog.querySelectorAll('[data-prime-picker-search], [data-prime-picker-folder]')].map(node => {
+          const box = node.getBoundingClientRect();
+          return { name: node.getAttribute('aria-label') || node.id, left: box.left, right: box.right, top: box.top, bottom: box.bottom, height: box.height };
+        });
+        return {
+          left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom, controls, filters,
+          library: { top: library.top, bottom: library.bottom }, toolbar: { top: toolbar.top, bottom: toolbar.bottom },
+        };
+      });
+      expect(geometry.controls).toHaveLength(3);
+      expect(geometry.filters).toHaveLength(2);
+      for (const filter of geometry.filters) {
+        expect(filter.height, `${width}×${height}px: ${filter.name}`).toBeGreaterThanOrEqual(30);
+        expect(filter.left, `${width}×${height}px: ${filter.name}`).toBeGreaterThanOrEqual(geometry.left);
+        expect(filter.right, `${width}×${height}px: ${filter.name}`).toBeLessThanOrEqual(geometry.right);
+        expect(filter.top, `${width}×${height}px: ${filter.name}`).toBeGreaterThanOrEqual(Math.max(geometry.library.top, geometry.toolbar.top));
+        expect(filter.bottom, `${width}×${height}px: ${filter.name}`).toBeLessThanOrEqual(Math.min(geometry.library.bottom, geometry.toolbar.bottom));
+      }
+      for (const control of geometry.controls) {
+        expect(control.left, `${width}px: ${control.name}`).toBeGreaterThanOrEqual(geometry.left);
+        expect(control.right, `${width}px: ${control.name}`).toBeLessThanOrEqual(geometry.right);
+        expect(control.top, `${width}px: ${control.name}`).toBeGreaterThanOrEqual(geometry.top);
+        expect(control.bottom, `${width}px: ${control.name}`).toBeLessThanOrEqual(geometry.bottom);
+        expect(control.scrollWidth, `${width}px: ${control.name}`).toBeLessThanOrEqual(control.clientWidth);
+      }
+      for (const [index, a] of geometry.controls.entries()) for (const b of geometry.controls.slice(index + 1)) {
+        expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${width}px: ${a.name} / ${b.name}`).toBe(true);
+      }
+    };
+    for (const { width, height } of [{ width: 320, height: 480 }, { width: 320, height: 568 }, { width: 375, height: 667 }, { width: 375, height: 812 }]) {
+      await page.setViewportSize({ width, height });
+      await assertPickerFits(width, height);
+      await accessible(page);
+      if (width === 375 && height === 812) await picker.screenshot({ path: test.info().outputPath('media-list-editor-mobile.jpg'), quality: 15 });
+    }
+    // Filtering, selection and confirmation must work in the narrow viewport, not just after resizing to desktop.
+    await page.setViewportSize({ width: 320, height: 480 });
+    const search = picker.locator('[data-prime-picker-search]');
+    const filtered = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === '/admin/media/api/items' && url.searchParams.get('q') === 'ocean';
+    });
+    await search.fill('ocean');
+    expect((await filtered).status()).toBe(200);
+    await expect(picker.locator('[data-prime-picker-card]')).toHaveCount(1);
+    await expect(picker.locator(`[data-prime-picker-card="${media[1].id}"]`)).toHaveAttribute('aria-selected', 'true');
+    const unfiltered = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === '/admin/media/api/items' && !url.searchParams.has('q');
+    });
+    await search.fill('');
+    expect((await unfiltered).status()).toBe(200);
+    await expect(picker.locator('[data-prime-picker-card]')).toHaveCount(2);
+    const mobileOption = picker.locator(`[data-prime-picker-card="${media[1].id}"]`);
+    await mobileOption.click();
+    await expect(mobileOption).toHaveAttribute('aria-selected', 'false');
+    await mobileOption.click();
+    await expect(mobileOption).toHaveAttribute('aria-selected', 'true');
+    // Clicking a clipped card must not scroll the search and folder controls out of view.
+    await assertPickerFits(320, 480);
+    const scrolled = await picker.locator('[data-prime-picker-scroll]').evaluate(body => {
+      body.scrollTop = body.scrollHeight;
+      const bounds = body.getBoundingClientRect();
+      const name = body.querySelector('.pc-media-card__name').getBoundingClientRect();
+      return { scrollTop: body.scrollTop, bodyTop: bounds.top, bodyBottom: bounds.bottom, nameTop: name.top, nameBottom: name.bottom };
+    });
+    expect(scrolled.scrollTop).toBeGreaterThan(0);
+    expect(scrolled.nameTop).toBeGreaterThanOrEqual(scrolled.bodyTop);
+    expect(scrolled.nameBottom).toBeLessThanOrEqual(scrolled.bodyBottom);
+    await assertPickerFits(320, 480);
+    await picker.screenshot({ path: test.info().outputPath('media-list-editor-mobile-small.jpg'), quality: 15 });
+
+    // The upload tab must also remain usable at the keyboard when its content exceeds the panel.
+    await picker.getByRole('tab', { name: 'Téléverser' }).focus();
     await page.keyboard.press('Enter');
+    const upload = picker.locator('[data-prime-picker-panel="upload"]');
+    await expect(upload).toBeVisible();
+    const uploadMetrics = await upload.evaluate(node => ({ height: node.clientHeight, content: node.scrollHeight, overflow: getComputedStyle(node).overflowY }));
+    if (uploadMetrics.content > uploadMetrics.height) expect(['auto', 'scroll']).toContain(uploadMetrics.overflow);
+    const fileInput = upload.locator('[data-prime-picker-file-input]');
+    await page.keyboard.press('Tab');
+    await expect(fileInput).toBeFocused();
+    await expect(fileInput).toHaveAccessibleName('Parcourir l’ordinateur');
+    const uploadGeometry = await upload.evaluate(panel => {
+      const bounds = panel.getBoundingClientRect();
+      const label = panel.querySelector('label').getBoundingClientRect();
+      return { top: bounds.top, bottom: bounds.bottom, labelTop: label.top, labelBottom: label.bottom };
+    });
+    // Include the focus outline, not just the label's border box.
+    expect(uploadGeometry.labelTop - 5).toBeGreaterThanOrEqual(uploadGeometry.top);
+    expect(uploadGeometry.labelBottom + 5).toBeLessThanOrEqual(uploadGeometry.bottom);
+    await accessible(page);
+    await picker.screenshot({ path: test.info().outputPath('media-list-editor-upload.jpg'), quality: 15 });
+    const png = await page.evaluate(() => {
+      const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 32;
+      const ctx = canvas.getContext('2d'); ctx.fillStyle = '#88445c'; ctx.fillRect(0, 0, 64, 32);
+      return canvas.toDataURL('image/png').split(',')[1];
+    });
+    const uploaded = page.waitForResponse(response => new URL(response.url()).pathname === '/admin/media/api/upload' && response.request().method() === 'POST');
+    const chooser = page.waitForEvent('filechooser');
+    await page.keyboard.press('Enter');
+    await (await chooser).setFiles({ name: 'picker-clavier.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+    const uploadResponse = await uploaded;
+    expect(uploadResponse.status()).toBe(201);
+    uploadedId = (await uploadResponse.json()).item.id;
+    expect(uploadedId).toBeGreaterThan(0);
+    await expect(picker.locator('[data-prime-picker-summary]')).toContainText('3 médias sélectionnés');
+    const pointerChooser = page.waitForEvent('filechooser');
+    await upload.getByText('Parcourir l’ordinateur', { exact: true }).click();
+    await (await pointerChooser).setFiles([]);
+    await picker.getByRole('tab', { name: 'Médiathèque' }).focus();
+    await page.keyboard.press('Enter');
+    const uploadedOption = picker.locator(`[data-prime-picker-card="${uploadedId}"]`);
+    await expect(uploadedOption).toHaveAttribute('aria-selected', 'true');
+    await uploadedOption.click();
+    await expect(uploadedOption).toHaveAttribute('aria-selected', 'false');
+    await expect(mobileOption).toHaveAttribute('aria-selected', 'true');
+    await assertPickerFits(320, 480);
+    await picker.locator('[data-prime-picker-confirm]').click();
     await expect(picker).toBeHidden();
     const combined = [original, ...media.map(item => `${item.url}|${item.alt}`)].join('\n');
     await expect(list).toHaveValue(combined);
     await expect(choose).toBeFocused();
     await expect(page.locator('[data-pb-live]')).toHaveText('Images ajoutées à la liste.');
+    await page.setViewportSize({ width: 1440, height: 900 });
     const frame = page.frameLocator('[data-pb-frame]');
     await expect(frame.locator('[data-pb-id="gallery_picker"] img')).toHaveCount(3);
     await page.locator('[data-pb-undo]').focus();
@@ -201,6 +324,7 @@ test('gallery and image carousel append real media selections without losing exi
         await api(`/api/v1/content/page/${entryId}?force=1`, 'DELETE');
       }
       for (const item of media) if (!item.deleted) await api(`/api/v1/media/${item.id}?force=1`, 'DELETE');
+      if (uploadedId !== null) await api(`/api/v1/media/${uploadedId}?force=1`, 'DELETE');
     } finally { page.off('dialog', leave); }
   }
 });

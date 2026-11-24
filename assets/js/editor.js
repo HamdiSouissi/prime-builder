@@ -613,6 +613,9 @@ async function openMedia(elementId, urlField, kind = 'image', multiple = false) 
     const overlay = document.getElementById('pc-media-picker-modal');
     const grid = overlay?.querySelector('[data-prime-picker-grid]');
     grid?.setAttribute('aria-label', ui.media_grid);
+    // Core wraps this input in a visible label but marks it hidden, so it cannot receive keyboard focus.
+    const upload = overlay?.querySelector('input[type="file"][data-prime-picker-file-input]');
+    if (upload?.hidden) { upload.classList.add('pb-media-picker-file-input'); upload.hidden = false; }
     if (overlay && !overlay.dataset.pbFocusTrap) {
       overlay.dataset.pbFocusTrap = 'true';
       overlay.addEventListener('keydown', event => {
