@@ -322,7 +322,7 @@ jobs:
               echo "::error title=Browser test log $(basename "$part") (base64)::$(base64 -w0 "$part")"
             done
           fi
-      - name: Fresh public request with the plugin disabled
+      - name: Fresh public requests after deactivation and reactivation
         working-directory: cms
         run: |
           curl --fail --silent --show-error 'http://127.0.0.1:8080/parcours-souris?pb-theme-active=1' > /tmp/prime-builder-theme-active.html
@@ -336,6 +336,12 @@ jobs:
           grep -F 'class="site-header' /tmp/prime-builder-theme-disabled.html
           if grep -q 'pb-theme-header' /tmp/prime-builder-theme-disabled.html; then echo 'Theme header appeared after deactivation'; exit 1; fi
           php bin/prime plugin:activate prime-builder
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/parcours-souris?pb-theme-reactivated=1' > /tmp/prime-builder-theme-reactivated.html
+          grep -Fq 'pb-theme-header' /tmp/prime-builder-theme-reactivated.html
+          grep -Fq 'En-tête construit' /tmp/prime-builder-theme-reactivated.html
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/test-prime-builder?pb-reactivated=1' > /tmp/prime-builder-reactivated.html
+          grep -Fq '<h2>Contenu conservé</h2>' /tmp/prime-builder-reactivated.html
+          grep -Fq '/assets/plugins/prime-builder/' /tmp/prime-builder-reactivated.html
       - name: Uninstall and verify data cleanup and public fallback
         working-directory: cms
         run: |
