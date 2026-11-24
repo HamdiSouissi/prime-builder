@@ -306,6 +306,43 @@ final class DocumentTest extends TestCase
         }
     }
 
+    public function testResponsiveBordersAreBoundedAndCompiledWithoutRawCss(): void
+    {
+        $node = $this->element('button', 'bordered');
+        $node['settings'] = ['text' => 'Découvrir', 'url' => '/'];
+        $node['styles'] = [
+            'desktop' => ['border_style' => 'solid', 'border_width' => 4, 'border_color' => 'kit:primary'],
+            'tablet' => ['border_width' => 8, 'border_style' => 'dashed', 'border_color' => '#123ABC'],
+            'mobile' => ['border_style' => 'none', 'border_width' => 0],
+        ];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame($node['styles'], $result['data']['elements'][0]['styles']);
+        $css = (new Compiler(1000, 600))->compile($result['data']);
+        $selector = '.pb-element[data-pb-id="bordered"]' . $this->legacyGuard($result['data']);
+        self::assertStringContainsString($selector . '{border-style:solid;border-width:4px;border-color:var(--pb-kit-primary);}', $css);
+        self::assertStringContainsString('@media(max-width:1000px){' . $selector . '{border-width:8px;border-style:dashed;border-color:#123abc;}}', $css);
+        self::assertStringContainsString('@media(max-width:600px){' . $selector . '{border-style:none;border-width:0px;}}', $css);
+        foreach (['none', 'solid', 'dashed', 'dotted', 'double'] as $style) {
+            $node['styles'] = ['desktop' => ['border_style' => $style, 'border_width' => 100, 'border_color' => 'kit:text']];
+            $valid = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+            self::assertSame([], $valid['errors']);
+            self::assertStringContainsString('border-style:' . $style . ';border-width:100px;border-color:var(--pb-kit-text);', (new Compiler())->compile($valid['data']));
+        }
+        // Validation and compilation independently reject malformed or injected declarations.
+        foreach ([
+            ['border_style', 'solid;display:none'], ['border_style', 'hidden'], ['border_style', true],
+            ['border_width', -1], ['border_width', 101], ['border_width', 1.5], ['border_width', '4px'], ['border_width', '1px;display:none'],
+            ['border_color', '#123456;display:none'], ['border_color', 'url(javascript:evil)'], ['border_color', 'transparent'], ['border_color', null],
+        ] as [$key, $bad]) {
+            $node['styles'] = ['desktop' => [$key => $bad]];
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors'], (string) $key);
+            self::assertSame('', (new Compiler())->compile(['elements' => [$node]]), (string) $key);
+        }
+        $node['styles'] = [];
+        self::assertSame('', (new Compiler())->compile(['elements' => [$node]]));
+    }
+
     public function testKitColorReferencesAndTypedLengthUnitsAreValidatedAndCompiled(): void
     {
         $node = $this->element();

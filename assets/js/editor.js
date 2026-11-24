@@ -474,10 +474,10 @@ function makeStyleControl(name, schema, current, onChange) {
     const references = { 'kit:primary': sixDigitColor(config.kitColors?.primary, '#c9441f'), 'kit:text': sixDigitColor(config.kitColors?.text, '#1a1d29') };
     input.value = references[current] || current || '';
     const picker = document.createElement('input'); picker.type = 'color';
-    picker.setAttribute('aria-label', name === 'color' ? ui.color_picker_text : ui.color_picker_background);
+    picker.setAttribute('aria-label', name === 'color' ? ui.color_picker_text : name === 'border_color' ? ui.color_picker_border : ui.color_picker_background);
     picker.value = sixDigitColor(input.value, '#000000');
     const reference = document.createElement('select');
-    reference.setAttribute('aria-label', name === 'color' ? ui.color_reference_text : ui.color_reference_background);
+    reference.setAttribute('aria-label', name === 'color' ? ui.color_reference_text : name === 'border_color' ? ui.color_reference_border : ui.color_reference_background);
     for (const [value, title] of [['', ui.color_custom], ['kit:primary', ui.kit_primary], ['kit:text', ui.kit_text]]) {
       const option = text('option', title); option.value = value; reference.append(option);
     }
@@ -647,7 +647,9 @@ function renderSettings() {
   } else {
     fields.append(text('p', ui.responsive_help, 'pb-intro'));
     const schemas = tab === 'style'
-      ? { color: { type: 'color' }, background: { type: 'color' }, font_size: { type: 'length' }, align: { type: 'enum', values: ['left', 'center', 'right'] }, radius: { type: 'length' } }
+      ? { color: { type: 'color' }, background: { type: 'color' }, font_size: { type: 'length' }, align: { type: 'enum', values: ['left', 'center', 'right'] },
+        border_style: { type: 'enum', values: ['none', 'solid', 'dashed', 'dotted', 'double'], option_labels: { none: ui.border_none, solid: ui.border_solid, dashed: ui.border_dashed, dotted: ui.border_dotted, double: ui.border_double } },
+        border_width: { type: 'integer', min: 0, max: 100 }, border_color: { type: 'color' }, radius: { type: 'length' } }
       : { padding: { type: 'length' },
         padding_top: { type: 'length' }, padding_right: { type: 'length' }, padding_bottom: { type: 'length' }, padding_left: { type: 'length' },
         margin: { type: 'length' },
@@ -675,7 +677,8 @@ function renderSettings() {
         const inherited = side ? spacingStyleSource(styles, device, name) : inheritedStyle(styles, device, name);
         if (!inherited) { hint.textContent = ui.value_default; return; }
         const value = inherited.value === 'kit:primary' ? ui.kit_primary : inherited.value === 'kit:text' ? ui.kit_text
-          : typeof inherited.value === 'number' && ['length', 'offset'].includes(schema.type) ? `${inherited.value}px` : ui[inherited.value] || String(inherited.value);
+          : typeof inherited.value === 'number' && (['length', 'offset'].includes(schema.type) || name === 'border_width') ? `${inherited.value}px`
+            : schema.option_labels?.[inherited.value] || ui[inherited.value] || String(inherited.value);
         const label = side && inherited.key !== name ? ui.value_all_sides : ui.value_inherited;
         hint.textContent = `${label} ${ui[inherited.mode]} : ${value}`;
       };
@@ -687,7 +690,7 @@ function renderSettings() {
         // rebuilding the controls or moving keyboard focus.
         sourceHints.forEach(updateHint => updateHint(styles));
       });
-      const warningText = name === 'visibility' ? ui.visibility_warning : name === 'position' ? ui.position_warning : null;
+      const warningText = name === 'visibility' ? ui.visibility_warning : name === 'position' ? ui.position_warning : name === 'border_style' ? ui.border_help : null;
       const warning = warningText ? text('small', warningText, 'pb-inherit-hint') : null;
       if (warning) warning.id = id();
       field.querySelectorAll('input,select,textarea').forEach(control => control.setAttribute('aria-describedby', warning ? `${hint.id} ${warning.id}` : hint.id));
@@ -902,6 +905,9 @@ function applyVisualStyles(doc) {
               if (key === 'color') node.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,span,li,blockquote,cite,summary').forEach(child => { if (child.closest('.pb-layout') === canvas) child.style.color = 'inherit'; });
             }
             else if (key === 'align' && ['left', 'center', 'right'].includes(value)) node.style.textAlign = value;
+            else if (key === 'border_style' && ['none', 'solid', 'dashed', 'dotted', 'double'].includes(value)) node.style.borderStyle = value;
+            else if (key === 'border_width' && Number.isInteger(value) && value >= 0 && value <= 100) node.style.borderWidth = `${value}px`;
+            else if (key === 'border_color' && cssColor(value) !== null) node.style.borderColor = cssColor(value);
             else if (key === 'width' && cssLength(value, true) !== null) node.style.width = cssLength(value, true);
             else if (key === 'position' && ['static', 'relative', 'absolute', 'fixed', 'sticky'].includes(value)) node.style.position = value;
             else if (['offset_top', 'offset_right', 'offset_bottom', 'offset_left'].includes(key) && cssOffset(value) !== null) node.style[key.slice(7)] = cssOffset(value);

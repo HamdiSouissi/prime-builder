@@ -128,9 +128,20 @@ final class Compiler
             $length = str_starts_with($key, 'margin_') ? Values::offset($value) : Values::length($value);
             return $length !== null ? self::SPACING_SIDES[$key] . ':' . $length . ';' : '';
         }
-        if (in_array($key, ['color', 'background'], true)) {
+        if (in_array($key, ['color', 'background', 'border_color'], true)) {
             $color = Values::color($value);
-            return $color !== null ? ($key === 'background' ? 'background-color' : 'color') . ':' . $color . ';' : '';
+            $property = match ($key) {
+                'background' => 'background-color', 'border_color' => 'border-color', default => 'color',
+            };
+            return $color !== null ? $property . ':' . $color . ';' : '';
+        }
+        if ($key === 'border_width') {
+            $width = Values::borderWidth($value);
+            return $width !== null ? 'border-width:' . $width . ';' : '';
+        }
+        if ($key === 'border_style') {
+            $style = Values::borderStyle($value);
+            return $style !== null ? 'border-style:' . $style . ';' : '';
         }
         if ($key === 'align' && is_string($value) && in_array($value, ['left', 'center', 'right'], true)) {
             return 'text-align:' . $value . ';';

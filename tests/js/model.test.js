@@ -162,6 +162,19 @@ test('responsive inheritance finds the nearest previous explicit value, includin
   assert.equal(inheritedStyle(styles, 'mobile', 'width'), null);
   assert.equal(inheritedStyle(null, 'mobile', 'width'), null);
 });
+test('border overrides inherit independently and clearing them preserves explicit zero', () => {
+  const desktop = { desktop: { border_style: 'solid', border_width: 4, border_color: 'kit:primary' } };
+  const tablet = setResponsiveStyle(desktop, 'tablet', 'border_width', 0);
+  const mobile = setResponsiveStyle(tablet, 'mobile', 'border_style', 'none');
+  assert.deepEqual(inheritedStyle(mobile, 'tablet', 'border_style'), { mode: 'desktop', value: 'solid' });
+  assert.deepEqual(inheritedStyle(mobile, 'mobile', 'border_width'), { mode: 'tablet', value: 0 });
+  assert.deepEqual(inheritedStyle(mobile, 'mobile', 'border_color'), { mode: 'desktop', value: 'kit:primary' });
+  const cleared = setResponsiveStyle(mobile, 'tablet', 'border_width', undefined);
+  assert.deepEqual(inheritedStyle(cleared, 'mobile', 'border_width'), { mode: 'desktop', value: 4 });
+  assert.equal(mobile.tablet.border_width, 0);
+  assert.equal(desktop.tablet, undefined);
+  assert.equal(cleared.mobile.border_style, 'none');
+});
 test('per-side spacing follows the cascade of side and all-sides values at each breakpoint', () => {
   const styles = {
     desktop: { padding_top: 12, padding: 20, margin: '8px', margin_left: 'auto' },

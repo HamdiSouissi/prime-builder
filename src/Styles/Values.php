@@ -45,6 +45,17 @@ final class Values
         return is_int($value) && $value >= -1000 && $value <= 1000 ? (string) $value : null;
     }
 
+    /** A predictable, bounded width in pixels; arbitrary CSS is not accepted. */
+    public static function borderWidth(mixed $value): ?string
+    {
+        return is_int($value) && $value >= 0 && $value <= 100 ? $value . 'px' : null;
+    }
+
+    public static function borderStyle(mixed $value): ?string
+    {
+        return is_string($value) && in_array($value, ['none', 'solid', 'dashed', 'dotted', 'double'], true) ? $value : null;
+    }
+
     public static function color(mixed $value): ?string
     {
         if (!is_string($value)) {

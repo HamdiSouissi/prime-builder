@@ -296,7 +296,9 @@ final class Validator
             }
             foreach ($values as $key => $value) {
                 $valid = match ($key) {
-                    'color', 'background' => Values::color($value) !== null,
+                    'color', 'background', 'border_color' => Values::color($value) !== null,
+                    'border_width' => Values::borderWidth($value) !== null,
+                    'border_style' => Values::borderStyle($value) !== null,
                     'padding', 'padding_top', 'padding_right', 'padding_bottom', 'padding_left', 'margin', 'gap', 'font_size', 'radius', 'min_height' => Values::length($value) !== null,
                     'margin_top', 'margin_right', 'margin_bottom', 'margin_left' => Values::offset($value) !== null,
                     'width' => Values::length($value, true) !== null,
