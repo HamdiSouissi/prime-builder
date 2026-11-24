@@ -996,9 +996,11 @@ function schedulePreview(target = null) {
   const sequence = ++requestNumber;
   previewTimer = setTimeout(() => renderPreview(sequence), 180);
 }
+let attachedFrameDocument = null;
 function attachFrameEvents() {
   const doc = frame.contentDocument;
-  if (!doc) return;
+  if (!doc || doc === attachedFrameDocument) return;
+  attachedFrameDocument = doc;
   doc.documentElement.dataset.pbEditorPreview = '';
   doc.addEventListener('keydown', shortcuts);
   doc.addEventListener('click', event => {
@@ -1193,6 +1195,9 @@ parentSelect.addEventListener('change', () => {
   renderParentOptions(find(history.present, selected)); parentSelect.focus();
 });
 frame.addEventListener('load', attachFrameEvents);
+// Module dependencies can finish after the iframe's load event. Attach to an
+// already-complete preview as well; the document guard prevents double binding.
+if (frame.contentDocument?.readyState === 'complete' && frame.contentDocument.URL !== 'about:blank') attachFrameEvents();
 root.addEventListener('click', async event => {
   const link = event.target.closest('a[href]');
   if (!dirty || !link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target || link.hasAttribute('download')) return;

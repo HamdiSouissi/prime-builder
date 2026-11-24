@@ -53,10 +53,28 @@ test('editor previews do not confuse an entry element with a copied zone element
       const foreign = '<div class="pb-layout" data-preview-foreign><div class="pb-element pb-heading" data-pb-id="shared_heading" data-pb-owner="ffffffffffffffffffffffff"><h2>En-tête indépendant</h2></div></div>';
       await route.fulfill({ response, body: html.replace(/(<body\b[^>]*>)/i, `$1${foreign}`) });
     });
-    await page.goto(`/admin/prime-builder/edit/${entryId}`);
+    // Force the iframe to finish before the editor module is available. A slow
+    // module request must not leave the canvas permanently unreconciled.
+    let releaseModel;
+    let modelRequested;
+    const modelGate = new Promise(resolve => { releaseModel = resolve; });
+    const modelRequest = new Promise(resolve => { modelRequested = resolve; });
+    await page.route('**/assets/plugins/prime-builder/js/model.js', async route => {
+      modelRequested();
+      await modelGate;
+      await route.continue();
+    });
+    await page.goto(`/admin/prime-builder/edit/${entryId}`, { waitUntil: 'commit' });
+    try {
+      await page.locator('[data-pb-frame]').waitFor({ state: 'attached' });
+      const previewFrame = await (await page.locator('[data-pb-frame]').elementHandle()).contentFrame();
+      await previewFrame.waitForURL(new RegExp(`/admin/content/post/${entryId}/preview`));
+      await Promise.all([modelRequest, previewFrame.waitForLoadState('load')]);
+    } finally { releaseModel(); }
     const frame = page.frameLocator('[data-pb-frame]');
     const foreign = frame.locator('[data-preview-foreign]');
     const canvas = frame.locator('.aurora-prose > .pb-layout');
+    await expect(canvas).toHaveAttribute('data-pb-editor-canvas', '');
     const entryHeading = canvas.locator(':scope > [data-pb-id="shared_heading"]');
     const zoneHeading = canvas.locator('.pb-theme_zone .pb-layout [data-pb-id="shared_heading"]');
     const sibling = canvas.locator(':scope > [data-pb-id="sibling"]');
