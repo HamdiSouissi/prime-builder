@@ -1,4 +1,4 @@
-import { History, add, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
+import { History, add, appendMediaList, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -575,7 +575,7 @@ function renderParentOptions(selectedElement) {
   walk(history.present); parentSelect.value = currentParent;
 }
 let mediaDependencies;
-async function openMedia(elementId, urlField, kind = 'image') {
+async function openMedia(elementId, urlField, kind = 'image', multiple = false) {
   try {
     if (!mediaDependencies) {
       const stylesheet = new Promise((resolve, reject) => {
@@ -587,16 +587,28 @@ async function openMedia(elementId, urlField, kind = 'image') {
     }
     const [picker, i18n] = await mediaDependencies;
     i18n.setTranslations(config.mediaMessages || {});
-    picker.openMediaPicker({ multiple: false, kinds: [kind], title: ui.choose_media, onSelect: selection => {
-      const media = Array.isArray(selection) ? selection[0] : selection;
+    picker.openMediaPicker({ multiple, kinds: [kind], title: multiple ? ui.choose_images : ui.choose_media, onSelect: selection => {
       const node = find(history.present, elementId);
-      if (!node || !media || typeof media.url !== 'string') return;
-      const settings = { ...node.settings, [urlField]: media.url };
-      if (['image', 'card', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(node.type) && typeof media.alt === 'string') settings.alt = media.alt;
-      if (['image', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(node.type)) {
-        for (const key of ['width', 'height']) if (Number.isInteger(media[key]) && media[key] > 0 && media[key] <= 10000) settings[key] = media[key];
+      if (!node) return;
+      const settings = { ...node.settings };
+      if (multiple) {
+        // Do not apply a late picker result to a different selection or panel.
+        if (selected !== elementId || panel !== 'settings' || tab !== 'content') return;
+        const current = typeof settings[urlField] === 'string' ? settings[urlField] : '';
+        const value = appendMediaList(current, Array.isArray(selection) ? selection : [selection]);
+        if (value === null) { void showMessage(ui.media_list_error); return; }
+        settings[urlField] = value;
+      } else {
+        const media = Array.isArray(selection) ? selection[0] : selection;
+        if (!media || typeof media.url !== 'string') return;
+        settings[urlField] = media.url;
+        if (['image', 'card', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(node.type) && typeof media.alt === 'string') settings.alt = media.alt;
+        if (['image', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(node.type)) {
+          for (const key of ['width', 'height']) if (Number.isInteger(media[key]) && media[key] > 0 && media[key] <= 10000) settings[key] = media[key];
+        }
       }
-      commit(update(history.present, elementId, { settings }), false, ui.choose_media); renderSettings();
+      commit(update(history.present, elementId, { settings }), false, multiple ? ui.choose_images : ui.choose_media); renderSettings();
+      if (multiple) { $('[data-pb-media-list]')?.focus({ preventScroll: true }); $('[data-pb-live]').textContent = ui.media_list_added; }
     } });
     const overlay = document.getElementById('pc-media-picker-modal');
     const grid = overlay?.querySelector('[data-prime-picker-grid]');
@@ -643,6 +655,9 @@ function renderSettings() {
       if ((['image', 'video', 'audio'].includes(element.type) && name === 'url') || (['card', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(element.type) && name === 'image_url')) {
         const choose = text('button', ui.choose_media, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMedia = '';
         choose.addEventListener('click', () => openMedia(element.id, name, ['video', 'audio'].includes(element.type) ? element.type : 'image')); fields.append(choose);
+      } else if (['gallery', 'image_carousel'].includes(element.type) && name === 'images' && schema.type === 'media_list') {
+        const choose = text('button', ui.choose_images, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMediaList = '';
+        choose.addEventListener('click', () => openMedia(element.id, name, 'image', true)); fields.append(choose);
       }
     }
     if (!fields.children.length) fields.append(text('p', ui.empty, 'pb-empty'));

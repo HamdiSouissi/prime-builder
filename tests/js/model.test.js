@@ -2,6 +2,31 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { History, add, changedElement, containsWidget, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from '../../assets/js/model.js';
 
+test('media-library selections append atomically to image lists without losing existing images', async () => {
+  const { appendMediaList } = await import('../../assets/js/model.js');
+  assert.equal(typeof appendMediaList, 'function');
+  const images = [
+    { kind: 'image', url: '/uploads/a.png', alt: 'Arbre\nvert | matin' },
+    { kind: 'image', url: '/uploads/b.png', alt: null },
+  ];
+  const snapshot = structuredClone(images);
+  assert.equal(appendMediaList('/uploads/old.png|Ancien|texte\n', images), '/uploads/old.png|Ancien|texte\n/uploads/a.png|Arbre vert | matin\n/uploads/b.png|');
+  assert.equal(appendMediaList('', images), '/uploads/a.png|Arbre vert | matin\n/uploads/b.png|');
+  assert.equal(appendMediaList('/old-a|A\r\n/old-b|B\r\n', [images[0]]), '/old-a|A\n/old-b|B\n/uploads/a.png|Arbre vert | matin');
+  assert.equal(appendMediaList('/old-a|A\n\n/old-b|B', [images[0]]), null);
+  assert.deepEqual(images, snapshot);
+  const nineteen = Array.from({ length: 19 }, (_, i) => `/uploads/${i}.png|`).join('\n');
+  assert.notEqual(appendMediaList(nineteen, [images[0]]), null);
+  assert.equal(appendMediaList(nineteen, images), null);
+  assert.equal(appendMediaList('', []), null);
+  assert.equal(appendMediaList('', [{ kind: 'video', url: '/uploads/a.mp4', alt: '' }]), null);
+  assert.equal(appendMediaList('', [{ kind: 'image', url: '/uploads/a|wrong.png', alt: '' }]), null);
+  assert.equal(appendMediaList('', [{ kind: 'image', url: '/uploads/a.png\n/uploads/b.png', alt: '' }]), null);
+  assert.notEqual(appendMediaList('', [{ kind: 'image', url: '/a', alt: 'é'.repeat(150) }]), null);
+  assert.equal(appendMediaList('', [{ kind: 'image', url: '/a', alt: 'é'.repeat(151) }]), null);
+  assert.equal(appendMediaList('/' + 'a'.repeat(9990) + '|', [images[0]]), null);
+});
+
 test('validated old nodes receive optional defaults without losing other values', () => {
   const input = [
     { id: 'empty', type: 'container', settings: null, styles: null, children: null, label: 'Existing' },

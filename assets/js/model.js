@@ -1,5 +1,27 @@
 /** Immutable tree operations shared by the editor and its tests. */
 export const clone = value => structuredClone(value);
+
+// Gallery and image-carousel fields use one URL|alternative-text row per image.
+// Keep the operation atomic: never silently drop selected images or truncate text.
+export function appendMediaList(current, selection) {
+  if (typeof current !== 'string' || !Array.isArray(selection) || selection.length === 0) return null;
+  const base = current.trim() ? current.trimEnd() : '';
+  const newline = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/u;
+  const existing = base ? base.split(newline) : [];
+  if (existing.some(line => !line.trim()) || existing.length + selection.length > 20) return null;
+  const bytes = value => new TextEncoder().encode(value).length;
+  const appended = [];
+  for (const item of selection) {
+    if (!item || item.kind !== 'image' || typeof item.url !== 'string') return null;
+    const url = item.url.trim();
+    if (!url || /[|\u0000-\u001f\u007f\u0085\u2028\u2029]/u.test(url)) return null;
+    const alt = typeof item.alt === 'string' ? item.alt.replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/gu, ' ').trim() : '';
+    if (bytes(alt) > 300) return null;
+    appended.push(`${url}|${alt}`);
+  }
+  const value = [...existing, ...appended].join('\n');
+  return bytes(value) <= 10000 ? value : null;
+}
 export function id() { return `pb_${globalThis.crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`; }
 // Only fill optional node fields on an already validated tree. This is not a
 // validator: failed conversions must never be passed to the editable model.

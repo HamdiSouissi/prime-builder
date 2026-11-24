@@ -591,6 +591,19 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/image_carousel.js', $assets->renderScripts());
     }
 
+    public function testImageListPickerLabelsAndSchemasAreAvailableToTheEditor(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Ajouter des images de la médiathèque', $config['ui']['choose_images']);
+        self::assertSame('Images ajoutées à la liste.', $config['ui']['media_list_added']);
+        self::assertStringContainsString('Aucune image n’a été ajoutée.', $config['ui']['media_list_error']);
+        self::assertSame('Add images from the media library', t('plugin::prime-builder.ui.choose_images', [], 'en'));
+        self::assertStringContainsString('No images were added.', t('plugin::prime-builder.ui.media_list_error', [], 'en'));
+        self::assertSame('media_list', $config['widgets']['gallery']['fields']['images']['type']);
+        self::assertSame('media_list', $config['widgets']['image_carousel']['fields']['images']['type']);
+    }
+
     public function testGalleryAssetsAreConditionalAndFallbackLabelsAreLocalized(): void
     {
         $app = $this->activated(null);
@@ -3821,6 +3834,45 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->where('id', '=', $stored['id'])->delete());
         self::assertSame(409, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $valid, '198.51.100.23')->status());
         self::assertSame(0, $count());
+    }
+
+    public function testRateLimitHandlesBucketCreatedAfterItsFirstUpdate(): void
+    {
+        $app = $this->activated(null);
+        $database = $this->db($app);
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $ip = '203.0.113.90';
+        $now = time();
+        $key = $tokens->limitKey('interleaved-start', $ip, intdiv($now, 60));
+        $hooks = new Hooks();
+        $inserted = false;
+        $updatePrefix = 'UPDATE `' . $database->prefixed('prime_builder_form_limits') . '`';
+        // The CMS emits db.query after executing the UPDATE, but before its row
+        // count is returned. Simulate a competing request creating the bucket in
+        // exactly that interval, without relying on scheduler timing.
+        $hooks->on('db.query', static function (string $sql) use (&$inserted, $database, $key, $now, $updatePrefix): void {
+            if (!$inserted && str_starts_with($sql, $updatePrefix)) {
+                $inserted = true;
+                $database->table('prime_builder_form_limits')->insert([
+                    'key_hash' => $key,
+                    'hits' => 1,
+                    'expires_at' => gmdate('Y-m-d H:i:s', $now + 120),
+                ]);
+            }
+        });
+        $interleaved = new \Prime\Database\Connection(['prefix' => $database->prefix()], $hooks, false, $database->pdo());
+        $limiter = new \PrimeBuilder\Forms\RateLimit($interleaved, $tokens);
+        $allowed = $limiter->allow('interleaved-start', $ip, 2, 60, $now);
+        self::assertTrue($inserted);
+        self::assertTrue($allowed, 'A newly created bucket still below its limit must accept this request.');
+        $row = $database->table('prime_builder_form_limits')->where('key_hash', '=', $key)->first();
+        self::assertNotNull($row);
+        self::assertSame(2, (int) $row['hits']);
+        self::assertFalse($limiter->allow('interleaved-start', $ip, 2, 60, $now));
+        $row = $database->table('prime_builder_form_limits')->where('key_hash', '=', $key)->first();
+        self::assertNotNull($row);
+        self::assertSame(2, (int) $row['hits']);
     }
 
     public function testContactFormRateLimitsAndScheduledPurge(): void

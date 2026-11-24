@@ -26,14 +26,21 @@ final class RateLimit
         if ($this->db->update($sql, [$key, $maximum]) === 1) {
             return true;
         }
+        return $this->createOrRetry($sql, $key, $maximum, gmdate('Y-m-d H:i:s', ($bucket + 1) * $seconds + 60));
+    }
+
+    private function createOrRetry(string $sql, string $key, int $maximum, string $expiresAt): bool
+    {
         if ($this->db->table(self::TABLE)->where('key_hash', '=', $key)->exists()) {
-            return false;
+            // The first UPDATE may have seen no row while another request was
+            // creating it. Retry atomically before deciding the bucket is full.
+            return $this->db->update($sql, [$key, $maximum]) === 1;
         }
         try {
             $this->db->table(self::TABLE)->insert([
                 'key_hash' => $key,
                 'hits' => 1,
-                'expires_at' => gmdate('Y-m-d H:i:s', ($bucket + 1) * $seconds + 60),
+                'expires_at' => $expiresAt,
             ]);
             return true;
         } catch (QueryException $exception) {
