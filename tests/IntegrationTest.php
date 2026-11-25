@@ -892,6 +892,11 @@ final class IntegrationTest extends TestCase
     {
         $app = $this->activated('admin');
         $config = $this->editorConfig($app, 1);
+        self::assertSame('Ligne à illustrer', $config['ui']['media_row_label']);
+        self::assertSame('Choisir l’image de la ligne', $config['ui']['media_row_choose']);
+        self::assertStringContainsString('Trop de lignes', $config['ui']['media_row_overflow']);
+        self::assertStringContainsString('Aucune modification', $config['ui']['media_row_changed']);
+        self::assertStringContainsString('portrait est décoratif', $config['ui']['media_row_help_portrait']);
         $cases = [
             'gallery' => ['images', "/uploads/a.png | A\n/uploads/b.png | B"],
             'image_carousel' => ['images', "/uploads/a.png | A\n/uploads/b.png | B"],

@@ -106,6 +106,49 @@ export function appendMediaCarouselSelection(current, rawDimensions, selection) 
   const dimensions = selectedDimensions(rawDimensions, listed, selection);
   return dimensions === null ? null : { items, dimensions };
 }
+// Portfolio rows need a title and category, and testimonials need a quotation.
+// Choose an image for an existing physical line instead of inventing content.
+// Other cells and rows remain untouched. A snapshot for the previous URL is
+// pruned only when no row still uses it.
+export function replaceStructuredImage(type, current, rawDimensions, index, media) {
+  const formats = {
+    slideshow: { min: 2, max: 6, image: 0, alt: 1, rows: 20, bytes: 15000 },
+    portfolio: { min: 4, max: 6, image: 0, alt: 1, rows: 24, bytes: 15000 },
+    testimonial_carousel: { min: 1, max: 4, image: 3, rows: 20, bytes: 10000 },
+  };
+  const format = Object.hasOwn(formats, type) ? formats[type] : null;
+  const bytes = value => new TextEncoder().encode(value).length;
+  if (!format || typeof current !== 'string' || bytes(current) > format.bytes || !Number.isInteger(index) || index < 0 ||
+    !media || media.kind !== 'image' || typeof media.url !== 'string') return null;
+  const url = media.url.trim();
+  if (!url || bytes(url) > 2048 || /[|\u0000-\u001f\u007f\u0085\u2028\u2029]/u.test(url)) return null;
+  const alt = typeof media.alt === 'string' ? media.alt.replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/gu, ' ').trim() : '';
+  if (format.alt !== undefined && (alt.includes('|') || bytes(alt) > 300)) return null;
+  const newline = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/u;
+  const lines = current.split(newline);
+  if (index >= lines.length || !lines[index].trim() || lines.filter(line => line.trim()).length > format.rows) return null;
+  const parts = lines[index].split('|');
+  if (parts.length < format.min || parts.length > format.max ||
+    (type === 'portfolio' && (!parts[2].trim() || !parts[3].trim())) ||
+    (type === 'testimonial_carousel' && !parts[0].trim())) return null;
+  // Preserve whitespace around the edited cells and the content of all others.
+  const cell = (old, value) => {
+    const match = old.match(/^([ \t]*)(.*?)([ \t]*)$/u);
+    return match ? `${match[1]}${value}${match[3]}` : value;
+  };
+  if (format.image >= parts.length) {
+    lines[index] += ' | '.repeat(format.image - parts.length + 1) + url;
+  } else {
+    parts[format.image] = cell(parts[format.image], url);
+    if (format.alt !== undefined) parts[format.alt] = cell(parts[format.alt], alt);
+    lines[index] = parts.join('|');
+  }
+  const items = lines.join('\n');
+  if (bytes(items) > format.bytes) return null;
+  const listed = new Set(lines.map(line => line.split('|')[format.image]?.trim()).filter(Boolean));
+  const dimensions = selectedDimensions(rawDimensions, listed, [media], format.rows);
+  return dimensions === null ? null : { items, dimensions };
+}
 export function id() { return `pb_${globalThis.crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`; }
 // Only fill optional node fields on an already validated tree. This is not a
 // validator: failed conversions must never be passed to the editable model.

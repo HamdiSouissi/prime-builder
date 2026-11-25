@@ -1,4 +1,4 @@
-import { History, add, appendMediaCarouselSelection, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, replaceImageSource, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
+import { History, add, appendMediaCarouselSelection, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, replaceImageSource, replaceStructuredImage, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
 import { makeRichField } from './rich-text.js';
 
 const root = document.querySelector('[data-pb-app]');
@@ -583,11 +583,18 @@ function isImageSource(type, field) {
 }
 let mediaDependencies;
 let mediaRequest = 0;
-async function openMedia(elementId, urlField, kind, multiple, opener) {
+async function openMedia(elementId, urlField, kind, multiple, opener, structured = null) {
   // The dependency import can finish after the author has changed panels or
   // even left and returned to this element. A rebuilt opener is a new request.
   const request = ++mediaRequest;
   const isCurrent = () => request === mediaRequest && opener.isConnected && selected === elementId && panel === 'settings' && tab === 'content';
+  const sameStructuredRow = node => {
+    if (!structured) return true;
+    const settings = node.settings || {};
+    const items = typeof settings[urlField] === 'string' ? settings[urlField] : '';
+    return node.type === structured.type && items === structured.items && settings.images_dimensions === structured.dimensions &&
+      $('[data-pb-media-row-select]')?.value === String(structured.index);
+  };
   try {
     if (!mediaDependencies) {
       const stylesheet = new Promise((resolve, reject) => {
@@ -598,14 +605,27 @@ async function openMedia(elementId, urlField, kind, multiple, opener) {
       mediaDependencies = Promise.all([import('/assets/admin/js/media/picker.js'), import('/assets/admin/js/i18n.js'), stylesheet]);
     }
     const [picker, i18n] = await mediaDependencies;
-    if (!isCurrent() || !find(history.present, elementId)) return;
+    const initialNode = find(history.present, elementId);
+    if (!isCurrent() || !initialNode) return;
+    if (!sameStructuredRow(initialNode)) { void showMessage(ui.media_row_changed); return; }
     i18n.setTranslations(config.mediaMessages || {});
     picker.openMediaPicker({ multiple, kinds: [kind], title: multiple ? ui.choose_images : ui.choose_media, onSelect: selection => {
       if (!isCurrent()) return;
       const node = find(history.present, elementId);
       if (!node) return;
       let settings = { ...node.settings };
-      if (multiple) {
+      if (structured) {
+        // Importing the picker and waiting for a selection are asynchronous.
+        // Never apply a line number to a list (or snapshot) changed meanwhile.
+        const current = typeof settings[urlField] === 'string' ? settings[urlField] : '';
+        if (!sameStructuredRow(node)) { void showMessage(ui.media_row_changed); return; }
+        const media = Array.isArray(selection) ? selection[0] : selection;
+        const result = replaceStructuredImage(node.type, current, settings.images_dimensions, structured.index, media);
+        if (result === null) { void showMessage(ui.media_row_error); return; }
+        settings[urlField] = result.items;
+        if (result.dimensions) settings.images_dimensions = result.dimensions;
+        else delete settings.images_dimensions;
+      } else if (multiple) {
         const current = typeof settings[urlField] === 'string' ? settings[urlField] : '';
         const images = Array.isArray(selection) ? selection : [selection];
         if (node.type === 'media_carousel' && urlField === 'items') {
@@ -627,11 +647,16 @@ async function openMedia(elementId, urlField, kind, multiple, opener) {
         if (isImageSource(node.type, urlField)) settings = replaceImageSource(settings, urlField, media.url, media);
         else settings[urlField] = media.url;
       }
-      commit(update(history.present, elementId, { settings }), false, multiple ? ui.choose_images : ui.choose_media); renderSettings();
+      commit(update(history.present, elementId, { settings }), false, structured ? ui.media_row_choose : multiple ? ui.choose_images : ui.choose_media); renderSettings();
       // Core restores the original opener before calling onSelect; rebuilding
       // the settings removes that node, so restore focus to its replacement.
-      $(multiple ? '[data-pb-media-list]' : '[data-pb-media]')?.focus({ preventScroll: true });
-      if (multiple) $('[data-pb-live]').textContent = ui.media_list_added;
+      if (structured) {
+        const row = $('[data-pb-media-row-select]');
+        if (row && [...row.options].some(option => option.value === String(structured.index))) row.value = String(structured.index);
+      }
+      $(structured ? '[data-pb-media-row]' : multiple ? '[data-pb-media-list]' : '[data-pb-media]')?.focus({ preventScroll: true });
+      if (structured) $('[data-pb-live]').textContent = ui.media_row_updated;
+      else if (multiple) $('[data-pb-live]').textContent = ui.media_list_added;
     } });
     const overlay = document.getElementById('pc-media-picker-modal');
     const grid = overlay?.querySelector('[data-prime-picker-grid]');
@@ -671,6 +696,55 @@ async function openMedia(elementId, urlField, kind, multiple, opener) {
     mediaDependencies = null;
     if (isCurrent()) $('[data-pb-save-state]').textContent = ui.media_error;
   }
+}
+function makeStructuredMediaControl(element, input) {
+  const group = document.createElement('div');
+  const label = document.createElement('label'); label.className = 'pb-field';
+  label.append(text('span', ui.media_row_label));
+  const row = document.createElement('select'); row.dataset.pbMediaRowSelect = '';
+  const help = text('p', element.type === 'testimonial_carousel' ? ui.media_row_help_portrait : ui.media_row_help, 'pb-intro');
+  help.id = id(); row.setAttribute('aria-describedby', help.id); label.append(row);
+  const choose = text('button', ui.media_row_choose, 'pb-media-button'); choose.type = 'button';
+  choose.dataset.pbMediaRow = ''; choose.setAttribute('aria-haspopup', 'dialog'); choose.setAttribute('aria-describedby', help.id);
+  const feedback = text('p', '', 'pb-sr-only'); feedback.dataset.pbMediaRowStatus = ''; feedback.setAttribute('role', 'status');
+  const syncRows = () => {
+    const prior = row.value;
+    row.replaceChildren();
+    const lines = input.value.split(/\r\n|[\n\r\v\f\u0085\u2028\u2029]/u);
+    const present = [];
+    const maximum = element.type === 'portfolio' ? 24 : 20;
+    for (const [index, line] of lines.entries()) {
+      if (!line.trim()) continue;
+      present.push({ line, index });
+      if (present.length > maximum) break;
+    }
+    const reason = present.length > maximum ? ui.media_row_overflow : !present.length ? ui.media_row_empty : '';
+    if (feedback.textContent !== reason) feedback.textContent = reason;
+    if (reason) {
+      const empty = text('option', reason); empty.value = ''; row.append(empty);
+    } else for (const { line, index } of present) {
+      const parts = line.split('|');
+      const summary = element.type === 'testimonial_carousel' ? parts[0] : [parts[2], parts[1], parts[0]].find(part => part?.trim());
+      const characters = [...(summary || '').trim().replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]+/gu, ' ')];
+      const excerpt = characters.slice(0, 60).join('') + (characters.length > 60 ? '…' : '');
+      const option = text('option', `${ui.media_row_number} ${index + 1}${excerpt ? ` — ${excerpt}` : ''}`);
+      option.value = String(index); row.append(option);
+    }
+    row.disabled = row.options[0].value === '';
+    choose.disabled = row.disabled;
+    if ([...row.options].some(option => option.value === prior)) row.value = prior;
+  };
+  input.addEventListener('input', syncRows); syncRows();
+  choose.addEventListener('click', () => {
+    const current = find(history.present, element.id);
+    if (!current || row.value === '') return;
+    const items = typeof current.settings.items === 'string' ? current.settings.items : '';
+    openMedia(element.id, 'items', 'image', false, choose, {
+      type: current.type, index: Number(row.value), items, dimensions: current.settings.images_dimensions,
+    });
+  });
+  group.append(label, choose, help, feedback);
+  return group;
 }
 function renderSettings() {
   const element = find(history.present, selected);
@@ -714,6 +788,9 @@ function renderSettings() {
         (element.type === 'media_carousel' && name === 'items' && schema.type === 'media_carousel_items')) {
         const choose = text('button', ui.choose_images, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMediaList = '';
         choose.addEventListener('click', () => openMedia(element.id, name, 'image', true, choose)); fields.append(choose);
+      } else if (name === 'items' && ['slideshow', 'portfolio', 'testimonial_carousel'].includes(element.type)) {
+        const input = fields.querySelector('textarea[data-pb-setting="items"]');
+        if (input) fields.append(makeStructuredMediaControl(element, input));
       }
     }
     if (!fields.children.length) fields.append(text('p', ui.empty, 'pb-empty'));

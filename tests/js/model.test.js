@@ -115,6 +115,66 @@ test('media carousel appends selected images atomically and keys dimensions by i
   assert.equal(appendMediaCarouselSelection('/' + 'a'.repeat(14990), '', [selection[0]]), null);
 });
 
+test('a structured list replaces only the chosen row image and binds known dimensions to its URL', async () => {
+  const { replaceStructuredImage } = await import('../../assets/js/model.js');
+  assert.equal(typeof replaceStructuredImage, 'function');
+  const picked = { kind: 'image', url: '/wide.png', alt: 'Paysage\nvert', width: 320, height: 200 };
+  const snapshot = structuredClone(picked);
+  const cases = [
+    ['slideshow', '/old.png | Ancien | Première | Description | Voir | /suite\n/other.png | Autre | Deuxième', '/old.png | Ancien | Première | Description | Voir | /suite\n/wide.png | Paysage vert | Deuxième'],
+    ['portfolio', '/old.png | Ancien | Projet A | Art | Description | /suite\n/other.png | Autre | Projet B | Sites', '/old.png | Ancien | Projet A | Art | Description | /suite\n/wide.png | Paysage vert | Projet B | Sites'],
+    ['testimonial_carousel', 'Excellent | Camille | Designer | /old.png\nTrès bien | Alex | Artiste', 'Excellent | Camille | Designer | /old.png\nTrès bien | Alex | Artiste | /wide.png'],
+  ];
+  const dimensions = JSON.stringify([{ url: '/old.png', width: 30, height: 40 }, { url: '/other.png', width: 60, height: 90 }, { url: '/removed.png', width: 1, height: 2 }]);
+  for (const [type, items, expected] of cases) {
+    const result = replaceStructuredImage(type, items, dimensions, 1, picked);
+    assert.equal(result.items, expected, type);
+    assert.deepEqual(JSON.parse(result.dimensions), [{ url: '/old.png', width: 30, height: 40 }, { url: '/wide.png', width: 320, height: 200 }], type);
+  }
+  assert.deepEqual(picked, snapshot);
+  const duplicate = replaceStructuredImage('slideshow', '/same.png|A\n/same.png|B', '[{"url":"/same.png","width":1,"height":2}]', 1, picked);
+  assert.deepEqual(JSON.parse(duplicate.dimensions), [{ url: '/same.png', width: 1, height: 2 }, { url: '/wide.png', width: 320, height: 200 }]);
+  const unknown = replaceStructuredImage('slideshow', '/same.png|A', '[{"url":"/same.png","width":1,"height":2}]', 0, { kind: 'image', url: '/same.png', alt: '', width: null, height: 2 });
+  assert.deepEqual(unknown, { items: '/same.png|', dimensions: '' });
+  const portrait = replaceStructuredImage('testimonial_carousel', 'Un témoignage', '', 0, { ...picked, alt: 'inutilisé | décoratif' });
+  assert.equal(portrait.items, 'Un témoignage |  |  | /wide.png');
+  const emptySlide = replaceStructuredImage('slideshow', ' | ', '', 0, picked);
+  assert.equal(emptySlide.items, ' /wide.png| Paysage vert');
+  const draft = replaceStructuredImage('portfolio', ' |  | Nouveau projet | Art', '', 0, picked);
+  assert.equal(draft.items, ' /wide.png|  Paysage vert| Nouveau projet | Art');
+  const physical = replaceStructuredImage('slideshow', '/old|Alt\r\n\r\n/other|Alt|Deuxième', '', 2, picked);
+  assert.equal(physical.items, '/old|Alt\n\n/wide.png|Paysage vert|Deuxième');
+});
+
+test('structured image replacement refuses malformed rows, excessive values and invalid metadata atomically', async () => {
+  const { replaceStructuredImage } = await import('../../assets/js/model.js');
+  const media = { kind: 'image', url: '/a.png', alt: 'Description', width: 1, height: 10000 };
+  assert.equal(replaceStructuredImage('gallery', '/old|alt', '', 0, media), null);
+  assert.equal(replaceStructuredImage('toString', '/old|alt', '', 0, media), null);
+  for (const [type, items, index] of [
+    ['slideshow', '', 0], ['slideshow', '/old', 0], ['slideshow', '/a|A|T|D|L|/x|extra', 0],
+    ['portfolio', '/a|A|Titre', 0], ['portfolio', '/a|A||Catégorie', 0], ['portfolio', '/a|A|Titre|', 0],
+    ['testimonial_carousel', ' | Auteur', 0], ['testimonial_carousel', 'Texte|Auteur|Fonction|/a|extra', 0],
+    ['slideshow', '/old|alt\n\n/other|alt', 1], ['slideshow', '/old|alt', -1], ['slideshow', '/old|alt', 1], ['slideshow', '/old|alt', 0.5],
+  ]) assert.equal(replaceStructuredImage(type, items, '', index, media), null, `${type} ${items} ${index}`);
+  assert.equal(replaceStructuredImage('slideshow', '/old|alt', '{bad', 0, media), null);
+  assert.equal(replaceStructuredImage('slideshow', '/old|alt', '[{"url":"/old","width":"1","height":2}]', 0, media), null);
+  assert.equal(replaceStructuredImage('slideshow', '/old|alt', '', 0, { ...media, kind: 'video' }), null);
+  assert.equal(replaceStructuredImage('slideshow', '/old|alt', '', 0, { ...media, url: '/bad|image' }), null);
+  assert.equal(replaceStructuredImage('slideshow', '/old|alt', '', 0, { ...media, url: '/bad\nimage' }), null);
+  assert.equal(replaceStructuredImage('slideshow', '/old|alt', '', 0, { ...media, url: '/' + 'a'.repeat(2048) }), null);
+  assert.equal(replaceStructuredImage('slideshow', '/old|alt', '', 0, { ...media, alt: 'Un | autre champ' }), null);
+  assert.notEqual(replaceStructuredImage('portfolio', '/old|alt|Titre|Catégorie', '', 0, { ...media, alt: 'é'.repeat(150) }), null);
+  assert.equal(replaceStructuredImage('portfolio', '/old|alt|Titre|Catégorie', '', 0, { ...media, alt: 'é'.repeat(151) }), null);
+  const twentySlides = Array.from({ length: 20 }, (_, index) => `/${index}|alt`).join('\n');
+  assert.notEqual(replaceStructuredImage('slideshow', twentySlides, '', 19, media), null);
+  assert.equal(replaceStructuredImage('slideshow', `${twentySlides}\n/extra|alt`, '', 0, media), null);
+  const twentyFourProjects = Array.from({ length: 24 }, (_, index) => `/${index}|alt|Projet|Art`).join('\n');
+  assert.notEqual(replaceStructuredImage('portfolio', twentyFourProjects, '', 23, media), null);
+  assert.equal(replaceStructuredImage('portfolio', `${twentyFourProjects}\n/extra|alt|Projet|Art`, '', 0, media), null);
+  assert.equal(replaceStructuredImage('testimonial_carousel', 'x'.repeat(10000), '', 0, media), null);
+});
+
 test('validated old nodes receive optional defaults without losing other values', () => {
   const input = [
     { id: 'empty', type: 'container', settings: null, styles: null, children: null, label: 'Existing' },
