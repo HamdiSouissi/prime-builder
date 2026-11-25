@@ -3219,6 +3219,8 @@ test('filtered HTML is previewed, sanitized, saved and reopened', async ({ page 
   await page.goto(`/admin/prime-builder/edit/${htmlId}`);
   await page.getByRole('button', { name: 'Ajouter HTML filtré', exact: true }).click();
   const field = page.getByLabel('Code HTML filtré', { exact: true });
+  // The privileged HTML widget keeps its source-only control.
+  await expect(page.getByRole('button', { name: 'Éditeur visuel', exact: true })).toHaveCount(0);
   await field.fill('<p>Un <strong>fragment HTML</strong><script>alert(1)</script><a href="javascript:alert(1)" onclick="alert(2)">lien</a></p>');
   const frame = page.frameLocator('[data-pb-frame]');
   await expect(frame.locator('.pb-html strong')).toHaveText('fragment HTML');

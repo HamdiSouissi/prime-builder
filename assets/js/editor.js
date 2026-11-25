@@ -1,4 +1,5 @@
 import { History, add, appendMediaList, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
+import { makeRichField } from './rich-text.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -522,8 +523,9 @@ function makeStyleControl(name, schema, current, onChange) {
   input.addEventListener('input', emit); units.addEventListener('change', emit);
   row.append(input, units); wrapper.append(row); return wrapper;
 }
-function makeField(name, schema, current, onChange) {
+function makeField(name, schema, current, onChange, allowVisualRich = true) {
   if (['color', 'length', 'offset', 'z_index'].includes(schema.type)) return makeStyleControl(name, schema, current, onChange);
+  if (schema.type === 'rich' && allowVisualRich) return makeRichField({ name, label: schema.label || ui[name] || name, schema, current, onChange, ui, id });
   const wrapper = document.createElement('label'); wrapper.className = 'pb-field';
   wrapper.append(text('span', schema.label || ui[name] || name));
   let input;
@@ -654,7 +656,7 @@ function renderSettings() {
         const settings = { ...current.settings };
         if (value === undefined) delete settings[name]; else settings[name] = value;
         commit(update(history.present, selected, { settings }), false, `${ui.content} : ${schema.label || ui[name] || name}`);
-      }));
+      }, element.type !== 'html'));
       if ((['image', 'video', 'audio'].includes(element.type) && name === 'url') || (['card', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(element.type) && name === 'image_url')) {
         const choose = text('button', ui.choose_media, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMedia = '';
         choose.addEventListener('click', () => openMedia(element.id, name, ['video', 'audio'].includes(element.type) ? element.type : 'image')); fields.append(choose);

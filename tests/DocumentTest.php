@@ -440,6 +440,32 @@ final class DocumentTest extends TestCase
         self::assertStringNotContainsString('onerror', $html);
     }
 
+    public function testRichTextKeepsBasicMarkupAndEnforcesItsUtf8ByteLimit(): void
+    {
+        $node = $this->element('text');
+        $node['settings'] = ['text' => '<h3>Sous-titre</h3><ul><li>Élément</li></ul><table><tbody><tr><th>Nom</th><td>Valeur</td></tr></tbody></table><p><a href="/guide" target="_blank" onclick="evil()">Guide</a> <a href="jav&#x61;script:evil()">Danger</a><script>evil()</script></p>'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $normalized = $result['data']['elements'][0]['settings']['text'];
+        self::assertIsString($normalized);
+        self::assertStringContainsString('<h3>Sous-titre</h3>', $normalized);
+        self::assertStringContainsString('<ul><li>Élément</li></ul>', $normalized);
+        self::assertStringContainsString('<table><tbody><tr><th>Nom</th><td>Valeur</td></tr></tbody></table>', $normalized);
+        self::assertStringContainsString('<a href="/guide" target="_blank" rel="noopener noreferrer">Guide</a>', $normalized);
+        self::assertStringContainsString('Danger', $normalized);
+        self::assertStringNotContainsString('onclick', $normalized);
+        self::assertStringNotContainsString('javascript:', $normalized);
+        self::assertStringNotContainsString('<script', $normalized);
+        $rendered = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertStringContainsString('<th>Nom</th><td>Valeur</td>', $rendered);
+        self::assertStringNotContainsString('<script', $rendered);
+
+        $node['settings'] = ['text' => str_repeat('é', 10000)];
+        self::assertSame([], $this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        $node['settings'] = ['text' => str_repeat('é', 10001)];
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+    }
+
     public function testUnknownWidgetDuplicateIdAndInvalidChildrenAreRejected(): void
     {
         $a = $this->element();
