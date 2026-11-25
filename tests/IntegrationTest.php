@@ -2569,6 +2569,56 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/table_of_contents.js', $assets->renderScripts());
     }
 
+    public function testTableOfContentsRichTextTargetsPersistAndAreScopedInThemeParts(): void
+    {
+        $app = $this->activated('admin');
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'builder', ['*'])['token'];
+        $elements = [
+            ['id' => 'toc', 'type' => 'table_of_contents', 'settings' => ['label' => 'Plan du texte'], 'styles' => [], 'children' => []],
+            ['id' => 'article', 'type' => 'text', 'settings' => ['text' => '<h2>Notre <em>histoire</em></h2><h3>Étape &amp; suite</h3><p>Contenu.</p>'], 'styles' => [], 'children' => []],
+        ];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = $elements;
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('<a href="#pb-toc-article-rich-1">Notre histoire</a>', $entry->contentHtml);
+        self::assertStringContainsString('<h2 id="pb-toc-article-rich-1" tabindex="-1">Notre <em>histoire</em></h2>', $entry->contentHtml);
+        self::assertStringContainsString('<a href="#pb-toc-article-rich-2">Étape &amp; suite</a>', $entry->contentHtml);
+        self::assertStringNotContainsString('pb-toc-article-rich', $entry->content);
+        self::assertSame($elements[1]['settings']['text'], $entry->decodedContent()['blocks'][0]['data']['elements'][1]['settings']['text']);
+
+        $document['blocks'][0]['data']['elements'][1]['settings']['text'] = '<h2>Titre modifié</h2><h4>Nouveau détail</h4>';
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        $body = json_decode($preview->body(), true);
+        self::assertIsArray($body);
+        self::assertStringContainsString('<a href="#pb-toc-article-rich-1">Titre modifié</a>', $body['data']['html']);
+        self::assertStringContainsString('<h4 id="pb-toc-article-rich-2" tabindex="-1">Nouveau détail</h4>', $body['data']['html']);
+        self::assertStringNotContainsString('Notre histoire</a>', $body['data']['html']);
+
+        $snapshot = ['id' => str_repeat('b', 32), 'name' => 'Texte partagé', 'elements' => $elements];
+        $app->get(Settings::class)->set('plugin.prime-builder.theme_partials', ['header' => $snapshot, 'footer' => $snapshot, 'exclude' => []]);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry);
+        $hooks = $app->get(Hooks::class);
+        $targets = [];
+        foreach (['header', 'footer'] as $slot) {
+            $part = $hooks->apply('site.partial', null, $slot, $page, []);
+            self::assertIsString($part);
+            self::assertSame(1, preg_match('~href="#(pb-toc-pbt_' . $slot . '_[a-f0-9]{24}-rich-1)">Notre histoire</a>~', $part, $matches));
+            $target = $matches[1] ?? '';
+            $targets[] = $target;
+            self::assertStringContainsString('<h2 id="' . $target . '" tabindex="-1">Notre <em>histoire</em></h2>', $part);
+            self::assertSame(1, substr_count($part, 'id="' . $target . '"'));
+        }
+        self::assertCount(2, array_unique($targets));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/table_of_contents.css'));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/table_of_contents.js', $assets->renderScripts());
+    }
+
     public function testSearchFormPersistsUsableHtmlAndRefreshesTheCoreSearchPath(): void
     {
         $app = $this->activated('admin');

@@ -3,4 +3,4 @@
 .pb-table_of_contents .pb-toc ol{margin:.25rem 0;padding-inline-start:1.5rem}
 .pb-table_of_contents .pb-toc li{margin:.35rem 0}
 .pb-table_of_contents .pb-toc a{color:inherit;text-decoration:underline;text-underline-offset:.15em}
-.pb-table_of_contents .pb-toc a:focus-visible,.pb-element[id^="pb-toc-"]:focus-visible{outline:3px solid #ed6647;outline-offset:3px}
+.pb-table_of_contents .pb-toc a:focus-visible,.pb-element[id^="pb-toc-"]:focus-visible,.pb-text :is(h2,h3,h4)[id^="pb-toc-"]:focus-visible{outline:3px solid #ed6647;outline-offset:3px}

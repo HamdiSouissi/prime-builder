@@ -370,6 +370,7 @@ return [
         'toc_min_level' => 'Niveau de titre minimum',
         'toc_max_level' => 'Niveau de titre maximum',
         'toc_empty' => 'Aucun titre à afficher dans ce sommaire.',
+        'toc_limit' => 'Sommaire limité aux 200 premiers titres reconnus du document.',
         'initial' => 'État initial',
         'closed' => 'Fermé',
         'open' => 'Ouvert',

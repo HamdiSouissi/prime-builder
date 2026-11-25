@@ -42,7 +42,7 @@ final class Renderer
     {
         $elements = is_array($data['elements'] ?? null) ? $data['elements'] : [];
         $this->styleOwner = Scope::forLayout($styleLayout ?? $data);
-        $this->tableOfContents = $this->containsTableOfContents($elements) ? new TableOfContents($elements) : null;
+        $this->tableOfContents = $this->containsTableOfContents($elements) ? new TableOfContents($elements, $this->sanitizer) : null;
         // The editor can locate a saved entry without assuming a theme's markup.
         // A zone or theme partial is rendered without an Entry and has no marker.
         $document = $this->entry !== null && $this->entry->id > 0 ? ' data-pb-document="' . $this->entry->id . '"' : '';
@@ -191,7 +191,8 @@ final class Renderer
     private function renderWidget(string $type, array $settings, array $definition, string $id): string
     {
         $text = self::escape(is_string($settings['text'] ?? null) ? $settings['text'] : '');
-        $rich = $this->sanitizer->sanitizeBasic(is_string($settings['text'] ?? null) ? $settings['text'] : '');
+        $rich = ($type === 'text' ? $this->tableOfContents?->richText($id) : null)
+            ?? $this->sanitizer->sanitizeBasic(is_string($settings['text'] ?? null) ? $settings['text'] : '');
         $url = is_string($settings['url'] ?? null) ? $settings['url'] : '';
         $href = $this->sanitizer->sanitizeHref($url) ?? '';
         $resource = $this->sanitizer->sanitizeResourceUrl($url) ?? '';
@@ -269,7 +270,7 @@ final class Renderer
             'share_buttons' => $this->pageContext !== null
                 ? ($this->content?->shareButtonsInPage($settings, $this->pageContext) ?? ShareButtons::render($settings, '', false))
                 : ($this->content?->shareButtons($settings, $this->entry) ?? ShareButtons::render($settings, '')),
-            'table_of_contents' => ($this->tableOfContents ?? new TableOfContents([]))->render($settings),
+            'table_of_contents' => ($this->tableOfContents ?? new TableOfContents([], $this->sanitizer))->render($settings),
             'theme_zone' => $this->content?->themeZone($settings, $this->live, $this->entry) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>',
             'form' => $this->renderForm($settings, $id),
             'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry, is_string($settings['block_anchor'] ?? null) ? $settings['block_anchor'] : null),

@@ -370,6 +370,7 @@ return [
         'toc_min_level' => 'Minimum heading level',
         'toc_max_level' => 'Maximum heading level',
         'toc_empty' => 'There are no headings to show in this table of contents.',
+        'toc_limit' => 'The table of contents is limited to the first 200 recognized headings in the document.',
         'initial' => 'Initial state',
         'closed' => 'Closed',
         'open' => 'Open',

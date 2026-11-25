@@ -1750,6 +1750,126 @@ final class DocumentTest extends TestCase
         self::assertStringNotContainsString('href="#pb-toc-review"', $filtered);
     }
 
+    public function testTableOfContentsIndexesRichTextHeadingsWithoutChangingTheirSafeContent(): void
+    {
+        $toc = $this->element('table_of_contents', 'toc');
+        $toc['settings'] = ['label' => 'Plan', 'min_level' => 2, 'max_level' => 3];
+        $deepToc = $this->element('table_of_contents', 'deep-toc');
+        $deepToc['settings'] = ['label' => 'Détails', 'min_level' => 4, 'max_level' => 4];
+        $anchor = $this->element('anchor', 'manual');
+        $anchor['settings'] = ['anchor' => 'pb-toc-article-rich-1'];
+        $rich = $this->element('text', 'article');
+        $rich['settings'] = ['text' => '<h2 id="bad" onclick="evil()">Un <em>chapitre</em> &amp; suite</h2><p>Texte <strong>important</strong>.</p><h3><a href="/guide" onclick="evil()">Guide</a></h3><h4>Neige<br>blanche</h4><h2><br></h2><h3>0</h3><h2>&#8203; &nbsp;</h2><script>evil()</script>'];
+        $normal = $this->element('heading', 'article-rich-2');
+        $normal['settings'] = ['text' => 'Autre titre', 'level' => 2];
+        $hidden = $this->element('container', 'hidden-parent');
+        $hidden['hidden'] = true;
+        $hiddenText = $this->element('text', 'hidden-text');
+        $hiddenText['settings'] = ['text' => '<h2>Titre masqué</h2>'];
+        $hidden['children'] = [$hiddenText];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$toc, $deepToc, $anchor, $rich, $normal, $hidden]]);
+        self::assertSame([], $result['errors']);
+        $renderer = new Renderer(new Registry(), new HtmlSanitizer());
+        $html = $renderer->render($result['data']);
+
+        self::assertStringContainsString('<a href="#pb-toc-article-rich-1-2">Un chapitre &amp; suite</a>', $html);
+        self::assertStringContainsString('<h2 id="pb-toc-article-rich-1-2" tabindex="-1">Un <em>chapitre</em> &amp; suite</h2>', $html);
+        self::assertStringContainsString('<a href="#pb-toc-article-rich-2">Guide</a>', $html);
+        self::assertStringContainsString('<h3 id="pb-toc-article-rich-2" tabindex="-1"><a href="/guide">Guide</a></h3>', $html);
+        self::assertStringContainsString('<a href="#pb-toc-article-rich-3">Neige blanche</a>', $html);
+        self::assertStringContainsString('<h4 id="pb-toc-article-rich-3" tabindex="-1">Neige<br>blanche</h4>', $html);
+        self::assertStringContainsString('<a href="#pb-toc-article-rich-5">0</a>', $html);
+        self::assertStringContainsString('<h3 id="pb-toc-article-rich-5" tabindex="-1">0</h3>', $html);
+        self::assertStringContainsString('<a href="#pb-toc-article-rich-2-2">Autre titre</a>', $html);
+        self::assertStringContainsString('<p>Texte <strong>important</strong>.</p>', $html);
+        self::assertStringContainsString('<h2><br></h2>', $html);
+        self::assertStringNotContainsString('pb-toc-article-rich-6', $html);
+        self::assertStringNotContainsString('href="#pb-toc-hidden-text', $html);
+        self::assertStringNotContainsString('onclick', $html);
+        self::assertStringNotContainsString('<script', $html);
+        self::assertSame(1, substr_count($html, 'id="pb-toc-article-rich-1"'));
+        self::assertSame(1, substr_count($html, 'id="pb-toc-article-rich-2"'));
+        self::assertSame(1, preg_match('~<nav class="pb-toc" aria-label="Plan">(.*?)</nav>~s', $html, $plan));
+        self::assertStringNotContainsString('Neige blanche</a>', $plan[1] ?? '');
+        self::assertStringContainsString('Guide</a>', $plan[1] ?? '');
+        self::assertSame(1, preg_match('~<nav class="pb-toc" aria-label="Détails">(.*?)</nav>~s', $html, $details));
+        self::assertStringContainsString('Neige blanche</a>', $details[1] ?? '');
+        self::assertStringNotContainsString('Guide</a>', $details[1] ?? '');
+
+        $withoutToc = $renderer->render(['version' => 1, 'elements' => [$result['data']['elements'][3]]]);
+        self::assertStringContainsString('<h2>Un <em>chapitre</em> &amp; suite</h2>', $withoutToc);
+        self::assertStringNotContainsString('pb-toc-article', $withoutToc);
+    }
+
+    public function testTableOfContentsBoundsItsLinksAndShowsWhenHeadingsAreOmitted(): void
+    {
+        $toc = $this->element('table_of_contents', 'toc');
+        $toc['settings'] = ['label' => 'Plan'];
+        $long = str_repeat('é', 180);
+        $rich = $this->element('text', 'article');
+        $headings = '<h2>' . $long . '</h2>';
+        for ($i = 2; $i <= 205; ++$i) {
+            $headings .= '<h2>Titre ' . $i . '</h2>';
+        }
+        $rich['settings'] = ['text' => $headings];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$toc, $rich]]);
+        self::assertSame([], $result['errors']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertSame(200, substr_count($html, '<a href="#pb-toc-article-rich-'));
+        $label = rtrim(mb_strcut($long, 0, 297, 'UTF-8')) . '…';
+        self::assertStringContainsString('<a href="#pb-toc-article-rich-1">' . $label . '</a>', $html);
+        self::assertStringContainsString('<h2 id="pb-toc-article-rich-1" tabindex="-1">' . $long . '</h2>', $html);
+        self::assertStringContainsString('<a href="#pb-toc-article-rich-200">Titre 200</a>', $html);
+        self::assertStringContainsString('<h2>Titre 201</h2>', $html);
+        self::assertStringNotContainsString('pb-toc-article-rich-201', $html);
+        self::assertStringContainsString(Renderer::escape(t('plugin::prime-builder.ui.toc_limit')), $html);
+
+        $plainHeading = $this->element('heading', 'long-heading');
+        $plainHeading['settings'] = ['text' => $long, 'level' => 2];
+        $plain = (new Renderer(new Registry(), new HtmlSanitizer()))->render(['version' => 1, 'elements' => [$toc, $plainHeading]]);
+        self::assertStringContainsString('<a href="#pb-toc-long-heading">' . $label . '</a>', $plain);
+        self::assertStringContainsString('<h2>' . $long . '</h2>', $plain);
+        self::assertStringNotContainsString(Renderer::escape(t('plugin::prime-builder.ui.toc_limit')), $plain);
+    }
+
+    public function testRepeatedTablesOfContentsKeepTheirGeneratedOutputBounded(): void
+    {
+        $elements = [];
+        for ($i = 0; $i < 20; ++$i) {
+            $toc = $this->element('table_of_contents', 'toc' . $i);
+            $toc['settings'] = ['label' => 'Plan'];
+            $elements[] = $toc;
+        }
+        for ($i = 0; $i < 3; ++$i) {
+            $text = $this->element('text', 'text' . $i);
+            $text['settings'] = ['text' => str_repeat('<h2>' . str_repeat('é', 100) . '</h2>', 70)];
+            $elements[] = $text;
+        }
+        $result = $this->validator()->validate(['version' => 1, 'elements' => $elements]);
+        self::assertSame([], $result['errors']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertSame(4000, substr_count($html, '<a href="#pb-toc-text'));
+        self::assertSame(20, substr_count($html, 'class="pb-toc__limit"'));
+        self::assertLessThan(2000000, strlen($html));
+    }
+
+    public function testTableOfContentsNeverIndexesUnsafeRichTextBeforeSanitizing(): void
+    {
+        $toc = $this->element('table_of_contents', 'toc');
+        $text = $this->element('text', 'unsafe');
+        $text['settings'] = ['text' => '<script><h2>Faux titre</h2></script><h2 id="attacker" onclick="evil()">Sûr <a href="javascript:evil()">lien</a></h2><p>&lt;h3&gt;texte&lt;/h3&gt;</p>'];
+        // Deliberately bypass document validation: Renderer must filter on its own.
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render(['version' => 1, 'elements' => [$toc, $text]]);
+        self::assertStringContainsString('<a href="#pb-toc-unsafe-rich-1">Sûr lien</a>', $html);
+        self::assertStringContainsString('<h2 id="pb-toc-unsafe-rich-1" tabindex="-1">Sûr lien</h2>', $html);
+        self::assertStringContainsString('&lt;h3&gt;texte&lt;/h3&gt;', $html);
+        self::assertStringNotContainsString('Faux titre', $html);
+        self::assertStringNotContainsString('javascript:', $html);
+        self::assertStringNotContainsString('onclick', $html);
+        self::assertStringNotContainsString('id="attacker"', $html);
+        self::assertStringNotContainsString('pb-toc-unsafe-rich-2', $html);
+    }
+
     public function testThemeZoneValidatesTheSlugAndHasAReadableFallback(): void
     {
         $node = $this->element('theme_zone');
