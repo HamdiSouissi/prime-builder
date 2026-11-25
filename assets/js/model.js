@@ -22,6 +22,36 @@ export function appendMediaList(current, selection) {
   const value = [...existing, ...appended].join('\n');
   return bytes(value) <= 10000 ? value : null;
 }
+
+// Dimensions are an optional snapshot keyed by the image URL, not its row
+// number: reordering or editing alternatives must not swap image proportions.
+export function appendMediaSelection(current, rawDimensions, selection) {
+  const images = appendMediaList(current, selection);
+  if (images === null || (rawDimensions !== undefined && typeof rawDimensions !== 'string')) return null;
+  const bytes = value => new TextEncoder().encode(value).length;
+  let prior;
+  try { prior = rawDimensions ? JSON.parse(rawDimensions) : []; } catch { return null; }
+  if (!Array.isArray(prior) || prior.length > 20 || (rawDimensions && bytes(rawDimensions) > 25000)) return null;
+  const dimensions = new Map();
+  for (const item of prior) {
+    if (!item || Array.isArray(item) || typeof item !== 'object' || Object.keys(item).length !== 3 ||
+      typeof item.url !== 'string' || !item.url.trim() || /[|\u0000-\u001f\u007f\u0085\u2028\u2029]/u.test(item.url) ||
+      !Number.isInteger(item.width) || item.width < 1 || item.width > 10000 ||
+      !Number.isInteger(item.height) || item.height < 1 || item.height > 10000 || dimensions.has(item.url)) return null;
+    dimensions.set(item.url, { url: item.url, width: item.width, height: item.height });
+  }
+  const listed = new Set(images.split(/\r\n|[\n\r\v\f\u0085\u2028\u2029]/u).map(line => line.split('|', 1)[0].trim()));
+  for (const url of dimensions.keys()) if (!listed.has(url)) dimensions.delete(url);
+  for (const item of selection) {
+    const url = item.url.trim();
+    if (Number.isInteger(item.width) && item.width >= 1 && item.width <= 10000 &&
+      Number.isInteger(item.height) && item.height >= 1 && item.height <= 10000) {
+      dimensions.set(url, { url, width: item.width, height: item.height });
+    } else dimensions.delete(url);
+  }
+  const encoded = dimensions.size ? JSON.stringify([...dimensions.values()]) : '';
+  return bytes(encoded) <= 25000 ? { images, dimensions: encoded } : null;
+}
 export function id() { return `pb_${globalThis.crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`; }
 // Only fill optional node fields on an already validated tree. This is not a
 // validator: failed conversions must never be passed to the editable model.

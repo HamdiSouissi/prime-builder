@@ -42,6 +42,7 @@ require_once dirname(__DIR__) . '/src/Widgets/Countdown.php';
 require_once dirname(__DIR__) . '/src/Widgets/CurrentEntry.php';
 require_once dirname(__DIR__) . '/src/Widgets/Map.php';
 require_once dirname(__DIR__) . '/src/Widgets/MediaCarousel.php';
+require_once dirname(__DIR__) . '/src/Widgets/MediaDimensions.php';
 require_once dirname(__DIR__) . '/src/Widgets/Navigation.php';
 require_once dirname(__DIR__) . '/src/Widgets/OriginalContent.php';
 require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
@@ -1972,6 +1973,70 @@ final class DocumentTest extends TestCase
         $bad = $this->element('gallery');
         $bad['settings'] = ['images' => 'javascript:alert(1)|Danger'];
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$bad]])['errors']);
+    }
+
+    public function testGalleryAndCarouselPersistOnlySafeDimensionsForListedImages(): void
+    {
+        $images = "/uploads/a.jpg|Alternative | conservée\n/uploads/b.jpg|Vue\n/uploads/unknown.jpg|Autre";
+        $rows = [
+            ['url' => '/uploads/a.jpg', 'width' => 640, 'height' => 480],
+            ['url' => '/uploads/b.jpg', 'width' => 320, 'height' => 200],
+            ['url' => '/uploads/removed.jpg', 'width' => 8, 'height' => 9],
+        ];
+        $metadata = json_encode($rows, JSON_THROW_ON_ERROR);
+        foreach (['gallery', 'image_carousel'] as $type) {
+            $node = $this->element($type, $type);
+            $node['settings'] = ['images' => $images, 'images_dimensions' => $metadata];
+            $validated = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+            self::assertSame([], $validated['errors'], $type);
+            $normalized = $validated['data']['elements'][0]['settings']['images_dimensions'] ?? '';
+            self::assertIsString($normalized);
+            self::assertSame(array_slice($rows, 0, 2), json_decode($normalized, true));
+            $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($validated['data']);
+            self::assertStringContainsString('src="/uploads/a.jpg" alt="Alternative | conservée" width="640" height="480" loading="lazy"', $html);
+            self::assertStringContainsString('src="/uploads/b.jpg" alt="Vue" width="320" height="200" loading="lazy"', $html);
+            self::assertStringContainsString('src="/uploads/unknown.jpg" alt="Autre" loading="lazy"', $html);
+            self::assertStringNotContainsString('removed.jpg', $html);
+            $node['settings']['images'] = '/uploads/unknown.jpg|Autre';
+            $removed = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+            self::assertSame([], $removed['errors']);
+            self::assertArrayNotHasKey('images_dimensions', $removed['data']['elements'][0]['settings'] ?? []);
+        }
+
+        $badValues = [
+            '{bad', '{}', '[{"url":"javascript:alert(1)","width":1,"height":1}]',
+            '[{"url":"/uploads/a.jpg","width":"640","height":480}]',
+            '[{"url":"/uploads/a.jpg","width":0,"height":480}]',
+            '[{"url":"/uploads/a.jpg","width":10001,"height":480}]',
+            '[{"url":"/uploads/a.jpg","width":1.5,"height":480}]',
+            '[{"url":"/uploads/a.jpg","width":640}]',
+            '[{"url":"/uploads/a.jpg","width":640,"height":480,"onerror":"evil()"}]',
+            '[{"url":"/uploads/a.jpg","width":640,"height":480},{"url":"/uploads/a.jpg","width":1,"height":1}]',
+            json_encode(array_fill(0, 21, $rows[0]), JSON_THROW_ON_ERROR),
+            str_repeat(' ', 25001),
+        ];
+        foreach (['gallery', 'image_carousel'] as $type) {
+            foreach ($badValues as $bad) {
+                $node = $this->element($type, $type);
+                $node['settings'] = ['images' => $images, 'images_dimensions' => $bad];
+                self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors'], $type . ': ' . substr($bad, 0, 100));
+                // Even a caller that bypasses document validation cannot inject attributes.
+                $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render(['version' => 1, 'elements' => [$node]]);
+                self::assertStringNotContainsString('onerror=', $html);
+                self::assertStringNotContainsString(' width=', $html);
+            }
+        }
+
+        $url = '/uploads/a.png?x="&y=1';
+        $node = $this->element('gallery', 'gallery');
+        $node['settings'] = [
+            'images' => $url . '|Alt "quoted"',
+            'images_dimensions' => json_encode([['url' => $url, 'width' => 1, 'height' => 10000]], JSON_THROW_ON_ERROR),
+        ];
+        $validated = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $validated['errors']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($validated['data']);
+        self::assertStringContainsString('src="/uploads/a.png?x=&quot;&amp;y=1" alt="Alt &quot;quoted&quot;" width="1" height="10000"', $html);
     }
 
     public function testMediaUrlsAndGalleryAreValidated(): void

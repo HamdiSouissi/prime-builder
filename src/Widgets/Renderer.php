@@ -808,10 +808,32 @@ final class Renderer
         return $html . '</div>';
     }
 
+    /**
+     * @param array<string, mixed> $settings
+     * @return array<string, array{width: int, height: int}>
+     */
+    private function imageListDimensions(array $settings): array
+    {
+        $input = is_string($settings['images_dimensions'] ?? null) ? $settings['images_dimensions'] : '[]';
+        $result = [];
+        foreach (MediaDimensions::parse($input, $this->sanitizer) ?? [] as $row) {
+            $result[$row['url']] = ['width' => $row['width'], 'height' => $row['height']];
+        }
+        return $result;
+    }
+
+    /** @param array<string, array{width: int, height: int}> $dimensions */
+    private static function dimensionAttributes(array $dimensions, string $url): string
+    {
+        $size = $dimensions[$url] ?? null;
+        return $size === null ? '' : ' width="' . $size['width'] . '" height="' . $size['height'] . '"';
+    }
+
     /** @param array<string, mixed> $settings */
     private function renderGallery(array $settings): string
     {
         $lines = preg_split('/\R/u', $this->fieldText($settings, 'images')) ?: [];
+        $dimensions = $this->imageListDimensions($settings);
         $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.gallery_' . $key));
         $html = '<div class="pb-gallery-grid" data-pb-gallery data-pb-gallery-dialog="' . $copy('dialog') . '"'
             . ' data-pb-gallery-close="' . $copy('close') . '" data-pb-gallery-previous="' . $copy('previous') . '"'
@@ -826,7 +848,7 @@ final class Renderer
                     : t('plugin::prime-builder.ui.gallery_open', ['number' => $index + 1]);
                 // The link is a useful fallback if JS is unavailable or the plugin is disabled.
                 $html .= '<a href="' . self::escape($url) . '" data-pb-gallery-item aria-label="' . self::escape($label) . '">'
-                    . '<img src="' . self::escape($url) . '" alt="' . self::escape($alt) . '" loading="lazy" decoding="async"></a>';
+                    . '<img src="' . self::escape($url) . '" alt="' . self::escape($alt) . '"' . self::dimensionAttributes($dimensions, $url) . ' loading="lazy" decoding="async"></a>';
             }
         }
         return $html . '</div>';
@@ -851,6 +873,7 @@ final class Renderer
     private function renderImageCarousel(array $settings): string
     {
         $lines = preg_split('/\R/u', $this->fieldText($settings, 'images')) ?: [];
+        $dimensions = $this->imageListDimensions($settings);
         $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.carousel_' . $key));
         $label = $this->fieldText($settings, 'label', t('plugin::prime-builder.widgets.image_carousel'));
         $html = '<div class="pb-carousel-content" data-pb-carousel data-pb-carousel-label="' . self::escape($label) . '"'
@@ -861,7 +884,7 @@ final class Renderer
             $parts = explode('|', $line, 2);
             $url = $this->sanitizer->sanitizeResourceUrl(trim($parts[0]));
             if ($url !== null) {
-                $html .= '<div data-pb-slide><img src="' . self::escape($url) . '" alt="' . self::escape(trim(strip_tags($parts[1] ?? ''))) . '" loading="lazy" decoding="async"></div>';
+                $html .= '<div data-pb-slide><img src="' . self::escape($url) . '" alt="' . self::escape(trim(strip_tags($parts[1] ?? ''))) . '"' . self::dimensionAttributes($dimensions, $url) . ' loading="lazy" decoding="async"></div>';
             }
         }
         return $html . '</div></div>';

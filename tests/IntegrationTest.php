@@ -625,6 +625,52 @@ final class IntegrationTest extends TestCase
         self::assertSame('media_list', $config['widgets']['image_carousel']['fields']['images']['type']);
     }
 
+    public function testImageListDimensionsSurviveBothApisAndArePrunedWhenUrlsChange(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertArrayNotHasKey('images_dimensions', $config['widgets']['gallery']['fields']);
+        self::assertArrayNotHasKey('images_dimensions', $config['widgets']['image_carousel']['fields']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'image dimensions', ['*'])['token'];
+        $rows = [
+            ['url' => '/uploads/one.png', 'width' => 640, 'height' => 480],
+            ['url' => '/uploads/two.png', 'width' => 320, 'height' => 200],
+        ];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [
+            ['id' => 'gallery', 'type' => 'gallery', 'settings' => ['images' => "/uploads/one.png|Un\n/uploads/two.png|Deux", 'images_dimensions' => json_encode($rows, JSON_THROW_ON_ERROR)], 'styles' => [], 'children' => []],
+            ['id' => 'carousel', 'type' => 'image_carousel', 'settings' => ['images' => '/uploads/two.png|Deux', 'images_dimensions' => json_encode($rows, JSON_THROW_ON_ERROR)], 'styles' => [], 'children' => []],
+        ];
+        $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertSame(1, substr_count($entry->contentHtml, 'alt="Un" width="640" height="480"'));
+        self::assertSame(2, substr_count($entry->contentHtml, 'alt="Deux" width="320" height="200"'));
+        $saved = $entry->decodedContent();
+        $carouselSizes = $saved['blocks'][0]['data']['elements'][1]['settings']['images_dimensions'] ?? '';
+        self::assertIsString($carouselSizes);
+        self::assertSame([$rows[1]], json_decode($carouselSizes, true));
+
+        $document['blocks'][0]['data']['elements'][0]['settings']['images'] = '/uploads/two.png|Deux';
+        $response = $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringNotContainsString('width="640"', $entry->contentHtml);
+        self::assertSame(2, substr_count($entry->contentHtml, 'width="320" height="200"'));
+        $sizes = $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['images_dimensions'] ?? '';
+        self::assertIsString($sizes);
+        self::assertSame([$rows[1]], json_decode($sizes, true));
+
+        $document['blocks'][0]['data']['elements'][0]['settings']['images_dimensions'] = json_encode([['url' => '/uploads/two.png', 'width' => '1" onerror="evil()', 'height' => 1]], JSON_THROW_ON_ERROR);
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('width="320" height="200"', $entry->contentHtml);
+        self::assertStringNotContainsString('onerror=', $entry->contentHtml);
+    }
+
     public function testGalleryAssetsAreConditionalAndFallbackLabelsAreLocalized(): void
     {
         $app = $this->activated(null);

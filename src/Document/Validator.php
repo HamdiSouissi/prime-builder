@@ -10,6 +10,7 @@ use PrimeBuilder\Styles\Values;
 use PrimeBuilder\Widgets\Countdown;
 use PrimeBuilder\Widgets\Map;
 use PrimeBuilder\Widgets\MediaCarousel;
+use PrimeBuilder\Widgets\MediaDimensions;
 use PrimeBuilder\Widgets\OriginalContent;
 use PrimeBuilder\Widgets\Portfolio;
 use PrimeBuilder\Widgets\PrimeBlock;
@@ -130,6 +131,27 @@ final class Validator
                 }
                 $settings[$key] = $normalized;
             }
+            if (in_array($type, ['gallery', 'image_carousel'], true) && is_string($settings['images_dimensions'] ?? null)) {
+                // Keep metadata tied to its URL, never to a position that can be
+                // reordered or edited in the text field.
+                $rows = MediaDimensions::parse($settings['images_dimensions'], $this->sanitizer);
+                $images = is_string($settings['images'] ?? null) ? $settings['images'] : '';
+                if ($rows === null) {
+                    $errors[] = t('plugin::prime-builder.validation.settings');
+                } else {
+                    $rows = MediaDimensions::onlyListed($rows, $images, $this->sanitizer);
+                    if ($rows === []) {
+                        unset($settings['images_dimensions']);
+                    } else {
+                        $encoded = MediaDimensions::serialize($rows);
+                        if ($encoded === null) {
+                            $errors[] = t('plugin::prime-builder.validation.settings');
+                        } else {
+                            $settings['images_dimensions'] = $encoded;
+                        }
+                    }
+                }
+            }
             if ($type === 'prime_block') {
                 $blockType = is_string($settings['block_type'] ?? null) ? $settings['block_type'] : 'paragraph';
                 $blockData = is_string($settings['block_data'] ?? null) ? $settings['block_data'] : '{}';
@@ -209,6 +231,7 @@ final class Validator
             'latitude', 'longitude' => $value === '' || Map::coordinate($value, $type === 'latitude') !== null ? trim($value) : null,
             'json_object' => is_object(json_decode($value)) ? $value : null,
             'media_list' => $this->mediaList($value),
+            'media_dimensions' => ($dimensions = MediaDimensions::parse($value, $this->sanitizer)) === null ? null : MediaDimensions::serialize($dimensions),
             'price_items' => $this->priceItems($value),
             'media_carousel_items' => ($media = MediaCarousel::parse($value, $this->sanitizer)) === null ? null : MediaCarousel::serialize($media),
             'slideshow_items' => ($slides = Slideshow::parse($value, $this->sanitizer)) === null ? null : Slideshow::serialize($slides),

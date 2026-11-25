@@ -25,22 +25,23 @@ test('gallery and image carousel append real media selections without losing exi
   const media = [];
   let entryId = null, uploadedId = null;
   try {
-    for (const [name, alt, color] of [['picker-montagne.png', 'Montagne & ciel', '#28613f'], ['picker-ocean.png', 'Océan & soleil', '#254b83']]) {
-      const uploaded = await page.evaluate(async ({ csrf, name, color }) => {
-        const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 200;
-        const ctx = canvas.getContext('2d');
+    for (const [name, alt, color, width, height] of [['picker-montagne.png', 'Montagne & ciel', '#28613f', 320, 200], ['picker-ocean.png', 'Océan & soleil', '#254b83', 240, 300]]) {
+      const uploaded = await page.evaluate(async ({ csrf, name, color, width, height }) => {
+        const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d'); ctx.scale(width / 320, height / 200);
         ctx.fillStyle = '#e8eeeb'; ctx.fillRect(0, 0, 320, 200);
         ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(0, 180); ctx.lineTo(120, 45); ctx.lineTo(230, 170); ctx.lineTo(320, 100); ctx.lineTo(320, 200); ctx.lineTo(0, 200); ctx.fill();
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
         const form = new FormData(); form.append('file', blob, name);
         const response = await fetch('/api/v1/media', { method: 'POST', headers: { 'X-Prime-CSRF': csrf, Accept: 'application/json' }, body: form });
         return { status: response.status, body: await response.text() };
-      }, { csrf, name, color });
+      }, { csrf, name, color, width, height });
       expect(uploaded.status, uploaded.body).toBe(201);
       const item = JSON.parse(uploaded.body).data;
+      expect([item.width, item.height]).toEqual([width, height]);
       // The public API returns an absolute URL; the admin picker exposes the local path.
       const url = new URL(item.url, process.env.E2E_BASE_URL || 'http://127.0.0.1:8080');
-      media.push({ id: item.id, url: url.pathname + url.search, alt });
+      media.push({ id: item.id, url: url.pathname + url.search, alt, width, height });
       const updated = await api(`/api/v1/media/${item.id}`, 'PATCH', { alt });
       expect(updated.status, updated.body).toBe(200);
     }
@@ -236,12 +237,28 @@ test('gallery and image carousel append real media selections without losing exi
     await expect(page.locator('[data-pb-live]')).toHaveText('Images ajoutées à la liste.');
     await page.setViewportSize({ width: 1440, height: 900 });
     const frame = page.frameLocator('[data-pb-frame]');
-    await expect(frame.locator('[data-pb-id="gallery_picker"] img')).toHaveCount(3);
+    const previewImages = frame.locator('[data-pb-id="gallery_picker"] img');
+    await expect(previewImages).toHaveCount(3);
+    await expect(previewImages.nth(0)).not.toHaveAttribute('width');
+    for (const [index, item] of media.entries()) {
+      await expect(previewImages.nth(index + 1)).toHaveAttribute('width', String(item.width));
+      await expect(previewImages.nth(index + 1)).toHaveAttribute('height', String(item.height));
+    }
     await page.locator('[data-pb-undo]').focus();
     await page.keyboard.press('Control+z');
     await expect(list).toHaveValue(original);
+    await expect(previewImages).toHaveCount(1);
     await page.keyboard.press('Control+Shift+z');
     await expect(list).toHaveValue(combined);
+    await expect(previewImages.nth(1)).toHaveAttribute('width', '320');
+    await expect(previewImages.nth(1)).toHaveAttribute('height', '200');
+    // Reordering rows must follow the URL rather than the former row index.
+    await list.fill([original, ...[...media].reverse().map(item => `${item.url}|${item.alt}`)].join('\n'));
+    await expect(previewImages.nth(1)).toHaveAttribute('src', media[1].url);
+    await expect(previewImages.nth(1)).toHaveAttribute('width', '240');
+    await expect(previewImages.nth(1)).toHaveAttribute('height', '300');
+    await expect(previewImages.nth(2)).toHaveAttribute('width', '320');
+    await list.fill(combined);
 
     // A selection that would cross the 20-image limit is refused atomically.
     const nineteen = Array.from({ length: 19 }, () => original).join('\n');
@@ -275,6 +292,8 @@ test('gallery and image carousel append real media selections without losing exi
     const saved = (await response.json()).data.content.blocks[0].data;
     expect(saved.elements[0].settings.images).toBe(combined);
     expect(saved.elements[1].settings.images).toBe(`${media[1].url}|${media[1].alt}`);
+    expect(JSON.parse(saved.elements[0].settings.images_dimensions)).toEqual(media.map(({ url, width, height }) => ({ url, width, height })));
+    expect(JSON.parse(saved.elements[1].settings.images_dimensions)).toEqual([{ url: media[1].url, width: 240, height: 300 }]);
     expect(saved.items.map(item => item.mediaId).sort((a, b) => a - b)).toEqual(media.map(item => item.id).sort((a, b) => a - b));
     await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
     for (const item of media) {
@@ -297,8 +316,15 @@ test('gallery and image carousel append real media selections without losing exi
       const gallery = publicPage.locator('[data-pb-id="gallery_picker"]');
       const images = gallery.locator('[data-pb-gallery-item] img');
       await expect(images).toHaveCount(3);
+      await expect(images.nth(0)).not.toHaveAttribute('width');
       await expect(images.nth(1)).toHaveAttribute('alt', media[0].alt);
       await expect(images.nth(2)).toHaveAttribute('alt', media[1].alt);
+      for (const [index, item] of media.entries()) {
+        await expect(images.nth(index + 1)).toHaveAttribute('width', String(item.width));
+        await expect(images.nth(index + 1)).toHaveAttribute('height', String(item.height));
+      }
+      await expect(publicPage.locator('[data-pb-id="carousel_picker"] img')).toHaveAttribute('width', '240');
+      await expect(publicPage.locator('[data-pb-id="carousel_picker"] img')).toHaveAttribute('height', '300');
       await images.nth(1).scrollIntoViewIfNeeded();
       await expect.poll(() => images.nth(1).evaluate(node => node.naturalWidth)).toBe(320);
       const link = gallery.getByRole('link', { name: /Montagne & ciel/ });
@@ -319,10 +345,41 @@ test('gallery and image carousel append real media selections without losing exi
     try {
       const fallback = await noJs.newPage();
       await fallback.goto('/pb-image-list-picker');
-      await expect(fallback.locator('[data-pb-id="gallery_picker"] img')).toHaveCount(3);
-      await expect(fallback.locator('[data-pb-id="carousel_picker"] img')).toHaveCount(1);
+      const galleryImages = fallback.locator('[data-pb-id="gallery_picker"] img');
+      const carouselImage = fallback.locator('[data-pb-id="carousel_picker"] img');
+      await expect(galleryImages).toHaveCount(3);
+      await expect(carouselImage).toHaveCount(1);
+      await expect(galleryImages.nth(1)).toHaveAttribute('width', '320');
+      await expect(galleryImages.nth(1)).toHaveAttribute('height', '200');
+      await expect(carouselImage).toHaveAttribute('width', '240');
+      await expect(carouselImage).toHaveAttribute('height', '300');
       await expect(fallback.getByRole('link', { name: /Montagne & ciel/ })).toHaveAttribute('href', media[0].url);
     } finally { await noJs.close(); }
+
+    // Removing a URL and saving prunes its metadata. Typing that URL back in
+    // later does not invent dimensions; the surviving URL keeps its own size.
+    await page.locator('[data-pb-panel="navigator"]').click();
+    await page.locator('[data-pb-tree-select="gallery_picker"]').click();
+    await list.fill([original, `${media[1].url}|${media[1].alt}`].join('\n'));
+    const removal = page.waitForResponse(response => response.request().method() === 'PATCH' && response.url().endsWith(`/documents/${entryId}`));
+    await page.locator('[data-pb-save]').click();
+    const removedResponse = await removal;
+    expect(removedResponse.status()).toBe(200);
+    const removedSettings = (await removedResponse.json()).data.content.blocks[0].data.elements[0].settings;
+    expect(JSON.parse(removedSettings.images_dimensions)).toEqual([{ url: media[1].url, width: 240, height: 300 }]);
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    await list.fill(combined);
+    await expect(previewImages).toHaveCount(3);
+    await expect(previewImages.nth(1)).not.toHaveAttribute('width');
+    await expect(previewImages.nth(1)).not.toHaveAttribute('height');
+    await expect(previewImages.nth(2)).toHaveAttribute('width', '240');
+    const readdition = page.waitForResponse(response => response.request().method() === 'PATCH' && response.url().endsWith(`/documents/${entryId}`));
+    await page.locator('[data-pb-save]').click();
+    const readdedResponse = await readdition;
+    expect(readdedResponse.status()).toBe(200);
+    const readdedSettings = (await readdedResponse.json()).data.content.blocks[0].data.elements[0].settings;
+    expect(JSON.parse(readdedSettings.images_dimensions)).toEqual([{ url: media[1].url, width: 240, height: 300 }]);
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
     expect(pageErrors).toEqual([]);
 
     const empty = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: [] } }] };

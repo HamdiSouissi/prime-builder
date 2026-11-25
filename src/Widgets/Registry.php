@@ -163,8 +163,15 @@ final class Registry
             'map' => ['title' => ['type' => 'text', 'max' => 1000, 'label' => 'plugin::prime-builder.ui.map_title'], 'latitude' => ['type' => 'latitude', 'max' => 16, 'label' => 'plugin::prime-builder.ui.map_latitude'], 'longitude' => ['type' => 'longitude', 'max' => 16, 'label' => 'plugin::prime-builder.ui.map_longitude'], 'zoom' => ['type' => 'integer', 'min' => 3, 'max' => 18, 'label' => 'plugin::prime-builder.ui.map_zoom']],
             'star_rating' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 5]],
             'counter' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 1000000000], 'prefix' => $text, 'suffix' => $text, 'title' => $text],
-            'gallery' => ['images' => ['type' => 'media_list', 'max' => 10000]],
-            'image_carousel' => ['label' => ['type' => 'text', 'max' => 1000, 'label' => 'plugin::prime-builder.ui.carousel_label'], 'images' => ['type' => 'media_list', 'max' => 10000]],
+            'gallery' => [
+                'images' => ['type' => 'media_list', 'max' => 10000],
+                'images_dimensions' => ['type' => 'media_dimensions', 'max' => MediaDimensions::MAX_BYTES, 'internal' => true],
+            ],
+            'image_carousel' => [
+                'label' => ['type' => 'text', 'max' => 1000, 'label' => 'plugin::prime-builder.ui.carousel_label'],
+                'images' => ['type' => 'media_list', 'max' => 10000],
+                'images_dimensions' => ['type' => 'media_dimensions', 'max' => MediaDimensions::MAX_BYTES, 'internal' => true],
+            ],
             'video' => ['url' => $url, 'video_title' => $text, 'captions' => $url, 'caption_language' => ['type' => 'enum', 'values' => ['fr', 'en']], 'transcript' => ['type' => 'rich', 'max' => 20000]],
             'audio' => ['url' => $url, 'transcript' => ['type' => 'rich', 'max' => 20000]],
             'posts' => [

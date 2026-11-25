@@ -1,4 +1,4 @@
-import { History, add, appendMediaList, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
+import { History, add, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
 import { makeRichField } from './rich-text.js';
 
 const root = document.querySelector('[data-pb-app]');
@@ -597,9 +597,11 @@ async function openMedia(elementId, urlField, kind = 'image', multiple = false) 
         // Do not apply a late picker result to a different selection or panel.
         if (selected !== elementId || panel !== 'settings' || tab !== 'content') return;
         const current = typeof settings[urlField] === 'string' ? settings[urlField] : '';
-        const value = appendMediaList(current, Array.isArray(selection) ? selection : [selection]);
-        if (value === null) { void showMessage(ui.media_list_error); return; }
-        settings[urlField] = value;
+        const result = appendMediaSelection(current, settings.images_dimensions, Array.isArray(selection) ? selection : [selection]);
+        if (result === null) { void showMessage(ui.media_list_error); return; }
+        settings[urlField] = result.images;
+        if (result.dimensions) settings.images_dimensions = result.dimensions;
+        else delete settings.images_dimensions;
       } else {
         const media = Array.isArray(selection) ? selection[0] : selection;
         if (!media || typeof media.url !== 'string') return;

@@ -27,6 +27,43 @@ test('media-library selections append atomically to image lists without losing e
   assert.equal(appendMediaList('/' + 'a'.repeat(9990) + '|', [images[0]]), null);
 });
 
+test('media-library selections retain bounded intrinsic dimensions without changing legacy rows', async () => {
+  const { appendMediaSelection } = await import('../../assets/js/model.js');
+  assert.equal(typeof appendMediaSelection, 'function');
+  const existing = '/old.png|Alternative | conservée';
+  const metadata = JSON.stringify([
+    { url: '/old.png', width: 640, height: 480 },
+    { url: '/removed.png', width: 11, height: 12 },
+  ]);
+  const picked = [
+    { kind: 'image', url: '/new.png', alt: 'Nouveau', width: 320, height: 200 },
+    { kind: 'image', url: '/unknown.png', alt: 'Sans dimensions', width: null, height: null },
+  ];
+  const original = structuredClone(picked);
+  const result = appendMediaSelection(existing, metadata, picked);
+  assert.deepEqual(picked, original);
+  assert.equal(result.images, `${existing}\n/new.png|Nouveau\n/unknown.png|Sans dimensions`);
+  assert.deepEqual(JSON.parse(result.dimensions), [
+    { url: '/old.png', width: 640, height: 480 },
+    { url: '/new.png', width: 320, height: 200 },
+  ]);
+  assert.deepEqual(appendMediaSelection('', undefined, [picked[1]]), { images: '/unknown.png|Sans dimensions', dimensions: '' });
+  assert.equal(appendMediaSelection(existing, '{bad', picked), null);
+  assert.equal(appendMediaSelection(existing, JSON.stringify([{ url: '/old.png', width: '640', height: 480 }]), picked), null);
+  assert.equal(appendMediaSelection(existing, JSON.stringify([{ url: '/old.png', width: 1, height: 1, extra: 'bad' }]), picked), null);
+  assert.equal(appendMediaSelection(existing, ' '.repeat(25001), picked), null);
+  assert.equal(appendMediaSelection(existing, '[]', Array.from({ length: 21 }, () => picked[0])), null);
+  const replaced = appendMediaSelection(existing, metadata, [{ kind: 'image', url: '/old.png', alt: 'Même URL', width: null, height: null }]);
+  assert.equal(replaced.dimensions, '', 'an unknown replacement must not keep stale dimensions');
+  const bounded = appendMediaSelection('', '', [
+    { kind: 'image', url: '/min-max.png', width: 1, height: 10000 },
+    { kind: 'image', url: '/too-wide.png', width: 10001, height: 1 },
+    { kind: 'image', url: '/fraction.png', width: 5.5, height: 2 },
+  ]);
+  assert.deepEqual(JSON.parse(bounded.dimensions), [{ url: '/min-max.png', width: 1, height: 10000 }]);
+  assert.equal(bounded.images, '/min-max.png|\n/too-wide.png|\n/fraction.png|');
+});
+
 test('validated old nodes receive optional defaults without losing other values', () => {
   const input = [
     { id: 'empty', type: 'container', settings: null, styles: null, children: null, label: 'Existing' },
