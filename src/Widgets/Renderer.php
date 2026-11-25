@@ -36,13 +36,16 @@ final class Renderer
 
     /**
      * @param array<string, mixed> $data
-     * @param array<string, mixed>|null $styleLayout Full layout when rendering a preview subtree.
+     * @param array<string, mixed>|null $styleLayout Full layout for style ownership and the outline when rendering a preview subtree.
      */
     public function render(array $data, ?array $styleLayout = null): string
     {
         $elements = is_array($data['elements'] ?? null) ? $data['elements'] : [];
         $this->styleOwner = Scope::forLayout($styleLayout ?? $data);
-        $this->tableOfContents = $this->containsTableOfContents($elements) ? new TableOfContents($elements, $this->sanitizer) : null;
+        // A targeted preview renders only one subtree, but its anchors and any
+        // table of contents must still agree with the complete document.
+        $outlineElements = is_array($styleLayout['elements'] ?? null) ? $styleLayout['elements'] : $elements;
+        $this->tableOfContents = $this->containsTableOfContents($outlineElements) ? new TableOfContents($outlineElements, $this->sanitizer) : null;
         // The editor can locate a saved entry without assuming a theme's markup.
         // A zone or theme partial is rendered without an Entry and has no marker.
         $document = $this->entry !== null && $this->entry->id > 0 ? ' data-pb-document="' . $this->entry->id . '"' : '';
@@ -191,8 +194,7 @@ final class Renderer
     private function renderWidget(string $type, array $settings, array $definition, string $id): string
     {
         $text = self::escape(is_string($settings['text'] ?? null) ? $settings['text'] : '');
-        $rich = ($type === 'text' ? $this->tableOfContents?->richText($id) : null)
-            ?? $this->sanitizer->sanitizeBasic(is_string($settings['text'] ?? null) ? $settings['text'] : '');
+        $rich = $this->richField($id, 'text', is_string($settings['text'] ?? null) ? $settings['text'] : '');
         $url = is_string($settings['url'] ?? null) ? $settings['url'] : '';
         $href = $this->sanitizer->sanitizeHref($url) ?? '';
         $resource = $this->sanitizer->sanitizeResourceUrl($url) ?? '';
@@ -218,22 +220,22 @@ final class Renderer
             'anchor' => isset($settings['anchor']) && preg_match('/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/', (string) $settings['anchor']) === 1 ? '<span id="' . self::escape((string) $settings['anchor']) . '"></span>' : '',
             'list' => $this->renderList($settings),
             'accordion' => '<details><summary>' . self::escape($this->fieldText($settings, 'title', t('plugin::prime-builder.widgets.accordion'))) . '</summary><div class="pb-accordion-content">' . $rich . '</div></details>',
-            'card' => $this->renderCard($settings),
-            'icon_box' => $this->renderIconBox($settings),
+            'card' => $this->renderCard($settings, $id),
+            'icon_box' => $this->renderIconBox($settings, $id),
             'icon' => $this->renderIcon($settings),
             'icon_list' => $this->renderIconList($settings),
-            'image_box' => $this->renderImageBox($settings),
-            'testimonial' => $this->renderTestimonial($settings),
+            'image_box' => $this->renderImageBox($settings, $id),
+            'testimonial' => $this->renderTestimonial($settings, $id),
             'testimonial_carousel' => $this->renderTestimonialCarousel($settings),
             'media_carousel' => $this->renderMediaCarousel($settings),
             'slideshow' => $this->renderSlideshow($settings),
             'portfolio' => $this->renderPortfolio($settings),
-            'review' => $this->renderReview($settings),
+            'review' => $this->renderReview($settings, $id),
             'flip_box' => $this->renderFlipBox($settings),
             'animated_heading' => $this->renderAnimatedHeading($settings),
             'code' => $this->renderCode($settings),
-            'call_to_action' => $this->renderCallToAction($settings),
-            'price_table' => $this->renderPriceTable($settings),
+            'call_to_action' => $this->renderCallToAction($settings, $id),
+            'price_table' => $this->renderPriceTable($settings, $id),
             'price_list' => $this->renderPriceList($settings),
             'countdown' => $this->renderCountdown($settings),
             'toggle' => '<details' . (($settings['initial'] ?? 'closed') === 'open' ? ' open' : '') . '><summary>' . self::escape($this->fieldText($settings, 'title', t('plugin::prime-builder.widgets.toggle'))) . '</summary><div>' . $rich . '</div></details>',
@@ -244,7 +246,7 @@ final class Renderer
             'tabs' => $this->renderTabs($settings, $id),
             'gallery' => $this->renderGallery($settings),
             'image_carousel' => $this->renderImageCarousel($settings),
-            'video', 'audio' => $this->renderMedia($type, $settings),
+            'video', 'audio' => $this->renderMedia($type, $settings, $id),
             'posts' => $this->content?->posts($settings, $this->live, $id) ?? '',
             'current_content' => $this->content?->current($settings, $this->entry, $this->live) ?? '',
             'search_form' => $this->content?->searchForm($settings, $id) ?? '',
@@ -326,6 +328,12 @@ final class Renderer
     private function fieldText(array $settings, string $key, string $fallback = ''): string
     {
         return is_string($settings[$key] ?? null) && trim($settings[$key]) !== '' ? $settings[$key] : $fallback;
+    }
+
+    /** Use generated heading targets only after the original field was sanitized. */
+    private function richField(string $id, string $field, string $value): string
+    {
+        return $this->tableOfContents?->richText($id, $field) ?? $this->sanitizer->sanitizeBasic($value);
     }
 
     /** @param array<string, mixed> $settings */
@@ -414,7 +422,7 @@ final class Renderer
     }
 
     /** @param array<string, mixed> $settings */
-    private function renderCard(array $settings): string
+    private function renderCard(array $settings, string $id): string
     {
         $image = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'image_url'));
         $link = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
@@ -426,7 +434,7 @@ final class Renderer
         if ($title !== '') {
             $html .= '<h3>' . self::escape($title) . '</h3>';
         }
-        $html .= $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text'));
+        $html .= $this->richField($id, 'text', $this->fieldText($settings, 'text'));
         if ($link !== null) {
             $html .= '<a class="pb-button-link" href="' . self::escape($link) . '">' . self::escape($this->fieldText($settings, 'button_text', t('plugin::prime-builder.ui.read_more'))) . '</a>';
         }
@@ -434,13 +442,13 @@ final class Renderer
     }
 
     /** @param array<string, mixed> $settings */
-    private function renderIconBox(array $settings): string
+    private function renderIconBox(array $settings, string $id): string
     {
         $symbol = $this->iconSymbol($settings);
         $title = $this->fieldText($settings, 'title');
         return '<div class="pb-icon-box-content"><span class="pb-icon-box-symbol" aria-hidden="true">' . $symbol . '</span>'
             . ($title !== '' ? '<h3>' . self::escape($title) . '</h3>' : '')
-            . $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text')) . '</div>';
+            . $this->richField($id, 'text', $this->fieldText($settings, 'text')) . '</div>';
     }
 
     /** @param array<string, mixed> $settings */
@@ -473,7 +481,7 @@ final class Renderer
     }
 
     /** @param array<string, mixed> $settings */
-    private function renderImageBox(array $settings): string
+    private function renderImageBox(array $settings, string $id): string
     {
         $image = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'image_url'));
         $title = $this->fieldText($settings, 'title');
@@ -485,7 +493,7 @@ final class Renderer
         if ($title !== '') {
             $html .= '<h3>' . self::escape($title) . '</h3>';
         }
-        $html .= $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text'));
+        $html .= $this->richField($id, 'text', $this->fieldText($settings, 'text'));
         if ($url !== null && $url !== '') {
             $html .= '<a class="pb-button-link" href="' . self::escape($url) . '">' . self::escape($this->fieldText($settings, 'button_text', t('plugin::prime-builder.ui.read_more'))) . '</a>';
         }
@@ -493,12 +501,12 @@ final class Renderer
     }
 
     /** @param array<string, mixed> $settings */
-    private function renderTestimonial(array $settings): string
+    private function renderTestimonial(array $settings, string $id): string
     {
         $image = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'image_url'));
         $author = $this->fieldText($settings, 'author');
         $job = $this->fieldText($settings, 'job_title');
-        $html = '<figure><blockquote>' . $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text')) . '</blockquote>';
+        $html = '<figure><blockquote>' . $this->richField($id, 'text', $this->fieldText($settings, 'text')) . '</blockquote>';
         if (($image !== null && $image !== '') || $author !== '' || $job !== '') {
             $html .= '<figcaption>';
             if ($image !== null && $image !== '') {
@@ -650,7 +658,7 @@ final class Renderer
     }
 
     /** @param array<string, mixed> $settings */
-    private function renderReview(array $settings): string
+    private function renderReview(array $settings, string $id): string
     {
         $title = $this->fieldText($settings, 'title');
         $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
@@ -663,7 +671,7 @@ final class Renderer
             $html .= '<h' . $level . '>' . self::escape($title) . '</h' . $level . '>';
         }
         $html .= '<p class="pb-review-rating">' . $this->renderStarRating(['value' => $rating]) . '</p>'
-            . '<blockquote>' . $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text')) . '</blockquote>';
+            . '<blockquote>' . $this->richField($id, 'text', $this->fieldText($settings, 'text')) . '</blockquote>';
         if (($image !== null && $image !== '') || $author !== '' || $job !== '') {
             $html .= '<div class="pb-review-credit">';
             if ($image !== null && $image !== '') {
@@ -699,7 +707,7 @@ final class Renderer
     }
 
     /** @param array<string, mixed> $settings */
-    private function renderCallToAction(array $settings): string
+    private function renderCallToAction(array $settings, string $id): string
     {
         $title = $this->fieldText($settings, 'title');
         $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
@@ -713,7 +721,7 @@ final class Renderer
         if ($title !== '') {
             $html .= '<h' . $level . '>' . self::escape($title) . '</h' . $level . '>';
         }
-        $html .= $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text'));
+        $html .= $this->richField($id, 'text', $this->fieldText($settings, 'text'));
         if ($url !== null && $url !== '') {
             $html .= '<a class="pb-button-link" href="' . self::escape($url) . '">' . self::escape($this->fieldText($settings, 'button_text', t('plugin::prime-builder.ui.read_more'))) . '</a>';
         }
@@ -721,7 +729,7 @@ final class Renderer
     }
 
     /** @param array<string, mixed> $settings */
-    private function renderPriceTable(array $settings): string
+    private function renderPriceTable(array $settings, string $id): string
     {
         $title = $this->fieldText($settings, 'title');
         $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
@@ -732,7 +740,7 @@ final class Renderer
         if ($title !== '') {
             $html .= '<h' . $level . '>' . self::escape($title) . '</h' . $level . '>';
         }
-        $html .= $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'text'));
+        $html .= $this->richField($id, 'text', $this->fieldText($settings, 'text'));
         if ($price !== '' || $period !== '') {
             $html .= '<p class="pb-price-table-amount"><strong>' . self::escape($price) . '</strong>' . ($period !== '' ? ' <span>' . self::escape($period) . '</span>' : '') . '</p>';
         }
@@ -902,10 +910,10 @@ final class Renderer
     }
 
     /** @param array<string, mixed> $settings */
-    private function renderMedia(string $type, array $settings): string
+    private function renderMedia(string $type, array $settings, string $id): string
     {
         $url = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'url'));
-        $transcript = $this->sanitizer->sanitizeBasic($this->fieldText($settings, 'transcript'));
+        $transcript = $this->richField($id, 'transcript', $this->fieldText($settings, 'transcript'));
         if ($url === null) {
             return $transcript;
         }

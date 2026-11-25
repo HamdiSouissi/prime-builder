@@ -17,6 +17,16 @@ final class TableOfContents
     private const MAX_HEADINGS = 200;
     private const MAX_LABEL_BYTES = 300;
 
+    // Only fields that remain visible when their widget is initialized. A
+    // target inside a closed disclosure, tab or flipped face cannot yet be
+    // reached reliably by a plain fragment link.
+    private const RICH_FIELDS = [
+        'text' => 'text', 'alert' => 'text', 'quote' => 'text', 'card' => 'text',
+        'icon_box' => 'text', 'image_box' => 'text', 'testimonial' => 'text',
+        'review' => 'text', 'call_to_action' => 'text', 'price_table' => 'text',
+        'audio' => 'transcript', 'video' => 'transcript',
+    ];
+
     /** @var list<array{anchor: string, level: int, text: string}> */
     private array $headings = [];
 
@@ -26,7 +36,7 @@ final class TableOfContents
     /** @var array<string, true> */
     private array $reserved = [];
 
-    /** @var array<string, string> Sanitized text widgets with generated heading targets. */
+    /** @var array<string, array<string, string>> Sanitized fields with generated heading targets. */
     private array $richText = [];
 
     private bool $truncated = false;
@@ -43,9 +53,9 @@ final class TableOfContents
         return $this->targets[$id] ?? null;
     }
 
-    public function richText(string $id): ?string
+    public function richText(string $id, string $field): ?string
     {
-        return $this->richText[$id] ?? null;
+        return $this->richText[$id][$field] ?? null;
     }
 
     /** @param array<string, mixed> $settings */
@@ -100,10 +110,6 @@ final class TableOfContents
             $type = $element['type'] ?? null;
             $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
             $validId = is_string($id) && preg_match('/^[a-zA-Z0-9_-]{1,64}$/D', $id) === 1;
-            if ($type === 'text' && $validId) {
-                $html = $this->sanitizer->sanitizeBasic(is_string($settings['text'] ?? null) ? $settings['text'] : '');
-                $this->richText[$id] = $this->collectRichText($id, $html);
-            }
             $text = '';
             $level = 2;
             if ($type === 'heading') {
@@ -147,6 +153,15 @@ final class TableOfContents
                     $anchor = self::uniqueAnchor($this->reserved, 'pb-toc-' . $id);
                     $this->targets[$id] = $anchor;
                     $this->headings[] = ['anchor' => $anchor, 'level' => $level, 'text' => self::label($text)];
+                }
+            }
+            // These bodies appear after the optional widget title in the actual
+            // markup. Collect in that order so the outline matches the page.
+            $field = is_string($type) ? (self::RICH_FIELDS[$type] ?? null) : null;
+            if ($validId && $field !== null && is_string($settings[$field] ?? null)) {
+                $html = $this->sanitizer->sanitizeBasic($settings[$field]);
+                if (preg_match('/<h[234]>/', $html) === 1) {
+                    $this->richText[$id][$field] = $this->collectRichText($id, $html);
                 }
             }
             if (is_array($element['children'] ?? null)) {

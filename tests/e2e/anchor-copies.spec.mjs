@@ -54,6 +54,9 @@ test('copied menu anchors remain distinct and their unchanged links are explaine
     const frame = page.frameLocator('[data-pb-frame]');
     const anchors = frame.locator('.pb-anchor span[id]');
     const warning = page.locator('[data-pb-anchor-warning]');
+    // A clean editor must not announce a copy warning before any copy is made.
+    await expect(warning).toHaveAttribute('hidden', '');
+    await expect(warning).toBeHidden();
     const opener = page.locator('[data-pb-context-open]');
     const menu = page.getByRole('menu', { name: 'Actions de l’élément' });
     await page.locator('[data-pb-panel="navigator"]').click();
@@ -113,6 +116,9 @@ test('copied menu anchors remain distinct and their unchanged links are explaine
     await page.reload();
     await expect(anchors).toHaveCount(8);
     expect(new Set(await anchors.evaluateAll(items => items.map(item => item.id))).size).toBe(8);
+    // The warning describes a copy in this editor session; it does not persist on reload.
+    await expect(warning).toHaveAttribute('hidden', '');
+    await expect(warning).toBeHidden();
 
     const noJs = await browser.newContext({ javaScriptEnabled: false, baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080', viewport: { width: 375, height: 812 } });
     try {

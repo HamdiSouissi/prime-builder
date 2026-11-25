@@ -2824,6 +2824,8 @@ final class IntegrationTest extends TestCase
         $elements = [
             ['id' => 'toc', 'type' => 'table_of_contents', 'settings' => ['label' => 'Plan du texte'], 'styles' => [], 'children' => []],
             ['id' => 'article', 'type' => 'text', 'settings' => ['text' => '<h2>Notre <em>histoire</em></h2><h3>Étape &amp; suite</h3><p>Contenu.</p>'], 'styles' => [], 'children' => []],
+            ['id' => 'card', 'type' => 'card', 'settings' => ['title' => 'Carte', 'text' => '<h3>Le <em>détail</em> de la carte</h3>'], 'styles' => [], 'children' => []],
+            ['id' => 'audio', 'type' => 'audio', 'settings' => ['transcript' => '<h4>Transcription du thème</h4>'], 'styles' => [], 'children' => []],
         ];
         $document = $this->document();
         $document['blocks'][0]['data']['elements'] = $elements;
@@ -2834,17 +2836,64 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('<a href="#pb-toc-article-rich-1">Notre histoire</a>', $entry->contentHtml);
         self::assertStringContainsString('<h2 id="pb-toc-article-rich-1" tabindex="-1">Notre <em>histoire</em></h2>', $entry->contentHtml);
         self::assertStringContainsString('<a href="#pb-toc-article-rich-2">Étape &amp; suite</a>', $entry->contentHtml);
+        self::assertStringContainsString('<a href="#pb-toc-card-rich-1">Le détail de la carte</a>', $entry->contentHtml);
+        self::assertStringContainsString('<h3 id="pb-toc-card-rich-1" tabindex="-1">Le <em>détail</em> de la carte</h3>', $entry->contentHtml);
+        self::assertStringContainsString('<a href="#pb-toc-audio-rich-1">Transcription du thème</a>', $entry->contentHtml);
         self::assertStringNotContainsString('pb-toc-article-rich', $entry->content);
+        self::assertStringNotContainsString('pb-toc-card-rich', $entry->content);
         self::assertSame($elements[1]['settings']['text'], $entry->decodedContent()['blocks'][0]['data']['elements'][1]['settings']['text']);
+        self::assertSame($elements[2]['settings']['text'], $entry->decodedContent()['blocks'][0]['data']['elements'][2]['settings']['text']);
 
         $document['blocks'][0]['data']['elements'][1]['settings']['text'] = '<h2>Titre modifié</h2><h4>Nouveau détail</h4>';
+        $document['blocks'][0]['data']['elements'][2]['settings']['text'] = '<h3>Carte actualisée</h3>';
         $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data']], $token);
         self::assertSame(200, $preview->status(), $preview->body());
         $body = json_decode($preview->body(), true);
         self::assertIsArray($body);
         self::assertStringContainsString('<a href="#pb-toc-article-rich-1">Titre modifié</a>', $body['data']['html']);
         self::assertStringContainsString('<h4 id="pb-toc-article-rich-2" tabindex="-1">Nouveau détail</h4>', $body['data']['html']);
+        self::assertStringContainsString('<a href="#pb-toc-card-rich-1">Carte actualisée</a>', $body['data']['html']);
         self::assertStringNotContainsString('Notre histoire</a>', $body['data']['html']);
+
+        // Targeted previews must use the same whole-document outline as a full
+        // preview, even though their response contains only the requested subtree.
+        $targetedToc = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data'], 'target' => 'toc'], $token);
+        self::assertSame(200, $targetedToc->status(), $targetedToc->body());
+        $tocBody = json_decode($targetedToc->body(), true);
+        self::assertIsArray($tocBody);
+        self::assertSame('toc', $tocBody['data']['target']);
+        self::assertStringContainsString('<a href="#pb-toc-card-rich-1">Carte actualisée</a>', $tocBody['data']['html']);
+        self::assertStringContainsString('<a href="#pb-toc-audio-rich-1">Transcription du thème</a>', $tocBody['data']['html']);
+        self::assertStringNotContainsString('class="pb-element pb-card"', $tocBody['data']['html']);
+        $targetedCard = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data'], 'target' => 'card'], $token);
+        self::assertSame(200, $targetedCard->status(), $targetedCard->body());
+        $cardBody = json_decode($targetedCard->body(), true);
+        self::assertIsArray($cardBody);
+        self::assertSame('card', $cardBody['data']['target']);
+        self::assertStringContainsString('<h3 id="pb-toc-card-rich-1" tabindex="-1">Carte actualisée</h3>', $cardBody['data']['html']);
+        self::assertStringNotContainsString('class="pb-toc"', $cardBody['data']['html']);
+        $collision = $document['blocks'][0]['data'];
+        $collision['elements'][] = ['id' => 'reserved', 'type' => 'anchor', 'settings' => ['anchor' => 'pb-toc-card-rich-1'], 'styles' => [], 'children' => []];
+        foreach (['toc', 'card'] as $target) {
+            $targeted = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $collision, 'target' => $target], $token);
+            self::assertSame(200, $targeted->status(), $targeted->body());
+            $targetedBody = json_decode($targeted->body(), true);
+            self::assertIsArray($targetedBody);
+            self::assertStringContainsString($target === 'toc' ? 'href="#pb-toc-card-rich-1-2"' : 'id="pb-toc-card-rich-1-2"', $targetedBody['data']['html']);
+        }
+        $noToc = $document['blocks'][0]['data'];
+        array_shift($noToc['elements']);
+        $targeted = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $noToc, 'target' => 'card'], $token);
+        self::assertSame(200, $targeted->status(), $targeted->body());
+        self::assertStringNotContainsString('pb-toc-card-rich', $targeted->body());
+
+        // Core and Builder saves must agree, without adding generated IDs to JSON.
+        $core = $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token);
+        self::assertSame(200, $core->status(), $core->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('<a href="#pb-toc-card-rich-1">Carte actualisée</a>', $entry->contentHtml);
+        self::assertStringNotContainsString('pb-toc-card-rich', $entry->content);
 
         $snapshot = ['id' => str_repeat('b', 32), 'name' => 'Texte partagé', 'elements' => $elements];
         $app->get(Settings::class)->set('plugin.prime-builder.theme_partials', ['header' => $snapshot, 'footer' => $snapshot, 'exclude' => []]);
@@ -2859,8 +2908,14 @@ final class IntegrationTest extends TestCase
             $targets[] = $target;
             self::assertStringContainsString('<h2 id="' . $target . '" tabindex="-1">Notre <em>histoire</em></h2>', $part);
             self::assertSame(1, substr_count($part, 'id="' . $target . '"'));
+            self::assertSame(1, preg_match('~href="#(pb-toc-pbt_' . $slot . '_[a-f0-9]{24}-rich-1)">Le détail de la carte</a>~', $part, $cardMatches));
+            $cardTarget = $cardMatches[1] ?? '';
+            $targets[] = $cardTarget;
+            self::assertStringContainsString('<h3 id="' . $cardTarget . '" tabindex="-1">Le <em>détail</em> de la carte</h3>', $part);
+            self::assertSame(1, substr_count($part, 'id="' . $cardTarget . '"'));
+            self::assertStringContainsString('>Transcription du thème</a>', $part);
         }
-        self::assertCount(2, array_unique($targets));
+        self::assertCount(4, array_unique($targets));
         $assets = new ThemeAssetRegistry();
         $hooks->emit('site.assets', $assets, $page);
         self::assertSame(1, substr_count($assets->renderStyles(), '/assets/plugins/prime-builder/css/widgets/table_of_contents.css'));

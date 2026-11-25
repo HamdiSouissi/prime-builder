@@ -2149,6 +2149,105 @@ final class DocumentTest extends TestCase
         self::assertStringNotContainsString('pb-toc-article', $withoutToc);
     }
 
+    public function testTableOfContentsIndexesVisibleRichWidgetFieldsInRenderOrder(): void
+    {
+        $toc = $this->element('table_of_contents', 'toc');
+        $toc['settings'] = ['label' => 'Plan', 'min_level' => 2, 'max_level' => 4];
+        $reserved = $this->element('anchor', 'manual');
+        $reserved['settings'] = ['anchor' => 'pb-toc-card-rich-1'];
+        $cases = [
+            'card' => ['title' => 'Carte', 'text' => '<h2 id="hostile" onclick="evil()">Chapitre <em>carte</em></h2><p>Texte sûr.</p><h4>Détail carte</h4><script>evil()</script>'],
+            'icon_box' => ['title' => 'Icône', 'text' => '<h3>Détail icône</h3>'],
+            'image_box' => ['title' => 'Image', 'text' => '<h3>Détail image</h3>'],
+            'review' => ['title' => 'Avis', 'text' => '<h3>Détail avis</h3>'],
+            'call_to_action' => ['title' => 'Action', 'text' => '<h3>Détail action</h3>'],
+            'price_table' => ['title' => 'Tarif', 'text' => '<h3>Détail tarif</h3>'],
+            'alert' => ['text' => '<h3>Détail alerte</h3>'],
+            'quote' => ['text' => '<h3>Détail citation</h3>'],
+            'testimonial' => ['text' => '<h3>Détail témoignage</h3>'],
+            'audio' => ['transcript' => '<h3>Transcription audio</h3>'],
+            'video' => ['transcript' => '<h3>Transcription vidéo</h3>'],
+        ];
+        $labels = [
+            'card' => 'Chapitre carte', 'icon_box' => 'Détail icône', 'image_box' => 'Détail image',
+            'review' => 'Détail avis', 'call_to_action' => 'Détail action', 'price_table' => 'Détail tarif',
+            'alert' => 'Détail alerte', 'quote' => 'Détail citation', 'testimonial' => 'Détail témoignage',
+            'audio' => 'Transcription audio', 'video' => 'Transcription vidéo',
+        ];
+        $elements = [$toc, $reserved];
+        foreach ($cases as $type => $settings) {
+            $element = $this->element($type, $type);
+            $element['settings'] = $settings;
+            $elements[] = $element;
+        }
+        // These widgets can hide a panel after initialization. Their internal
+        // headings must not be linked until navigation can reveal the target.
+        foreach ([
+            'tabs' => ['text_1' => '<h3>Onglet masquable</h3>'],
+            'accordion' => ['text' => '<h3>Accordéon fermé</h3>'],
+            'toggle' => ['text' => '<h3>Bascule fermée</h3>'],
+            'flip_box' => ['back_text' => '<h3>Face masquable</h3>'],
+        ] as $type => $settings) {
+            $element = $this->element($type, $type);
+            $element['settings'] = $settings;
+            $elements[] = $element;
+        }
+        $hidden = $this->element('container', 'hidden');
+        $hidden['hidden'] = true;
+        $hiddenChild = $this->element('alert', 'hidden-alert');
+        $hiddenChild['settings'] = ['text' => '<h3>Invisible</h3>'];
+        $hidden['children'] = [$hiddenChild];
+        $elements[] = $hidden;
+        $result = $this->validator()->validate(['version' => 1, 'elements' => $elements]);
+        self::assertSame([], $result['errors']);
+        $renderer = new Renderer(new Registry(), new HtmlSanitizer());
+        $html = $renderer->render($result['data']);
+        foreach ($labels as $type => $label) {
+            $target = 'pb-toc-' . $type . '-rich-1' . ($type === 'card' ? '-2' : '');
+            self::assertStringContainsString('<a href="#' . $target . '">' . $label . '</a>', $html, $type);
+            self::assertStringContainsString('id="' . $target . '" tabindex="-1"', $html, $type);
+        }
+        self::assertStringContainsString('<h2 id="pb-toc-card-rich-1-2" tabindex="-1">Chapitre <em>carte</em></h2>', $html);
+        self::assertStringContainsString('<a href="#pb-toc-card-rich-2">Détail carte</a>', $html);
+        self::assertStringContainsString('<p>Texte sûr.</p>', $html);
+        self::assertStringNotContainsString('<script', $html);
+        self::assertStringNotContainsString('onclick', $html);
+        self::assertStringNotContainsString('id="hostile"', $html);
+        self::assertSame(1, substr_count($html, 'id="pb-toc-card-rich-1"'));
+        self::assertSame(1, preg_match('~<nav class="pb-toc" aria-label="Plan">(.*?)</nav>~s', $html, $plan));
+        $planHtml = $plan[1] ?? '';
+        $cardTitle = strpos($planHtml, '>Carte</a>');
+        $cardChapter = strpos($planHtml, 'Chapitre carte</a>');
+        $cardDetail = strpos($planHtml, 'Détail carte</a>');
+        $iconTitle = strpos($planHtml, '>Icône</a>');
+        foreach ([$cardTitle, $cardChapter, $cardDetail, $iconTitle] as $position) {
+            self::assertIsInt($position);
+        }
+        self::assertLessThan($cardChapter, $cardTitle);
+        self::assertLessThan($iconTitle, $cardDetail);
+        foreach (['Onglet masquable', 'Accordéon fermé', 'Bascule fermée', 'Face masquable', 'Invisible'] as $excluded) {
+            self::assertStringNotContainsString($excluded . '</a>', $planHtml);
+        }
+        self::assertStringNotContainsString('pb-toc-', $result['data']['elements'][2]['settings']['text']);
+        $withoutToc = $renderer->render(['version' => 1, 'elements' => array_slice($result['data']['elements'], 1)]);
+        self::assertStringContainsString('<h2>Chapitre <em>carte</em></h2>', $withoutToc);
+        self::assertStringNotContainsString('id="pb-toc-card-rich-1-2"', $withoutToc);
+
+        // Rich fields share the same document-wide budget with ordinary titles.
+        $many = $this->element('text', 'many');
+        $many['settings'] = ['text' => str_repeat('<h2>Titre antérieur</h2>', 199)];
+        $last = $this->element('card', 'last');
+        $last['settings'] = ['title' => 'Deux centième titre', 'text' => '<h3>Au-delà de la limite</h3>'];
+        $bounded = $this->validator()->validate(['version' => 1, 'elements' => [$toc, $many, $last]]);
+        self::assertSame([], $bounded['errors']);
+        $limited = $renderer->render($bounded['data']);
+        self::assertSame(200, substr_count($limited, '<a href="#pb-toc-'));
+        self::assertStringContainsString('href="#pb-toc-last">Deux centième titre</a>', $limited);
+        self::assertStringContainsString('class="pb-toc__limit"', $limited);
+        self::assertStringNotContainsString('href="#pb-toc-last-rich-', $limited);
+        self::assertStringContainsString('<h3>Au-delà de la limite</h3>', $limited);
+    }
+
     public function testTableOfContentsDistinguishesInvisibleAndPrivateUseCharacters(): void
     {
         $toc = $this->element('table_of_contents', 'toc');
