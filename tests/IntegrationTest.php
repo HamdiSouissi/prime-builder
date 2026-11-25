@@ -342,6 +342,52 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
     }
 
+    public function testWidgetClassesPersistThroughApisPreviewAndThemeCopies(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('Classes CSS', $config['ui']['widget_classes']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'classes', ['*'])['token'];
+        $document = $this->document();
+        $node = &$document['blocks'][0]['data']['elements'][0];
+        $node['classes'] = '  theme-hero  wide theme-hero ';
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $layout = $entry->decodedContent()['blocks'][0]['data'];
+        self::assertSame('theme-hero wide', $layout['elements'][0]['classes']);
+        self::assertStringContainsString('class="pb-element pb-heading theme-hero wide"', $entry->contentHtml);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry));
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/', $assets->renderScripts());
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $layout, 'target' => 'one'], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        self::assertStringContainsString('class="pb-element pb-heading theme-hero wide"', json_decode($preview->body(), true)['data']['html']);
+        $node['classes'] = 'other-class';
+        $saved = $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $layout = $entry->decodedContent()['blocks'][0]['data'];
+        self::assertSame('other-class', $layout['elements'][0]['classes']);
+        self::assertStringContainsString('class="pb-element pb-heading other-class"', $entry->contentHtml);
+        foreach (['pb-element', 'pc-media-picker', 'good bad" onclick="evil', str_repeat('x', 65)] as $bad) {
+            $node['classes'] = $bad;
+            self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+            self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token)->status());
+        }
+        self::assertSame($entry->content, $app->get(EntryRepository::class)->find(1)?->content);
+        $template = $this->send($app, 'POST', '/api/prime-builder/v1/templates', ['name' => 'Classes', 'kind' => 'section', 'data' => $layout], $token);
+        self::assertSame(201, $template->status(), $template->body());
+        $templateId = json_decode($template->body(), true)['data']['id'];
+        $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $templateId, 'footer' => '', 'exclude' => ''];
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
+        $header = $app->get(Hooks::class)->apply('site.partial', null, 'header', new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry), []);
+        self::assertIsString($header);
+        self::assertStringContainsString('class="pb-element pb-heading other-class"', $header);
+    }
+
     public function testResponsiveBordersPersistThroughBothApisAndThemeCopies(): void
     {
         $app = $this->activated('admin');

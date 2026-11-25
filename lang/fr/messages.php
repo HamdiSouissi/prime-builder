@@ -128,6 +128,7 @@ return [
         'widget' => 'Type de widget inconnu.',
         'settings' => 'Réglage de widget invalide.',
         'styles' => 'Style non autorisé ou invalide.',
+        'classes' => 'Classes CSS non autorisées ou invalides.',
     ],
     'defaults' => [
         'prime_block' => 'Un texte composé avec un bloc Prime.',
@@ -654,6 +655,9 @@ return [
         'author' => 'Auteur',
         'value' => 'Valeur',
         'anchor' => 'Identifiant de l’ancre',
+        'widget_classes' => 'Classes CSS',
+        'widget_classes_help' => 'Classes de l’enveloppe, communes à tous les écrans : 20 noms ASCII au maximum, séparés par des espaces, 64 caractères par nom et 512 au total. Un nom commence par une lettre, un soulignement ou un tiret suivi d’une lettre, d’un soulignement ou d’un tiret. Ensuite : lettres, chiffres, tirets ou soulignements. Les noms pb et pc et leurs préfixes suivis de - ou _ sont réservés, sans distinction de casse. Aucun CSS n’est créé.',
+        'widget_classes_error' => 'Classes CSS invalides. Corrigez ce champ avant d’enregistrer.',
         'padding' => 'Marge intérieure',
         'padding_sides' => 'Marge intérieure par côté',
         'padding_top' => 'Intérieure : haut',

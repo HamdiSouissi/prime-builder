@@ -11,6 +11,7 @@ use Prime\Security\HtmlSanitizer;
 use Prime\Site\PageContext;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\MediaReferences;
+use PrimeBuilder\Styles\CssClasses;
 use PrimeBuilder\Styles\Scope;
 use Throwable;
 
@@ -277,7 +278,11 @@ final class Renderer
                 $hidden = ($element['hidden'] ?? false) === true ? ' hidden' : '';
                 $target = $this->tableOfContents?->target($id);
                 $anchor = $target !== null ? ' id="' . self::escape($target) . '" tabindex="-1"' : '';
-                $html .= '<div class="pb-element pb-' . self::escape($type) . '" data-pb-owner="' . $this->styleOwner . '" data-pb-id="' . self::escape($id) . '"' . $anchor . $hidden . '>' . $content . '</div>';
+                // Direct callers do not necessarily pass a validated layout. Never
+                // apply custom classes to protected original content or invalid data.
+                $classes = in_array($type, ['original_content', 'original_group'], true) ? '' : CssClasses::normalize($element['classes'] ?? '');
+                $extra = is_string($classes) && $classes !== '' ? ' ' . self::escape($classes) : '';
+                $html .= '<div class="pb-element pb-' . self::escape($type) . $extra . '" data-pb-owner="' . $this->styleOwner . '" data-pb-id="' . self::escape($id) . '"' . $anchor . $hidden . '>' . $content . '</div>';
             } catch (Throwable $exception) {
                 $this->logger?->error('Prime Builder widget failed', ['widget' => $type, 'message' => $exception->getMessage()]);
             }

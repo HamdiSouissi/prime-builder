@@ -128,6 +128,7 @@ return [
         'widget' => 'Unknown widget type.',
         'settings' => 'Invalid widget setting.',
         'styles' => 'Invalid or disallowed style.',
+        'classes' => 'Invalid or disallowed CSS classes.',
     ],
     'defaults' => [
         'prime_block' => 'Text composed with a Prime block.',
@@ -654,6 +655,9 @@ return [
         'author' => 'Author',
         'value' => 'Value',
         'anchor' => 'Anchor ID',
+        'widget_classes' => 'CSS classes',
+        'widget_classes_help' => 'Classes on the wrapper, shared by all screen sizes: up to 20 ASCII names separated by spaces, 64 characters per name and 512 in total. A name starts with a letter, underscore or hyphen followed by a letter, underscore or hyphen. After that, use letters, digits, hyphens or underscores. The names pb and pc and their prefixes followed by - or _ are reserved, case-insensitively. No CSS is created.',
+        'widget_classes_error' => 'Invalid CSS classes. Correct this field before saving.',
         'padding' => 'Padding',
         'padding_sides' => 'Padding by side',
         'padding_top' => 'Padding: top',

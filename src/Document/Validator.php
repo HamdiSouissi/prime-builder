@@ -6,6 +6,7 @@ namespace PrimeBuilder\Document;
 
 use Prime\Editor\BlockRegistry;
 use Prime\Security\HtmlSanitizer;
+use PrimeBuilder\Styles\CssClasses;
 use PrimeBuilder\Styles\Values;
 use PrimeBuilder\Widgets\Countdown;
 use PrimeBuilder\Widgets\Map;
@@ -221,6 +222,14 @@ final class Validator
                 $children = [];
             }
             $element = ['id' => $id, 'type' => $type, 'settings' => $settings, 'styles' => $styles, 'children' => $this->elements($children, $depth + 1, $count, $seen, $errors, $definitions, $mediaIds)];
+            if (array_key_exists('classes', $item)) {
+                $classes = CssClasses::normalize($item['classes']);
+                if ($classes === null || ($isOriginal && $classes !== '')) {
+                    $errors[] = t('plugin::prime-builder.validation.classes');
+                } elseif ($classes !== '') {
+                    $element['classes'] = $classes;
+                }
+            }
             if (array_key_exists('label', $item)) {
                 if (!is_string($item['label']) || strlen($item['label']) > 320) {
                     $errors[] = t('plugin::prime-builder.validation.settings');

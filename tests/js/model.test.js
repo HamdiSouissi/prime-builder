@@ -2,6 +2,33 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { History, add, changedElement, containsWidget, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from '../../assets/js/model.js';
 
+test('custom widget classes normalize bounded safe tokens without changing copies', async () => {
+  const { normalizeWidgetClasses } = await import('../../assets/js/model.js');
+  assert.equal(typeof normalizeWidgetClasses, 'function');
+  assert.equal(normalizeWidgetClasses('  theme-hero\twide theme-hero -accent _utility  '), 'theme-hero wide -accent _utility');
+  assert.equal(normalizeWidgetClasses(' \t\n'), '');
+  assert.equal(normalizeWidgetClasses(Array.from({ length: 20 }, (_, i) => `class-${i}`).join(' ')), Array.from({ length: 20 }, (_, i) => `class-${i}`).join(' '));
+  assert.equal(normalizeWidgetClasses('--custom A a _X ' + 'z'.repeat(64)), '--custom A a _X ' + 'z'.repeat(64));
+  for (const bad of [null, false, [], 'pb-element', 'PB_layout', 'pc-media-picker', 'pc', 'evil" onclick="alert(1)', 'foo.bar', '9start', '-9start', 'name:evil', 'accentué', 'name\u2028', 'name\u2029', 'name\v', 'safe\0unsafe', 'a'.repeat(65), 'a'.repeat(513), Array.from({ length: 21 }, (_, i) => `class-${i}`).join(' ')]) {
+    assert.equal(normalizeWidgetClasses(bad), null, JSON.stringify(bad));
+  }
+  const first = { ...createElement('heading'), classes: 'theme-hero wide' };
+  const tree = [first];
+  const copy = duplicate(tree, first.id);
+  assert.equal(copy.length, 2);
+  assert.equal(copy[1].classes, 'theme-hero wide');
+  assert.notEqual(copy[1].id, first.id);
+  assert.equal(changedElement(tree, update(tree, first.id, { classes: 'other' })), first.id);
+  assert.equal(tree[0].classes, 'theme-hero wide');
+  const { firstInvalidWidgetClasses } = await import('../../assets/js/model.js');
+  const nested = [{ id: 'parent', type: 'container', children: [{ id: 'bad', type: 'heading', classes: 'pb-element', children: [] }] }];
+  assert.equal(firstInvalidWidgetClasses(nested)?.id, 'bad');
+  assert.equal(firstInvalidWidgetClasses([{ id: 'original', type: 'original_group', classes: 'custom' }])?.id, 'original');
+  assert.equal(firstInvalidWidgetClasses([{ id: 'original', type: 'original_group', classes: '' }]), null);
+  assert.equal(firstInvalidWidgetClasses([{ id: 'a', classes: null }])?.id, 'a');
+  assert.equal(firstInvalidWidgetClasses([{ id: 'a' }, first]), null);
+});
+
 test('single-image sources discard stale dimensions and copy only complete valid media sizes', async () => {
   const { replaceImageSource } = await import('../../assets/js/model.js');
   assert.equal(typeof replaceImageSource, 'function');

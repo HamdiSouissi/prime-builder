@@ -1,6 +1,38 @@
 /** Immutable tree operations shared by the editor and its tests. */
 export const clone = value => structuredClone(value);
 
+// Keep in sync with CssClasses::normalize. Only simple ASCII identifiers are
+// accepted; raw CSS, selectors and the Builder/CMS namespaces are never allowed.
+export function normalizeWidgetClasses(value) {
+  if (typeof value !== 'string' || value.length > 512) return null;
+  const trimmed = value.replace(/^[ \t\r\n\f]+|[ \t\r\n\f]+$/g, '');
+  if (trimmed === '') return '';
+  const parts = trimmed.split(/[ \t\r\n\f]+/);
+  if (parts.length > 20) return null;
+  const seen = new Set();
+  for (const part of parts) {
+    if (part.length > 64 || !/^(?:-?[_a-zA-Z]|--)[_a-zA-Z0-9-]*(?![\s\S])/.test(part) || /^(?:pb|pc)(?:[-_]|$)/i.test(part)) return null;
+    seen.add(part);
+  }
+  return [...seen].join(' ');
+}
+
+// An invalid draft remains editable, but must never be silently saved or lost
+// when the user has moved to another element or panel.
+export function firstInvalidWidgetClasses(elements) {
+  if (!Array.isArray(elements)) return null;
+  for (const node of elements) {
+    if (!node || typeof node !== 'object') continue;
+    if (Object.hasOwn(node, 'classes')) {
+      const normalized = normalizeWidgetClasses(node.classes);
+      if (normalized === null || (['original_content', 'original_group'].includes(node.type) && normalized !== '')) return node;
+    }
+    const child = firstInvalidWidgetClasses(node.children);
+    if (child) return child;
+  }
+  return null;
+}
+
 // Width and height describe one source, not the widget as a whole. A typed
 // replacement invalidates the old dimensions; a media selection supplies a
 // fresh pair only when both values are usable. The alternative stays editable.

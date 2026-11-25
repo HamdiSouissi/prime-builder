@@ -62,6 +62,7 @@ require_once dirname(__DIR__) . '/src/Document/Validator.php';
 require_once dirname(__DIR__) . '/src/Document/Layout.php';
 require_once dirname(__DIR__) . '/src/Document/Converter.php';
 require_once dirname(__DIR__) . '/src/Styles/Values.php';
+require_once dirname(__DIR__) . '/src/Styles/CssClasses.php';
 require_once dirname(__DIR__) . '/src/Styles/Scope.php';
 require_once dirname(__DIR__) . '/src/Styles/Compiler.php';
 require_once dirname(__DIR__) . '/src/Styles/Kit.php';
@@ -84,6 +85,41 @@ final class DocumentTest extends TestCase
     private function legacyGuard(array $layout): string
     {
         return ':where([data-pb-owner="' . Scope::forLayout($layout) . '"],:not([data-pb-owner])):not(:where(.pb-theme_zone .pb-element:not([data-pb-owner])))';
+    }
+
+    public function testWidgetClassesAreBoundedNormalizedAndSafeEvenForDirectRendering(): void
+    {
+        $node = $this->element('heading', 'classed');
+        $node['settings'] = ['text' => 'Un titre'];
+        $node['classes'] = "  theme-hero\twide theme-hero -accent _utility  ";
+        $layout = ['version' => 1, 'elements' => [$node]];
+        $result = $this->validator()->validate($layout);
+        self::assertSame([], $result['errors']);
+        self::assertSame('theme-hero wide -accent _utility', $result['data']['elements'][0]['classes']);
+        self::assertSame(Scope::forLayout($layout), Scope::forLayout($result['data']));
+        $renderer = new Renderer(new Registry(), new HtmlSanitizer());
+        self::assertStringContainsString('class="pb-element pb-heading theme-hero wide -accent _utility"', $renderer->render($result['data']));
+        $empty = $node;
+        $empty['classes'] = " \t\n";
+        $clean = $this->validator()->validate(['version' => 1, 'elements' => [$empty]]);
+        self::assertSame([], $clean['errors']);
+        self::assertArrayNotHasKey('classes', $clean['data']['elements'][0]);
+        $maximum = $node;
+        $maximum['classes'] = implode(' ', array_map(static fn (int $i): string => 'class-' . $i, range(1, 20)));
+        self::assertSame([], $this->validator()->validate(['version' => 1, 'elements' => [$maximum]])['errors']);
+        $maximum['classes'] = '--custom A a _X ' . str_repeat('z', 64);
+        self::assertSame([], $this->validator()->validate(['version' => 1, 'elements' => [$maximum]])['errors']);
+        foreach ([
+            null, false, [], 'pb-element', 'PB_layout', 'pc-media-picker', 'pc',
+            'evil" onclick="alert(1)', 'foo.bar', '9start', '-9start', 'name:evil', 'accentué',
+            "name\u{2028}", "name\u{2029}", "name\v", "safe\0unsafe", str_repeat('a', 65), str_repeat('a', 513),
+            implode(' ', array_map(static fn (int $i): string => 'class-' . $i, range(1, 21))),
+        ] as $bad) {
+            $invalid = $node;
+            $invalid['classes'] = $bad;
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$invalid]])['errors'], (string) json_encode($bad));
+            self::assertStringContainsString('class="pb-element pb-heading"', $renderer->render(['version' => 1, 'elements' => [$invalid]]));
+        }
     }
 
     public function testValidTreeAndCss(): void
@@ -649,6 +685,18 @@ final class DocumentTest extends TestCase
         self::assertSame([], $result['errors']);
         self::assertArrayNotHasKey('items', $result['data']);
         self::assertNotEmpty((new Validator(new Registry(), new HtmlSanitizer(), originals: $originals, entryId: 2))->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        // A protected original remains read-only even through the API or a direct renderer call.
+        foreach (['original_content', 'original_group'] as $type) {
+            $protected = $this->element($type);
+            $protected['settings'] = ['payload' => $originals->protect(1, 'legacy', '<p>Conservé</p>', $type === 'original_group')];
+            $protected['classes'] = 'custom';
+            self::assertNotEmpty($validator->validate(['version' => 1, 'elements' => [$protected]])['errors']);
+            $rendered = (new Renderer(new Registry(), new HtmlSanitizer(), originals: $originals))->render(['version' => 1, 'elements' => [$protected]]);
+            self::assertStringContainsString('class="pb-element pb-' . $type . '"', $rendered);
+            self::assertStringNotContainsString(' custom', $rendered);
+            $protected['classes'] = '';
+            self::assertSame([], $validator->validate(['version' => 1, 'elements' => [$protected]])['errors']);
+        }
     }
 
     /** @param array<string, mixed> $settings */

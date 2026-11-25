@@ -1,4 +1,4 @@
-import { History, add, appendMediaCarouselSelection, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, freshIds, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, replaceImageSource, replaceStructuredImage, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
+import { History, add, appendMediaCarouselSelection, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, firstInvalidWidgetClasses, freshIds, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, normalizeWidgetClasses, remove, reorder, replaceImageSource, replaceStructuredImage, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
 import { makeRichField } from './rich-text.js';
 
 const root = document.querySelector('[data-pb-app]');
@@ -749,6 +749,34 @@ function makeStructuredMediaControl(element, input) {
   group.append(label, choose, help, feedback);
   return group;
 }
+function makeWidgetClassesControl(element) {
+  const wrapper = document.createElement('div'); wrapper.className = 'pb-style-field';
+  const label = document.createElement('label'); label.className = 'pb-field';
+  label.append(text('span', ui.widget_classes));
+  const input = document.createElement('input'); input.type = 'text'; input.value = typeof element.classes === 'string' ? element.classes : '';
+  input.dataset.pbClasses = ''; input.autocomplete = 'off'; input.spellcheck = false;
+  let malformed = Object.hasOwn(element, 'classes') && (typeof element.classes !== 'string' ||
+    (normalizeWidgetClasses(element.classes) === null && normalizeWidgetClasses(input.value) !== null));
+  const help = text('small', ui.widget_classes_help, 'pb-inherit-hint'); help.id = id();
+  const error = text('small', '', 'pb-inherit-hint pb-class-error'); error.id = id(); error.setAttribute('role', 'status');
+  input.setAttribute('aria-describedby', `${help.id} ${error.id}`);
+  const refresh = () => {
+    const valid = !malformed && normalizeWidgetClasses(input.value) !== null;
+    input.setAttribute('aria-invalid', String(!valid));
+    error.textContent = valid ? '' : ui.widget_classes_error;
+  };
+  input.addEventListener('input', () => {
+    const current = find(history.present, element.id); if (!current) return;
+    malformed = false;
+    // Preserve invalid drafts instead of dropping the last keystroke. The save
+    // action finds and focuses the first invalid field, even after navigation.
+    const normalized = normalizeWidgetClasses(input.value);
+    commit(update(history.present, element.id, { classes: normalized ?? input.value }), false, `${ui.advanced} : ${ui.widget_classes}`);
+    refresh();
+  });
+  label.append(input); wrapper.append(label, help, error); refresh();
+  return wrapper;
+}
 function renderSettings() {
   const element = find(history.present, selected);
   if (!element) { panel = 'widgets'; renderPanel(); return; }
@@ -798,6 +826,7 @@ function renderSettings() {
     }
     if (!fields.children.length) fields.append(text('p', ui.empty, 'pb-empty'));
   } else {
+    if (tab === 'advanced') fields.append(makeWidgetClassesControl(element));
     fields.append(text('p', ui.responsive_help, 'pb-intro'));
     const schemas = tab === 'style'
       ? { color: { type: 'color' }, background: { type: 'color' }, font_size: { type: 'length' }, align: { type: 'enum', values: ['left', 'center', 'right'] },
@@ -1245,6 +1274,13 @@ function attachFrameEvents() {
 }
 async function save() {
   if (!ensureLayout()) return;
+  const invalid = firstInvalidWidgetClasses(history.present);
+  if (invalid) {
+    selected = invalid.id; tab = 'advanced'; panel = 'settings'; renderPanel();
+    $('[data-pb-save-state]').textContent = ui.widget_classes_error;
+    $('[data-pb-classes]')?.focus();
+    return;
+  }
   const snapshot = JSON.stringify(history.present);
   const currentStatus = status.value;
   const currentSchedule = schedule.value;
