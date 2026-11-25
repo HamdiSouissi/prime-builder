@@ -582,7 +582,12 @@ function isImageSource(type, field) {
     (['card', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(type) && field === 'image_url');
 }
 let mediaDependencies;
-async function openMedia(elementId, urlField, kind = 'image', multiple = false) {
+let mediaRequest = 0;
+async function openMedia(elementId, urlField, kind, multiple, opener) {
+  // The dependency import can finish after the author has changed panels or
+  // even left and returned to this element. A rebuilt opener is a new request.
+  const request = ++mediaRequest;
+  const isCurrent = () => request === mediaRequest && opener.isConnected && selected === elementId && panel === 'settings' && tab === 'content';
   try {
     if (!mediaDependencies) {
       const stylesheet = new Promise((resolve, reject) => {
@@ -593,14 +598,14 @@ async function openMedia(elementId, urlField, kind = 'image', multiple = false) 
       mediaDependencies = Promise.all([import('/assets/admin/js/media/picker.js'), import('/assets/admin/js/i18n.js'), stylesheet]);
     }
     const [picker, i18n] = await mediaDependencies;
+    if (!isCurrent() || !find(history.present, elementId)) return;
     i18n.setTranslations(config.mediaMessages || {});
     picker.openMediaPicker({ multiple, kinds: [kind], title: multiple ? ui.choose_images : ui.choose_media, onSelect: selection => {
+      if (!isCurrent()) return;
       const node = find(history.present, elementId);
       if (!node) return;
       let settings = { ...node.settings };
       if (multiple) {
-        // Do not apply a late picker result to a different selection or panel.
-        if (selected !== elementId || panel !== 'settings' || tab !== 'content') return;
         const current = typeof settings[urlField] === 'string' ? settings[urlField] : '';
         const result = appendMediaSelection(current, settings.images_dimensions, Array.isArray(selection) ? selection : [selection]);
         if (result === null) { void showMessage(ui.media_list_error); return; }
@@ -614,11 +619,30 @@ async function openMedia(elementId, urlField, kind = 'image', multiple = false) 
         else settings[urlField] = media.url;
       }
       commit(update(history.present, elementId, { settings }), false, multiple ? ui.choose_images : ui.choose_media); renderSettings();
-      if (multiple) { $('[data-pb-media-list]')?.focus({ preventScroll: true }); $('[data-pb-live]').textContent = ui.media_list_added; }
+      // Core restores the original opener before calling onSelect; rebuilding
+      // the settings removes that node, so restore focus to its replacement.
+      $(multiple ? '[data-pb-media-list]' : '[data-pb-media]')?.focus({ preventScroll: true });
+      if (multiple) $('[data-pb-live]').textContent = ui.media_list_added;
     } });
     const overlay = document.getElementById('pc-media-picker-modal');
     const grid = overlay?.querySelector('[data-prime-picker-grid]');
     grid?.setAttribute('aria-label', ui.media_grid);
+    if (grid && !grid.dataset.pbFocusRecovery) {
+      grid.dataset.pbFocusRecovery = 'true';
+      let focusedCard = null;
+      overlay.addEventListener('focusin', event => {
+        focusedCard = grid.contains(event.target) ? event.target.closest('[data-prime-picker-card]') : null;
+      });
+      // Core replaces the grid when a debounced filter starts. If it removes
+      // the focused card, keep the user in the dialog without stealing a focus
+      // they have already moved elsewhere.
+      new MutationObserver(() => {
+        if (overlay.hidden || !focusedCard || focusedCard.isConnected) return;
+        focusedCard = null;
+        const search = overlay.querySelector('[data-prime-picker-search]');
+        if (document.activeElement === document.body && search?.getClientRects().length) search.focus({ preventScroll: true });
+      }).observe(grid, { childList: true });
+    }
     // Core wraps this input in a visible label but marks it hidden, so it cannot receive keyboard focus.
     const upload = overlay?.querySelector('input[type="file"][data-prime-picker-file-input]');
     if (upload?.hidden) { upload.classList.add('pb-media-picker-file-input'); upload.hidden = false; }
@@ -636,7 +660,7 @@ async function openMedia(elementId, urlField, kind = 'image', multiple = false) 
     }
   } catch {
     mediaDependencies = null;
-    $('[data-pb-save-state]').textContent = ui.media_error;
+    if (isCurrent()) $('[data-pb-save-state]').textContent = ui.media_error;
   }
 }
 function renderSettings() {
@@ -676,10 +700,10 @@ function renderSettings() {
       }, element.type !== 'html'));
       if ((['image', 'video', 'audio'].includes(element.type) && name === 'url') || (['card', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(element.type) && name === 'image_url')) {
         const choose = text('button', ui.choose_media, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMedia = '';
-        choose.addEventListener('click', () => openMedia(element.id, name, ['video', 'audio'].includes(element.type) ? element.type : 'image')); fields.append(choose);
+        choose.addEventListener('click', () => openMedia(element.id, name, ['video', 'audio'].includes(element.type) ? element.type : 'image', false, choose)); fields.append(choose);
       } else if (['gallery', 'image_carousel'].includes(element.type) && name === 'images' && schema.type === 'media_list') {
         const choose = text('button', ui.choose_images, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMediaList = '';
-        choose.addEventListener('click', () => openMedia(element.id, name, 'image', true)); fields.append(choose);
+        choose.addEventListener('click', () => openMedia(element.id, name, 'image', true, choose)); fields.append(choose);
       }
     }
     if (!fields.children.length) fields.append(text('p', ui.empty, 'pb-empty'));
@@ -1323,6 +1347,16 @@ $('[data-pb-command-open]').addEventListener('click', openCommands);
 document.querySelector('[data-pb-command-close]').addEventListener('click', () => commandDialog.close());
 commandSearch.addEventListener('input', renderCommands);
 function shortcuts(event) {
+  // The CMS picker is a modal overlay outside the editor root. Its keystrokes
+  // must not undo, save, or open editor commands behind the active dialog.
+  const picker = document.getElementById('pc-media-picker-modal');
+  if (picker && !picker.hidden) {
+    const editable = picker.contains(event.target) && event.target.closest('input,textarea,[contenteditable="true"]');
+    // Chromium can undo the last background text input even with a picker
+    // button focused. Keep native undo for editable fields inside the picker.
+    if (!editable && (event.ctrlKey || event.metaKey) && ['z', 'y'].includes(event.key.toLowerCase())) event.preventDefault();
+    return;
+  }
   if (selected && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) && !event.target.closest('input,textarea,select,[contenteditable="true"]')) {
     event.preventDefault();
     panel = 'settings'; renderPanel();

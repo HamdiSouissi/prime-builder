@@ -72,12 +72,14 @@ test('single-image widgets replace stale sizes and reserve known proportions bef
     const frame = page.frameLocator('[data-pb-frame]');
 
     const pick = async item => {
-      await page.getByRole('button', { name: 'Choisir dans la médiathèque' }).click();
+      const choose = page.getByRole('button', { name: 'Choisir dans la médiathèque', exact: true });
+      await choose.click();
       const picker = page.getByRole('dialog', { name: 'Choisir dans la médiathèque' });
       await expect(picker).toBeVisible();
       await picker.locator(`[data-prime-picker-card="${item.id}"]`).click();
       await picker.locator('[data-prime-picker-confirm]').click();
       await expect(picker).toBeHidden();
+      await expect(choose).toBeFocused();
     };
     for (const [id, type, field] of widgets) {
       await page.locator('[data-pb-panel="navigator"]').click();
