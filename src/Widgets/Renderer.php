@@ -10,6 +10,7 @@ use Prime\Log\Logger;
 use Prime\Security\HtmlSanitizer;
 use Prime\Site\PageContext;
 use PrimeBuilder\Document\HtmlContent;
+use PrimeBuilder\Document\MediaReferences;
 use PrimeBuilder\Styles\Scope;
 use Throwable;
 
@@ -18,6 +19,8 @@ final class Renderer
 {
     private ?TableOfContents $tableOfContents = null;
     private string $styleOwner = '';
+    /** @var array<string, array{width: int, height: int}> */
+    private array $inferredImageDimensions = [];
 
     public function __construct(
         private readonly Registry $registry,
@@ -31,6 +34,7 @@ final class Renderer
         private readonly ?HtmlContent $html = null,
         private readonly bool $trustedPreview = false,
         private readonly ?PageContext $pageContext = null,
+        private readonly ?MediaReferences $mediaReferences = null,
     ) {
     }
 
@@ -46,6 +50,15 @@ final class Renderer
         // table of contents must still agree with the complete document.
         $outlineElements = is_array($styleLayout['elements'] ?? null) ? $styleLayout['elements'] : $elements;
         $this->tableOfContents = $this->containsTableOfContents($outlineElements) ? new TableOfContents($outlineElements, $this->sanitizer) : null;
+        $this->inferredImageDimensions = [];
+        if ($this->mediaReferences !== null) {
+            try {
+                $this->inferredImageDimensions = $this->mediaReferences->imageDimensions($this->singleImageUrls($elements));
+            } catch (Throwable $exception) {
+                // A media database failure must not prevent the rest of a page from rendering.
+                $this->logger?->error('Prime Builder image dimensions lookup failed', ['message' => $exception->getMessage()]);
+            }
+        }
         // The editor can locate a saved entry without assuming a theme's markup.
         // A zone or theme partial is rendered without an Entry and has no marker.
         $document = $this->entry !== null && $this->entry->id > 0 ? ' data-pb-document="' . $this->entry->id . '"' : '';
@@ -53,6 +66,40 @@ final class Renderer
             ? ' data-pb-live="/api/prime-builder/v1/documents/' . $this->entry->id . '/live"'
             : '';
         return '<div class="pb-layout"' . $document . $refresh . '>' . $this->renderElements($elements, $this->registry->all()) . '</div>';
+    }
+
+    /**
+     * Resolve only the native single-image fields that have no author-supplied
+     * dimension. Explicit sizes, including an incomplete pair, remain untouched.
+     *
+     * @param array<mixed> $elements
+     * @return list<string>
+     */
+    private function singleImageUrls(array $elements): array
+    {
+        $urls = [];
+        $pending = $elements;
+        $fields = ['image' => 'url', 'card' => 'image_url', 'image_box' => 'image_url', 'testimonial' => 'image_url', 'review' => 'image_url', 'call_to_action' => 'image_url'];
+        while ($pending !== []) {
+            $element = array_pop($pending);
+            if (!is_array($element)) {
+                continue;
+            }
+            foreach (is_array($element['children'] ?? null) ? $element['children'] : [] as $child) {
+                $pending[] = $child;
+            }
+            $type = $element['type'] ?? null;
+            $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
+            $field = is_string($type) ? ($fields[$type] ?? null) : null;
+            if ($field === null || array_key_exists('width', $settings) || array_key_exists('height', $settings) || !is_string($settings[$field] ?? null)) {
+                continue;
+            }
+            $url = $this->sanitizer->sanitizeResourceUrl($settings[$field]);
+            if ($url !== null && $url !== '') {
+                $urls[$url] = $url;
+            }
+        }
+        return array_values($urls);
     }
 
     /** @param array<mixed> $elements */
@@ -211,7 +258,7 @@ final class Renderer
             'heading' => '<h' . $level . '>' . $text . '</h' . $level . '>',
             'text' => $rich,
             'html' => $this->renderHtmlWidget($id, $settings),
-            'image' => $resource !== '' ? '<img src="' . self::escape($resource) . '" alt="' . self::escape((string) ($settings['alt'] ?? '')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async">' : '',
+            'image' => $resource !== '' ? '<img src="' . self::escape($resource) . '" alt="' . self::escape((string) ($settings['alt'] ?? '')) . '"' . $this->imageDimensionAttributes($settings, $resource) . ' loading="lazy" decoding="async">' : '',
             'button' => $href !== '' ? '<a class="pb-button-link" href="' . self::escape($href) . '">' . $text . '</a>' : '',
             'separator' => '<hr>',
             'quote' => '<blockquote>' . $rich . (isset($settings['author']) && $settings['author'] !== '' ? '<cite>' . self::escape((string) $settings['author']) . '</cite>' : '') . '</blockquote>',
@@ -409,8 +456,11 @@ final class Renderer
     }
 
     /** @param array<string, mixed> $settings */
-    private static function imageDimensionAttributes(array $settings): string
+    private function imageDimensionAttributes(array $settings, string $url): string
     {
+        if (!array_key_exists('width', $settings) && !array_key_exists('height', $settings)) {
+            $settings += $this->inferredImageDimensions[$url] ?? [];
+        }
         $attributes = '';
         foreach (['width', 'height'] as $name) {
             $value = $settings[$name] ?? null;
@@ -428,7 +478,7 @@ final class Renderer
         $link = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
         $html = '<article class="pb-card-content">';
         if ($image !== null) {
-            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async">';
+            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . $this->imageDimensionAttributes($settings, $image) . ' loading="lazy" decoding="async">';
         }
         $title = $this->fieldText($settings, 'title');
         if ($title !== '') {
@@ -488,7 +538,7 @@ final class Renderer
         $url = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
         $html = '<div>';
         if ($image !== null && $image !== '') {
-            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async">';
+            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . $this->imageDimensionAttributes($settings, $image) . ' loading="lazy" decoding="async">';
         }
         if ($title !== '') {
             $html .= '<h3>' . self::escape($title) . '</h3>';
@@ -510,7 +560,7 @@ final class Renderer
         if (($image !== null && $image !== '') || $author !== '' || $job !== '') {
             $html .= '<figcaption>';
             if ($image !== null && $image !== '') {
-                $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async"> ';
+                $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . $this->imageDimensionAttributes($settings, $image) . ' loading="lazy" decoding="async"> ';
             }
             if ($author !== '') {
                 $html .= '<cite>' . self::escape($author) . '</cite>';
@@ -675,7 +725,7 @@ final class Renderer
         if (($image !== null && $image !== '') || $author !== '' || $job !== '') {
             $html .= '<div class="pb-review-credit">';
             if ($image !== null && $image !== '') {
-                $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async">';
+                $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . $this->imageDimensionAttributes($settings, $image) . ' loading="lazy" decoding="async">';
             }
             if ($author !== '' || $job !== '') {
                 $html .= '<p>' . ($author !== '' ? '<cite>' . self::escape($author) . '</cite>' : '')
@@ -715,7 +765,7 @@ final class Renderer
         $url = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
         $html = '<div class="pb-cta-content">';
         if ($image !== null && $image !== '') {
-            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async">';
+            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . $this->imageDimensionAttributes($settings, $image) . ' loading="lazy" decoding="async">';
         }
         $html .= '<div class="pb-cta-copy">';
         if ($title !== '') {

@@ -9,7 +9,7 @@ test('single-image widgets replace stale sizes and reserve known proportions bef
   await page.locator('input[name=email]').fill(process.env.E2E_ADMIN_EMAIL || 'builder@prime.test');
   await page.locator('input[name=password]').fill(process.env.E2E_ADMIN_PASSWORD || 'Cascade-Corail-900!Orbit');
   await Promise.all([page.waitForURL(/\/admin\/?$/), page.locator('form button[type=submit]').click()]);
-  await page.goto(`/admin/prime-builder/edit/${process.env.E2E_ENTRY_ID || '1'}`);
+  // The dashboard provides a token independently of any fixture entry.
   const csrf = await page.locator('meta[name="csrf-token"]').getAttribute('content');
   const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
     const response = await fetch(url, {
@@ -92,16 +92,17 @@ test('single-image widgets replace stale sizes and reserve known proportions bef
         await expect(width).toHaveValue('320');
         await expect(height).toHaveValue('200');
       }
-      // A typed source is not necessarily the same image: old dimensions must
-      // disappear from both the controls and preview, without losing focus.
+      // A typed source is not necessarily the same image: old author sizes
+      // disappear from the controls, and the preview uses this library image's
+      // own dimensions rather than the previous image's dimensions.
       await source.fill(tall.url);
       await expect(source).toBeFocused();
       await expect(width).toHaveValue('');
       await expect(height).toHaveValue('');
       const image = frame.locator(`[data-pb-id="${id}"] img`);
       await expect(image).toHaveAttribute('src', tall.url);
-      await expect(image).not.toHaveAttribute('width');
-      await expect(image).not.toHaveAttribute('height');
+      await expect(image).toHaveAttribute('width', '150');
+      await expect(image).toHaveAttribute('height', '300');
       await pick(tall);
       await expect(source).toHaveValue(tall.url);
       await expect(width).toHaveValue('150');
@@ -140,8 +141,10 @@ test('single-image widgets replace stale sizes and reserve known proportions bef
         await expect(height).toHaveValue('');
         await expect(page.getByLabel('Texte alternatif', { exact: true })).toHaveValue('');
         await expect(image).toHaveAttribute('src', wide.url);
-        await expect(image).not.toHaveAttribute('width');
-        await expect(image).not.toHaveAttribute('height');
+        // The picker response is incomplete, but the renderer can still read
+        // the actual media record without storing a guessed pair in the editor.
+        await expect(image).toHaveAttribute('width', '320');
+        await expect(image).toHaveAttribute('height', '200');
         await pick(tall);
         await expect(width).toHaveValue('150');
         await expect(height).toHaveValue('300');

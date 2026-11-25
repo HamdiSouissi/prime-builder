@@ -712,6 +712,126 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('onerror=', $entry->contentHtml);
     }
 
+    public function testSingleImagesInferKnownLibraryDimensionsWithoutChangingTheDocument(): void
+    {
+        $app = $this->activated('admin');
+        $db = $this->db($app);
+        $db->pdo()->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $db->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $media = $app->get(\Prime\Media\MediaRepository::class);
+        $first = $media->create([
+            'disk_path' => 'sizes/wide.jpg', 'filename' => 'wide.jpg', 'original_name' => 'wide.jpg',
+            'extension' => 'jpg', 'mime_type' => 'image/jpeg', 'kind' => 'image', 'width' => 640, 'height' => 480,
+            'variants' => [
+                '_original_webp' => ['path' => 'sizes/wide.webp', 'width' => 640, 'height' => 480],
+                'small' => ['path' => 'sizes/wide-320x240.jpg', 'webp' => 'sizes/wide-320x240.webp', 'width' => 320, 'height' => 240],
+            ],
+        ]);
+        $media->create([
+            'disk_path' => 'sizes/wide.png', 'filename' => 'wide.png', 'original_name' => 'wide.png',
+            'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'width' => 100, 'height' => 100,
+            'variants' => [
+                'other' => ['path' => 'sizes/wide-320x240.png', 'webp' => 'sizes/wide-320x240.webp', 'width' => 100, 'height' => 100],
+            ],
+        ]);
+        $media->create([
+            'disk_path' => 'sizes/invalid.png', 'filename' => 'invalid.png', 'original_name' => 'invalid.png',
+            'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'width' => 10001, 'height' => 500,
+        ]);
+        foreach (['jpg', 'png'] as $extension) {
+            $media->create([
+                'disk_path' => 'sizes/equal.' . $extension, 'filename' => 'equal.' . $extension, 'original_name' => 'equal.' . $extension,
+                'extension' => $extension, 'mime_type' => 'image/' . ($extension === 'jpg' ? 'jpeg' : 'png'), 'kind' => 'image', 'width' => 160, 'height' => 90,
+                'variants' => ['_original_webp' => ['path' => 'sizes/equal.webp', 'width' => 160, 'height' => 90]],
+            ]);
+        }
+        $element = static fn (string $id, string $type, array $settings): array => ['id' => $id, 'type' => $type, 'settings' => $settings, 'styles' => [], 'children' => []];
+        $elements = [];
+        foreach (['image' => 'url', 'image_box' => 'image_url', 'testimonial' => 'image_url', 'review' => 'image_url', 'call_to_action' => 'image_url', 'card' => 'image_url'] as $type => $field) {
+            $elements[] = $element('single_' . $type, $type, [$field => $first->url(), 'alt' => $type]);
+        }
+        $elements[] = $element('variant', 'image', ['url' => '/uploads/sizes/wide-320x240.jpg?revision=1', 'alt' => 'Variante']);
+        $elements[] = $element('original_webp', 'image', ['url' => '/uploads/sizes/wide.webp', 'alt' => 'Original WebP']);
+        $elements[] = $element('ambiguous', 'image', ['url' => '/uploads/sizes/wide-320x240.webp', 'alt' => 'Ambiguë']);
+        $elements[] = $element('equal_ambiguous', 'image', ['url' => '/uploads/sizes/equal.webp', 'alt' => 'Ambiguë même taille']);
+        $elements[] = $element('external', 'image', ['url' => 'https://outside.test/uploads/sizes/wide.jpg', 'alt' => 'Externe']);
+        $elements[] = $element('invalid', 'image', ['url' => '/uploads/sizes/invalid.png', 'alt' => 'Invalide']);
+        $elements[] = $element('manual', 'image', ['url' => $first->url(), 'alt' => 'Manuelle', 'width' => 20, 'height' => 30]);
+        $elements[] = $element('partial', 'image', ['url' => $first->url(), 'alt' => 'Partielle', 'width' => 40]);
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = $elements;
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'inferred dimensions', ['*'])['token'];
+        foreach (['/api/prime-builder/v1/documents/1', '/api/v1/content/post/1'] as $route) {
+            $saved = $this->send($app, 'PATCH', $route, ['content' => $document], $token);
+            self::assertSame(200, $saved->status(), $saved->body());
+            $entry = $app->get(EntryRepository::class)->find(1);
+            self::assertNotNull($entry);
+            foreach (['image', 'image_box', 'testimonial', 'review', 'call_to_action', 'card'] as $alt) {
+                self::assertStringContainsString('alt="' . $alt . '" width="640" height="480" loading="lazy"', $entry->contentHtml);
+            }
+            self::assertStringContainsString('alt="Variante" width="320" height="240" loading="lazy"', $entry->contentHtml);
+            self::assertStringContainsString('alt="Original WebP" width="640" height="480" loading="lazy"', $entry->contentHtml);
+            foreach (['Ambiguë', 'Ambiguë même taille', 'Externe', 'Invalide'] as $alt) {
+                self::assertStringContainsString('alt="' . $alt . '" loading="lazy"', $entry->contentHtml);
+            }
+            self::assertStringContainsString('alt="Manuelle" width="20" height="30" loading="lazy"', $entry->contentHtml);
+            self::assertStringContainsString('alt="Partielle" width="40" loading="lazy"', $entry->contentHtml);
+            self::assertArrayNotHasKey('width', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']);
+            self::assertArrayNotHasKey('height', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']);
+        }
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data'], 'target' => 'single_card'], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        self::assertStringContainsString('width=\\"640\\" height=\\"480\\"', $preview->body());
+
+        $snapshot = ['id' => str_repeat('b', 32), 'name' => 'Images partagées', 'elements' => $elements];
+        $app->get(Settings::class)->set('plugin.prime-builder.theme_partials', ['header' => $snapshot, 'exclude' => []]);
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $header = $app->get(Hooks::class)->apply('site.partial', null, 'header', new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry), []);
+        self::assertIsString($header);
+        self::assertStringContainsString('alt="card" width="640" height="480" loading="lazy"', $header);
+
+        $references = new \PrimeBuilder\Document\MediaReferences($db, '/uploads', 'https://site.test/');
+        $renderer = new \PrimeBuilder\Widgets\Renderer(new \PrimeBuilder\Widgets\Registry(), $app->get(\Prime\Security\HtmlSanitizer::class), mediaReferences: $references);
+        $db->enableQueryLog();
+        $db->clearQueryLog();
+        $many = [];
+        for ($i = 0; $i < 250; ++$i) {
+            $many[] = $element('repeated' . $i, 'image', ['url' => $first->url()]);
+        }
+        $html = $renderer->render(['version' => 1, 'elements' => $many]);
+        self::assertSame(250, substr_count($html, 'width="640" height="480"'));
+        self::assertCount(1, $db->queryLog(), 'Repeated images share a single lookup');
+        $db->clearQueryLog();
+        $many = [];
+        for ($i = 0; $i < 201; ++$i) {
+            $many[] = $element('missing' . $i, 'image', ['url' => '/uploads/missing-' . $i . '.jpg']);
+        }
+        $renderer->render(['version' => 1, 'elements' => $many]);
+        self::assertCount(2, $db->queryLog(), 'Distinct paths are looked up in batches of 200');
+        $db->clearQueryLog();
+        $sizes = $references->imageDimensions([
+            '/uploads/sizes/wide.jpg', 'https://SITE.TEST:443/uploads/sizes/wide.jpg?version=2',
+            'https://outside.test/uploads/sizes/wide.jpg', 'https://site.test:444/uploads/sizes/wide.jpg',
+            '/uploads/sizes/../sizes/wide.jpg', '/uploads/sizes/WIDE.jpg',
+        ]);
+        self::assertSame([
+            '/uploads/sizes/wide.jpg' => ['width' => 640, 'height' => 480],
+            'https://SITE.TEST:443/uploads/sizes/wide.jpg?version=2' => ['width' => 640, 'height' => 480],
+        ], $sizes);
+        self::assertCount(1, $db->queryLog());
+        $db->clearQueryLog();
+        $renderer->render(['version' => 1, 'elements' => [$element('explicit', 'image', ['url' => $first->url(), 'width' => 20, 'height' => 30])]]);
+        self::assertCount(0, $db->queryLog(), 'Author dimensions need no inference');
+        $db->enableQueryLog(false);
+
+        // If metadata becomes unavailable, preserve the image and other content.
+        $db->pdo()->exec('DROP TABLE pc_media');
+        $fallback = $renderer->render(['version' => 1, 'elements' => [$element('offline', 'image', ['url' => $first->url(), 'alt' => 'Image conservée'])]]);
+        self::assertStringContainsString('alt="Image conservée" loading="lazy"', $fallback);
+        self::assertStringNotContainsString('width="640"', $fallback);
+    }
+
     public function testGalleryAssetsAreConditionalAndFallbackLabelsAreLocalized(): void
     {
         $app = $this->activated(null);

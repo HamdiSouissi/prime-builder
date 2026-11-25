@@ -60,15 +60,7 @@ final class MediaReferences
             }
         }
 
-        // Core's image processor names resized files <stem>-<width>x<height>.<ext>
-        // and WebP companions <stem>.webp. These are only lookup candidates:
-        // the stored variants must confirm the exact path before an ID is used.
-        $candidates = $paths;
-        foreach ($paths as $path) {
-            foreach (self::originalCandidates($path) as $candidate) {
-                $candidates[$candidate] = $candidate;
-            }
-        }
+        $candidates = self::candidates($paths);
         $ids = [];
         // Both supported CMS versions expose Connection::table and the unique
         // media.disk_path column. Small batches also work with SQLite's bind limit.
@@ -103,6 +95,127 @@ final class MediaReferences
             }
         }
         return array_values($ids);
+    }
+
+    /**
+     * Resolve image sizes only from exact, local media records and declared
+     * variants. An ambiguous path, invalid metadata or a foreign origin leaves
+     * the image unsized; this method never fetches a URL or inspects a file.
+     *
+     * @param list<string> $urls
+     * @return array<string, array{width: int, height: int}>
+     */
+    public function imageDimensions(array $urls): array
+    {
+        /** @var array<string, array<string, true>> $paths */
+        $paths = [];
+        foreach ($urls as $url) {
+            $path = $this->localPath($url);
+            if ($path !== null) {
+                $paths[$path][$url] = true;
+            }
+        }
+        $requested = [];
+        foreach (array_keys($paths) as $path) {
+            $requested[(string) $path] = (string) $path;
+        }
+        $candidates = self::candidates($requested);
+        /** @var array<string, array{width: int, height: int}|null> $sizes */
+        $sizes = [];
+        /** @var array<string, string> $owners */
+        $owners = [];
+        foreach (array_chunk(array_values($candidates), 200) as $chunk) {
+            $rows = $this->db->table('media')->select(['disk_path', 'kind', 'width', 'height', 'variants'])->whereIn('disk_path', $chunk)->get();
+            foreach ($rows as $row) {
+                $original = $row['disk_path'] ?? null;
+                if (!is_string($original) || !isset($candidates[$original])) {
+                    continue;
+                }
+                $image = ($row['kind'] ?? null) === 'image';
+                self::recordSize($sizes, $owners, $paths, $original, $original, $image ? self::size($row) : null);
+                $variants = is_string($row['variants'] ?? null) ? json_decode($row['variants'], true) : null;
+                if (!is_array($variants)) {
+                    continue;
+                }
+                foreach ($variants as $variant) {
+                    if (!is_array($variant) || !is_string($variant['path'] ?? null)) {
+                        continue;
+                    }
+                    $size = $image ? self::size($variant) : null;
+                    foreach ([$variant['path'], $variant['webp'] ?? null] as $variantPath) {
+                        if (is_string($variantPath)) {
+                            self::recordSize($sizes, $owners, $paths, ltrim($variantPath, '/'), $original, $size);
+                        }
+                    }
+                }
+            }
+        }
+        $result = [];
+        foreach ($paths as $path => $sources) {
+            $size = $sizes[$path] ?? null;
+            if ($size !== null) {
+                foreach (array_keys($sources) as $url) {
+                    $result[$url] = $size;
+                }
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * @param array<string, array{width: int, height: int}|null> $sizes
+     * @param array<string, string> $owners
+     * @param array<string, array<string, true>> $paths
+     * @param array{width: int, height: int}|null $size
+     */
+    private static function recordSize(array &$sizes, array &$owners, array $paths, string $path, string $owner, ?array $size): void
+    {
+        if (!isset($paths[$path])) {
+            return;
+        }
+        // Different records can name the same WebP file. Even when their
+        // dimensions happen to agree, it is not safe to guess its owner.
+        if (!array_key_exists($path, $sizes)) {
+            $owners[$path] = $owner;
+            $sizes[$path] = $size;
+        } elseif ($owners[$path] !== $owner || $sizes[$path] !== $size) {
+            $sizes[$path] = null;
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array{width: int, height: int}|null
+     */
+    private static function size(array $row): ?array
+    {
+        $width = $row['width'] ?? null;
+        $height = $row['height'] ?? null;
+        foreach ([$width, $height] as $value) {
+            if (!(is_int($value) || (is_string($value) && preg_match('/^[0-9]{1,5}$/D', $value) === 1))
+                || (int) $value < 1 || (int) $value > 10000) {
+                return null;
+            }
+        }
+        return ['width' => (int) $width, 'height' => (int) $height];
+    }
+
+    /**
+     * Core's generated filenames suggest possible originals; variants must
+     * confirm the path before it is used for either references or dimensions.
+     *
+     * @param array<string, string> $paths
+     * @return array<string, string>
+     */
+    private static function candidates(array $paths): array
+    {
+        $candidates = $paths;
+        foreach ($paths as $path) {
+            foreach (self::originalCandidates($path) as $candidate) {
+                $candidates[$candidate] = $candidate;
+            }
+        }
+        return $candidates;
     }
 
     /** @return list<string> Candidate originals for the CMS's generated image filenames. */
@@ -199,27 +312,35 @@ final class MediaReferences
     /** @param array<string, string> $paths */
     private function add(string $url, array &$paths): void
     {
+        $diskPath = $this->localPath($url);
+        if ($diskPath !== null) {
+            $paths[$diskPath] = $diskPath;
+        }
+    }
+
+    private function localPath(string $url): ?string
+    {
         $parts = parse_url($url);
         if (!is_array($parts)) {
-            return;
+            return null;
         }
         if (isset($parts['scheme']) || isset($parts['host'])) {
             if ($this->origin === null || self::origin($url) !== $this->origin) {
-                return;
+                return null;
             }
         } elseif (!str_starts_with($url, '/') || str_starts_with($url, '//')) {
-            return;
+            return null;
         }
         $path = is_string($parts['path'] ?? null) ? rawurldecode($parts['path']) : '';
         if (!str_starts_with($path, $this->prefix)) {
-            return;
+            return null;
         }
         $diskPath = substr($path, strlen($this->prefix));
         if ($diskPath === '' || strlen($diskPath) > 1020 || str_contains($diskPath, "\0") || str_contains($diskPath, '\\')
             || preg_match('~(?:^|/)\.\.?(/|$)~', $diskPath) === 1) {
-            return;
+            return null;
         }
-        $paths[$diskPath] = $diskPath;
+        return $diskPath;
     }
 
     private static function origin(string $url): ?string

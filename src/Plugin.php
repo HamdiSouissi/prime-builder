@@ -108,6 +108,7 @@ final class Plugin extends AbstractPlugin
             $context->app()->get(\Prime\Media\MediaConfig::class)->urlPrefix(),
             $context->app()->get(UrlGenerator::class)->absolute('/'),
         );
+        $context->app()->container()->singleton(MediaReferences::class, static fn (): MediaReferences => $mediaReferences);
         $partials = new Partials($context);
         $zoneLayouts = new ZoneLayouts($context->app()->get(ThemeManager::class), $context->app()->get(ZoneRepository::class));
         $identity = new SiteIdentity($context->app());
@@ -159,7 +160,7 @@ final class Plugin extends AbstractPlugin
             icon: 'layout-dashboard',
             category: 'plugins',
             validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer, $blocks, $originals, html: $htmlContent, requireSealedHtml: true, mediaReferences: $mediaReferences))->validate($data),
-            renderer: static fn (array $data, HtmlSanitizer $sanitizer, array $renderContext): string => (new Renderer($registry, $sanitizer, $context->logger(), $content, ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null, false, $blocks, $originals, $htmlContent))->render($data),
+            renderer: static fn (array $data, HtmlSanitizer $sanitizer, array $renderContext): string => (new Renderer($registry, $sanitizer, $context->logger(), $content, ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null, false, $blocks, $originals, $htmlContent, mediaReferences: $mediaReferences))->render($data),
             // Text extraction has no entry context; it never emits HTML and still sanitizes markup.
             textExtractor: static fn (array $data): string => Str::plainText((new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, true))->render($data)),
             keywords: ['builder', 'layout'],
@@ -199,7 +200,7 @@ final class Plugin extends AbstractPlugin
             $payload['content_text'] = $renderer->extractText($candidate);
             return $payload;
         });
-        $context->hooks()->filter('site.partial', static function (mixed $previous, mixed $name, mixed $page) use ($context, $partials, $registry, $content, $blocks, $originals, $htmlContent): mixed {
+        $context->hooks()->filter('site.partial', static function (mixed $previous, mixed $name, mixed $page) use ($context, $partials, $registry, $content, $blocks, $originals, $htmlContent, $mediaReferences): mixed {
             if (is_string($previous) || !is_string($name) || !in_array($name, ['header', 'footer'], true) || !$page instanceof PageContext) {
                 return $previous;
             }
@@ -208,7 +209,7 @@ final class Plugin extends AbstractPlugin
                 return $previous;
             }
             // Only validated library snapshots can reach here; HTML is still filtered.
-            $renderer = new Renderer($registry, $context->app()->get(\Prime\Security\HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, true, $page);
+            $renderer = new Renderer($registry, $context->app()->get(\Prime\Security\HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, true, $page, $mediaReferences);
             return '<' . $name . ' class="pb-theme-' . $name . '">' . $renderer->render($layout) . '</' . $name . '>';
         });
         // Contextual snapshots depend on routes, terms, profiles, media and other

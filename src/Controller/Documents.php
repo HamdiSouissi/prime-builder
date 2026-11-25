@@ -25,6 +25,7 @@ use PrimeBuilder\Configuration;
 use PrimeBuilder\Document\Converter;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
+use PrimeBuilder\Document\MediaReferences;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
@@ -377,7 +378,7 @@ final class Documents
                 return ApiError::response('forbidden', 403, $request);
             }
         }
-        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals, $htmlContent, true);
+        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals, $htmlContent, true, mediaReferences: $this->plugin->app()->get(MediaReferences::class));
         if (array_key_exists('target', $body)) {
             $target = $body['target'];
             $elements = is_array($result['data']['elements'] ?? null) ? $result['data']['elements'] : [];
