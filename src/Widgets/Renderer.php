@@ -53,7 +53,7 @@ final class Renderer
         $this->inferredImageDimensions = [];
         if ($this->mediaReferences !== null) {
             try {
-                $this->inferredImageDimensions = $this->mediaReferences->imageDimensions($this->singleImageUrls($elements));
+                $this->inferredImageDimensions = $this->mediaReferences->imageDimensions($this->imageUrlsForInference($elements));
             } catch (Throwable $exception) {
                 // A media database failure must not prevent the rest of a page from rendering.
                 $this->logger?->error('Prime Builder image dimensions lookup failed', ['message' => $exception->getMessage()]);
@@ -69,13 +69,13 @@ final class Renderer
     }
 
     /**
-     * Resolve only the native single-image fields that have no author-supplied
-     * dimension. Explicit sizes, including an incomplete pair, remain untouched.
+     * Collect only native image URLs without author-supplied dimensions. A
+     * single-image field with one explicit dimension is intentionally skipped.
      *
      * @param array<mixed> $elements
      * @return list<string>
      */
-    private function singleImageUrls(array $elements): array
+    private function imageUrlsForInference(array $elements): array
     {
         $urls = [];
         $pending = $elements;
@@ -91,15 +91,66 @@ final class Renderer
             $type = $element['type'] ?? null;
             $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
             $field = is_string($type) ? ($fields[$type] ?? null) : null;
-            if ($field === null || array_key_exists('width', $settings) || array_key_exists('height', $settings) || !is_string($settings[$field] ?? null)) {
+            if ($field !== null) {
+                if (!array_key_exists('width', $settings) && !array_key_exists('height', $settings) && is_string($settings[$field] ?? null)) {
+                    $url = $this->sanitizer->sanitizeResourceUrl($settings[$field]);
+                    if ($url !== null && $url !== '') {
+                        $urls[$url] = $url;
+                    }
+                }
                 continue;
             }
-            $url = $this->sanitizer->sanitizeResourceUrl($settings[$field]);
-            if ($url !== null && $url !== '') {
-                $urls[$url] = $url;
+            if (!is_string($type) || !in_array($type, ['gallery', 'image_carousel', 'media_carousel', 'slideshow', 'portfolio', 'testimonial_carousel'], true)) {
+                continue;
+            }
+            $explicit = $this->imageListDimensions($settings);
+            foreach ($this->imageListUrls($type, $settings) as $url) {
+                if (!isset($explicit[$url])) {
+                    $urls[$url] = $url;
+                }
             }
         }
         return array_values($urls);
+    }
+
+    /**
+     * Use the same bounded parsers as the renderers and exclude video rows.
+     *
+     * @param array<string, mixed> $settings
+     * @return list<string>
+     */
+    private function imageListUrls(string $type, array $settings): array
+    {
+        $urls = [];
+        if ($type === 'gallery' || $type === 'image_carousel') {
+            $lines = preg_split('/\\R/u', $this->fieldText($settings, 'images')) ?: [];
+            foreach (array_slice($lines, 0, 20) as $line) {
+                $url = $this->sanitizer->sanitizeResourceUrl(trim(explode('|', $line, 2)[0]));
+                if ($url !== null && $url !== '') {
+                    $urls[] = $url;
+                }
+            }
+        } elseif ($type === 'media_carousel') {
+            foreach (MediaCarousel::parse($this->fieldText($settings, 'items'), $this->sanitizer) ?? [] as $row) {
+                if ($row['type'] === 'image') {
+                    $urls[] = $row['url'];
+                }
+            }
+        } else {
+            $input = $this->fieldText($settings, 'items');
+            $rows = match ($type) {
+                'slideshow' => Slideshow::parse($input, $this->sanitizer),
+                'portfolio' => Portfolio::parse($input, $this->sanitizer),
+                'testimonial_carousel' => Testimonials::parse($input, $this->sanitizer),
+                default => null,
+            };
+            foreach ($rows ?? [] as $row) {
+                if ($row['image'] !== '') {
+                    $urls[] = $row['image'];
+                }
+            }
+        }
+        return $urls;
     }
 
     /** @param array<mixed> $elements */
@@ -592,7 +643,7 @@ final class Renderer
             if ($row['author'] !== '' || $row['job'] !== '' || $row['image'] !== '') {
                 $html .= '<figcaption>';
                 if ($row['image'] !== '') {
-                    $html .= '<img src="' . self::escape($row['image']) . '" alt=""' . self::dimensionAttributes($dimensions, $row['image']) . ' loading="lazy" decoding="async">';
+                    $html .= '<img src="' . self::escape($row['image']) . '" alt=""' . $this->dimensionAttributes($dimensions, $row['image']) . ' loading="lazy" decoding="async">';
                 }
                 if ($row['author'] !== '' || $row['job'] !== '') {
                     $html .= '<span>' . ($row['author'] !== '' ? '<cite>' . self::escape($row['author']) . '</cite>' : '')
@@ -623,7 +674,7 @@ final class Renderer
         foreach ($rows as $row) {
             $html .= '<div data-pb-slide><figure>';
             if ($row['type'] === 'image') {
-                $html .= '<img src="' . self::escape($row['url']) . '" alt="' . self::escape($row['description']) . '"' . self::dimensionAttributes($dimensions, $row['url']) . ' loading="lazy" decoding="async">';
+                $html .= '<img src="' . self::escape($row['url']) . '" alt="' . self::escape($row['description']) . '"' . $this->dimensionAttributes($dimensions, $row['url']) . ' loading="lazy" decoding="async">';
                 if ($row['caption'] !== '') {
                     $html .= '<figcaption>' . self::escape($row['caption']) . '</figcaption>';
                 }
@@ -658,7 +709,7 @@ final class Renderer
             . ' data-pb-carousel-position="' . $copy('slideshow_position') . '"><div class="pb-slideshow-slides">';
         foreach ($slides as $slide) {
             $html .= '<article class="pb-slideshow-slide" data-pb-slide><img src="' . self::escape($slide['image']) . '" alt="'
-                . self::escape($slide['alt']) . '"' . self::dimensionAttributes($dimensions, $slide['image']) . ' loading="lazy" decoding="async">';
+                . self::escape($slide['alt']) . '"' . $this->dimensionAttributes($dimensions, $slide['image']) . ' loading="lazy" decoding="async">';
             if ($slide['title'] !== '' || $slide['description'] !== '' || $slide['link'] !== '') {
                 $html .= '<div class="pb-slideshow-content">';
                 if ($slide['title'] !== '') {
@@ -695,7 +746,7 @@ final class Renderer
         foreach ($items as $item) {
             $title = self::escape($item['title']);
             $html .= '<li class="pb-portfolio-item" data-pb-portfolio-item data-pb-category="' . self::escape($item['category']) . '"><article>'
-                . '<img src="' . self::escape($item['image']) . '" alt="' . self::escape($item['alt']) . '"' . self::dimensionAttributes($dimensions, $item['image']) . ' loading="lazy" decoding="async">'
+                . '<img src="' . self::escape($item['image']) . '" alt="' . self::escape($item['alt']) . '"' . $this->dimensionAttributes($dimensions, $item['image']) . ' loading="lazy" decoding="async">'
                 . '<div class="pb-portfolio-copy"><p class="pb-portfolio-category">' . self::escape($item['category']) . '</p><h' . $level . '>'
                 . ($item['link'] !== '' ? '<a href="' . self::escape($item['link']) . '">' . $title . '</a>' : $title)
                 . '</h' . $level . '>';
@@ -892,9 +943,9 @@ final class Renderer
     }
 
     /** @param array<string, array{width: int, height: int}> $dimensions */
-    private static function dimensionAttributes(array $dimensions, string $url): string
+    private function dimensionAttributes(array $dimensions, string $url): string
     {
-        $size = $dimensions[$url] ?? null;
+        $size = $dimensions[$url] ?? $this->inferredImageDimensions[$url] ?? null;
         return $size === null ? '' : ' width="' . $size['width'] . '" height="' . $size['height'] . '"';
     }
 
@@ -917,7 +968,7 @@ final class Renderer
                     : t('plugin::prime-builder.ui.gallery_open', ['number' => $index + 1]);
                 // The link is a useful fallback if JS is unavailable or the plugin is disabled.
                 $html .= '<a href="' . self::escape($url) . '" data-pb-gallery-item aria-label="' . self::escape($label) . '">'
-                    . '<img src="' . self::escape($url) . '" alt="' . self::escape($alt) . '"' . self::dimensionAttributes($dimensions, $url) . ' loading="lazy" decoding="async"></a>';
+                    . '<img src="' . self::escape($url) . '" alt="' . self::escape($alt) . '"' . $this->dimensionAttributes($dimensions, $url) . ' loading="lazy" decoding="async"></a>';
             }
         }
         return $html . '</div>';
@@ -953,7 +1004,7 @@ final class Renderer
             $parts = explode('|', $line, 2);
             $url = $this->sanitizer->sanitizeResourceUrl(trim($parts[0]));
             if ($url !== null) {
-                $html .= '<div data-pb-slide><img src="' . self::escape($url) . '" alt="' . self::escape(trim(strip_tags($parts[1] ?? ''))) . '"' . self::dimensionAttributes($dimensions, $url) . ' loading="lazy" decoding="async"></div>';
+                $html .= '<div data-pb-slide><img src="' . self::escape($url) . '" alt="' . self::escape(trim(strip_tags($parts[1] ?? ''))) . '"' . $this->dimensionAttributes($dimensions, $url) . ' loading="lazy" decoding="async"></div>';
             }
         }
         return $html . '</div></div>';

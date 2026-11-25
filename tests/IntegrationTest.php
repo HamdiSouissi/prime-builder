@@ -832,6 +832,87 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('width="640"', $fallback);
     }
 
+    public function testImageListsInferKnownDimensionsWithoutOverridingSavedSizes(): void
+    {
+        $app = $this->activated('admin');
+        $db = $this->db($app);
+        $db->pdo()->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $db->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $media = $app->get(\Prime\Media\MediaRepository::class);
+        foreach (['list-a' => [640, 480], 'list-b' => [300, 200], 'list-c' => [800, 600]] as $name => [$width, $height]) {
+            $media->create([
+                'disk_path' => 'sizes/' . $name . '.png', 'filename' => $name . '.png', 'original_name' => $name . '.png',
+                'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'width' => $width, 'height' => $height,
+            ]);
+        }
+        $a = '/uploads/sizes/list-a.png';
+        $b = '/uploads/sizes/list-b.png';
+        $c = '/uploads/sizes/list-c.png';
+        $snapshot = json_encode([['url' => $b, 'width' => 66, 'height' => 77], ['url' => $c, 'width' => 50, 'height' => 60]], JSON_THROW_ON_ERROR);
+        $manual = $b . ' | 44 | 33';
+        $rows = [
+            'gallery' => ['images', "$a | A\n$b | B\n$c | C\n/uploads/unknown.png | Inconnue\nhttps://outside.test/uploads/sizes/list-a.png | Externe"],
+            'image_carousel' => ['images', "$a | A\n$b | B\n$c | C"],
+            'media_carousel' => ['items', "image | $a | A\nimage | $b | B\nimage | $c | C\nvideo | $a | Vidéo"],
+            'slideshow' => ['items', "$a | A | Premier\n$b | B | Deuxième\n$c | C | Troisième"],
+            'portfolio' => ['items', "$a | A | Projet A | Art\n$b | B | Projet B | Art\n$c | C | Projet C | Art"],
+            'testimonial_carousel' => ['items', "Excellent | A | Fonction | $a\nBien | B | Fonction | $b\nMerci | C | Fonction | $c"],
+        ];
+        $element = static fn (string $id, string $type, array $settings): array => ['id' => $id, 'type' => $type, 'settings' => $settings, 'styles' => [], 'children' => []];
+        $elements = [];
+        foreach ($rows as $type => [$field, $value]) {
+            $elements[] = $element('list_' . $type, $type, [$field => $value, 'images_dimensions' => $snapshot, 'manual_dimensions' => $manual]);
+        }
+        // A dimension in one widget must not override the same URL in another.
+        $elements[] = $element('other_gallery', 'gallery', ['images' => $b . '|Autre']);
+        $elements[] = $element('single', 'image', ['url' => $a, 'alt' => 'Seule']);
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = $elements;
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'inferred list dimensions', ['*'])['token'];
+        foreach (['/api/prime-builder/v1/documents/1', '/api/v1/content/post/1'] as $route) {
+            $saved = $this->send($app, 'PATCH', $route, ['content' => $document], $token);
+            self::assertSame(200, $saved->status(), $saved->body());
+            $entry = $app->get(EntryRepository::class)->find(1);
+            self::assertNotNull($entry);
+            self::assertSame(7, substr_count($entry->contentHtml, ' width="640" height="480" loading="lazy"'));
+            self::assertSame(6, substr_count($entry->contentHtml, ' width="44" height="33" loading="lazy"'));
+            self::assertSame(6, substr_count($entry->contentHtml, ' width="50" height="60" loading="lazy"'));
+            self::assertStringContainsString('alt="Autre" width="300" height="200" loading="lazy"', $entry->contentHtml);
+            self::assertStringContainsString('alt="Inconnue" loading="lazy"', $entry->contentHtml);
+            self::assertStringContainsString('alt="Externe" loading="lazy"', $entry->contentHtml);
+            self::assertStringContainsString('<video controls preload="none" aria-label="Vidéo"><source src="' . $a . '">', $entry->contentHtml);
+            $stored = $entry->decodedContent()['blocks'][0]['data']['elements'];
+            self::assertSame($manual, $stored[0]['settings']['manual_dimensions']);
+            self::assertSame(json_decode($snapshot, true), json_decode($stored[0]['settings']['images_dimensions'], true));
+            self::assertArrayNotHasKey('images_dimensions', $stored[6]['settings']);
+        }
+        foreach (array_keys($rows) as $type) {
+            $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data'], 'target' => 'list_' . $type], $token);
+            self::assertSame(200, $preview->status(), $preview->body());
+            self::assertStringContainsString('width=\\"640\\" height=\\"480\\"', $preview->body());
+        }
+        $app->get(Settings::class)->set('plugin.prime-builder.theme_partials', ['header' => ['id' => str_repeat('e', 32), 'name' => 'Listes', 'elements' => $elements], 'exclude' => []]);
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $header = $app->get(Hooks::class)->apply('site.partial', null, 'header', new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry), []);
+        self::assertIsString($header);
+        self::assertSame(7, substr_count($header, ' width="640" height="480" loading="lazy"'));
+
+        $references = new \PrimeBuilder\Document\MediaReferences($db, '/uploads', 'https://site.test/');
+        $renderer = new \PrimeBuilder\Widgets\Renderer(new \PrimeBuilder\Widgets\Registry(), $app->get(\Prime\Security\HtmlSanitizer::class), mediaReferences: $references);
+        $db->enableQueryLog();
+        $db->clearQueryLog();
+        $renderer->render(['version' => 1, 'elements' => $elements]);
+        self::assertCount(1, $db->queryLog(), 'Single images and all lists share a lookup');
+        $db->clearQueryLog();
+        $renderer->render(['version' => 1, 'elements' => [$element('video', 'media_carousel', ['items' => 'video | ' . $a . ' | Vidéo'])]]);
+        self::assertCount(0, $db->queryLog(), 'A video row alone needs no image lookup');
+        $db->clearQueryLog();
+        $renderer->render(['version' => 1, 'elements' => [$element('known', 'gallery', ['images' => $b . '|B', 'manual_dimensions' => $manual])]]);
+        self::assertCount(0, $db->queryLog(), 'Explicit list sizes need no inference');
+        $db->enableQueryLog(false);
+    }
+
     public function testGalleryAssetsAreConditionalAndFallbackLabelsAreLocalized(): void
     {
         $app = $this->activated(null);

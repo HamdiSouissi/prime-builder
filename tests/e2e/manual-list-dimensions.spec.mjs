@@ -74,8 +74,9 @@ test('image-list widgets accept explicit intrinsic sizes and discard them when a
       await expect(control).toHaveAccessibleName(/Dimensions intrinsèques connues/);
       await expect(control).toHaveValue('');
       const first = imagesFor(frame, id).first();
-      await expect(first).not.toHaveAttribute('width');
-      await expect(first).not.toHaveAttribute('height');
+      // Empty author fields leave library dimensions to the renderer.
+      await expect(first).toHaveAttribute('width', '320');
+      await expect(first).toHaveAttribute('height', '200');
       await control.fill(expected);
       await expect(control).toBeFocused();
       await expect(first).toHaveAttribute('width', '320');

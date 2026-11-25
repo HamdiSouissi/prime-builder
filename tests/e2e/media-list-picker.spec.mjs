@@ -369,8 +369,9 @@ test('gallery and image carousel append real media selections without losing exi
       await expect(fallback.getByRole('link', { name: /Montagne & ciel/ })).toHaveAttribute('href', media[0].url);
     } finally { await noJs.close(); }
 
-    // Removing a URL and saving prunes its metadata. Typing that URL back in
-    // later does not invent dimensions; the surviving URL keeps its own size.
+    // Removing a URL and saving prunes its stored metadata. Typing that URL
+    // back in can still infer its current library size without restoring the
+    // old snapshot; the surviving URL keeps its own explicit size.
     await page.locator('[data-pb-panel="navigator"]').click();
     await page.locator('[data-pb-tree-select="gallery_picker"]').click();
     await list.fill([original, `${media[1].url}|${media[1].alt}`].join('\n'));
@@ -383,8 +384,8 @@ test('gallery and image carousel append real media selections without losing exi
     await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
     await list.fill(combined);
     await expect(previewImages).toHaveCount(3);
-    await expect(previewImages.nth(1)).not.toHaveAttribute('width');
-    await expect(previewImages.nth(1)).not.toHaveAttribute('height');
+    await expect(previewImages.nth(1)).toHaveAttribute('width', '320');
+    await expect(previewImages.nth(1)).toHaveAttribute('height', '200');
     await expect(previewImages.nth(2)).toHaveAttribute('width', '240');
     const readdition = page.waitForResponse(response => response.request().method() === 'PATCH' && response.url().endsWith(`/documents/${entryId}`));
     await page.locator('[data-pb-save]').click();
