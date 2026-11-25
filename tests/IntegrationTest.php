@@ -888,6 +888,68 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('onerror=', $entry->contentHtml);
     }
 
+    public function testImageListManualDimensionsPersistAndArePrunedThroughBothApis(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        $cases = [
+            'gallery' => ['images', "/uploads/a.png | A\n/uploads/b.png | B"],
+            'image_carousel' => ['images', "/uploads/a.png | A\n/uploads/b.png | B"],
+            'media_carousel' => ['items', "image | /uploads/a.png | A\nimage | /uploads/b.png | B"],
+            'slideshow' => ['items', "/uploads/a.png | A | Premier\n/uploads/b.png | B | Second"],
+            'portfolio' => ['items', "/uploads/a.png | A | Projet A | Art\n/uploads/b.png | B | Projet B | Art"],
+            'testimonial_carousel' => ['items', "Excellent | Camille | Designer | /uploads/a.png\nTrès bien | Alex | Artiste | /uploads/b.png"],
+        ];
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'manual list dimensions', ['*'])['token'];
+        $document = $this->document();
+        $elements = [];
+        foreach ($cases as $type => [$field, $items]) {
+            self::assertSame('media_dimensions_manual', $config['widgets'][$type]['fields']['manual_dimensions']['type'], $type);
+            self::assertStringContainsString('URL | largeur | hauteur', $config['widgets'][$type]['fields']['manual_dimensions']['label'], $type);
+            $elements[] = [
+                'id' => 'list_' . $type, 'type' => $type,
+                'settings' => [
+                    $field => $items,
+                    'images_dimensions' => json_encode([['url' => '/uploads/b.png', 'width' => 400, 'height' => 300]], JSON_THROW_ON_ERROR),
+                    'manual_dimensions' => '/uploads/a.png | 320 | 200',
+                ],
+                'styles' => [], 'children' => [],
+            ];
+        }
+        $document['blocks'][0]['data']['elements'] = $elements;
+        $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertSame(6, substr_count($entry->contentHtml, 'width="320" height="200" loading="lazy"'));
+        self::assertSame(6, substr_count($entry->contentHtml, 'width="400" height="300" loading="lazy"'));
+        self::assertSame('/uploads/a.png | 320 | 200', $entry->decodedContent()['blocks'][0]['data']['elements'][5]['settings']['manual_dimensions']);
+
+        foreach ($document['blocks'][0]['data']['elements'] as &$element) {
+            $field = in_array($element['type'], ['gallery', 'image_carousel'], true) ? 'images' : 'items';
+            $original = $element['settings'][$field] ?? null;
+            self::assertIsString($original);
+            $element['settings'][$field] = str_replace('/uploads/a.png', '/uploads/replacement.png', $original);
+        }
+        unset($element);
+        $response = $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertSame(6, substr_count($entry->contentHtml, 'width="400" height="300" loading="lazy"'));
+        self::assertStringNotContainsString('width="320"', $entry->contentHtml);
+        foreach ($entry->decodedContent()['blocks'][0]['data']['elements'] as $element) {
+            self::assertArrayNotHasKey('manual_dimensions', $element['settings']);
+        }
+
+        $document['blocks'][0]['data']['elements'][5]['settings']['manual_dimensions'] = '/uploads/replacement.png | 1" onerror="evil() | 2';
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringNotContainsString('onerror=', $entry->contentHtml);
+    }
+
     public function testPortfolioPersistsAndLoadsItsAssetsOnlyWhereNeeded(): void
     {
         $app = $this->activated('admin');

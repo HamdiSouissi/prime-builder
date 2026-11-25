@@ -512,6 +512,7 @@ return [
         'media_list_added' => 'Images added to the list.',
         'media_list_error' => 'This selection could not be added. Check the URLs and alternative text: at most 20 images, 300 bytes per text and 10,000 bytes total. No images were added.',
         'media_carousel_add_error' => 'These images could not be added. Check the URLs and alternative text without “|”: at most 20 media items, 300 bytes per text and 15,000 bytes total. No images were added.',
+        'image_dimensions_manual' => 'Known intrinsic dimensions (optional): one line URL | width | height, in whole pixels from 1 to 10,000. These override the media library; only image URLs in the list are retained when saving.',
         'media_grid' => 'Available media',
         'media_error' => 'The media library is unavailable. You can enter a URL.',
         'rich_visual' => 'Visual editor',

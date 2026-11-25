@@ -679,7 +679,7 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('data-pb-carousel-position="' . Renderer::escape(t('plugin::prime-builder.ui.testimonials_position')) . '"', $html);
         self::assertSame(2, substr_count($html, 'data-pb-slide'));
         self::assertStringContainsString('<blockquote><p>Bon résultat</p></blockquote>', $html);
-        self::assertStringContainsString('src="/uploads/portrait.jpg" alt="" width="96" height="96" loading="lazy"', $html);
+        self::assertStringContainsString('src="/uploads/portrait.jpg" alt="" loading="lazy"', $html);
         self::assertStringContainsString('<cite>Camille &amp; Alex</cite><span>Designer</span>', $html);
         self::assertStringContainsString('<cite>Sam</cite>', $html);
         self::assertStringNotContainsString(' hidden', $html);
@@ -795,6 +795,144 @@ final class DocumentTest extends TestCase
         }
     }
 
+    public function testImageListDimensionsCanBeExplicitlyProvidedAndFollowOnlyImageUrls(): void
+    {
+        $cases = [
+            'gallery' => ['images', "/uploads/a.png | A\n/uploads/b.png | B"],
+            'image_carousel' => ['images', "/uploads/a.png | A\n/uploads/b.png | B"],
+            'media_carousel' => ['items', "image | /uploads/a.png | A\nvideo | /uploads/video.webm | Vidéo\nimage | /uploads/b.png | B"],
+            'slideshow' => ['items', "/uploads/a.png | A | Première\n/uploads/b.png | B | Deuxième"],
+            'portfolio' => ['items', "/uploads/a.png | A | Projet A | Art\n/uploads/b.png | B | Projet B | Art"],
+            'testimonial_carousel' => ['items', "Excellent | Camille | Artiste | /uploads/a.png\nTrès bien | Alex | Designer | /uploads/b.png"],
+        ];
+        $snapshot = [
+            ['url' => '/uploads/a.png', 'width' => 1, 'height' => 1],
+            ['url' => '/uploads/b.png', 'width' => 400, 'height' => 300],
+            ['url' => '/uploads/video.webm', 'width' => 4, 'height' => 3],
+            ['url' => '/uploads/unused.png', 'width' => 4, 'height' => 3],
+        ];
+        $renderer = new Renderer(new Registry(), new HtmlSanitizer());
+        foreach ($cases as $type => [$field, $items]) {
+            $node = $this->element($type);
+            $node['settings'] = [
+                $field => $items,
+                'images_dimensions' => json_encode($snapshot, JSON_THROW_ON_ERROR),
+                'manual_dimensions' => "/uploads/a.png | 00320 | 00200\n/uploads/unused.png | 9 | 9\n/uploads/video.webm | 10 | 10",
+            ];
+            $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+            self::assertSame([], $result['errors'], $type);
+            $settings = $result['data']['elements'][0]['settings'];
+            self::assertSame(array_slice($snapshot, 0, 2), json_decode($settings['images_dimensions'], true), $type);
+            self::assertSame('/uploads/a.png | 320 | 200', $settings['manual_dimensions'], $type);
+            self::assertSame([], $this->validator()->validate($result['data'])['errors'], $type);
+            $html = $renderer->render($result['data']);
+            self::assertMatchesRegularExpression('~<img src="/uploads/a\\.png"[^>]* width="320" height="200" loading="lazy"~', $html, $type);
+            self::assertMatchesRegularExpression('~<img src="/uploads/b\\.png"[^>]* width="400" height="300" loading="lazy"~', $html, $type);
+            self::assertStringNotContainsString('width="1" height="1"', $html, $type);
+
+            $node['settings'][$field] = str_replace('/uploads/a.png', '/uploads/replacement.png', $items);
+            $changed = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+            self::assertSame([], $changed['errors'], $type);
+            self::assertArrayNotHasKey('manual_dimensions', $changed['data']['elements'][0]['settings'], $type);
+            self::assertSame([$snapshot[1]], json_decode($changed['data']['elements'][0]['settings']['images_dimensions'], true), $type);
+            $html = $renderer->render($changed['data']);
+            self::assertMatchesRegularExpression('~<img src="/uploads/replacement\\.png"[^>]* loading="lazy"~', $html, $type);
+            self::assertStringNotContainsString('width="320"', $html, $type);
+            self::assertStringContainsString('width="400" height="300"', $html, $type);
+        }
+    }
+
+    public function testStructuredImageListsDoNotInventDimensionsAndRejectUnsafeManualSizes(): void
+    {
+        $cases = [
+            'slideshow' => '/uploads/a.png | A | Titre',
+            'portfolio' => '/uploads/a.png | A | Projet | Art',
+            'testimonial_carousel' => 'Citation | Auteur | Fonction | /uploads/a.png',
+        ];
+        foreach ($cases as $type => $items) {
+            $node = $this->element($type);
+            $node['settings'] = ['items' => $items];
+            $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+            self::assertSame([], $result['errors'], $type);
+            $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+            self::assertMatchesRegularExpression('~<img src="/uploads/a\\.png"[^>]* loading="lazy"~', $html, $type);
+            self::assertStringNotContainsString(' width=', $html, $type);
+            self::assertStringNotContainsString(' height=', $html, $type);
+            foreach ([
+                '/uploads/a.png | 0 | 1', '/uploads/a.png | 1 | 10001', '/uploads/a.png | -1 | 1',
+                '/uploads/a.png | 1.5 | 1', '/uploads/a.png | 000001 | 1', '/uploads/a.png | 1 |',
+                '/uploads/a.png | 1 | 1 | extra', '/uploads/a.png | 1" onerror="evil() | 1', 'javascript:evil() | 1 | 1',
+                "/uploads/a.png | 1 | 1\n/uploads/a.png | 2 | 2", str_repeat('x', 25001),
+            ] as $bad) {
+                $node['settings']['manual_dimensions'] = $bad;
+                self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors'], $type . ': ' . substr($bad, 0, 100));
+                // Rendering an unvalidated tree must not turn invalid values into attributes.
+                $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render(['version' => 1, 'elements' => [$node]]);
+                self::assertStringNotContainsString('onerror=', $html, $type);
+                self::assertStringNotContainsString(' width=', $html, $type);
+            }
+        }
+    }
+
+    public function testOnlyPortfolioAcceptsMoreThanTwentyImageDimensionRows(): void
+    {
+        $snapshot = [];
+        $manual = [];
+        foreach (range(1, 21) as $index) {
+            $snapshot[] = ['url' => '/uploads/' . $index . '.png', 'width' => 320, 'height' => 200];
+            $manual[] = '/uploads/' . $index . '.png | 320 | 200';
+        }
+        $cases = [
+            'gallery' => ['images', '/uploads/1.png | A'],
+            'image_carousel' => ['images', '/uploads/1.png | A'],
+            'media_carousel' => ['items', 'image | /uploads/1.png | A'],
+            'slideshow' => ['items', '/uploads/1.png | A'],
+            'testimonial_carousel' => ['items', 'Citation | Auteur | Fonction | /uploads/1.png'],
+        ];
+        foreach ($cases as $type => [$field, $items]) {
+            $node = $this->element($type);
+            foreach (['images_dimensions' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'manual_dimensions' => implode("\n", $manual)] as $key => $value) {
+                $node['settings'] = [$field => $items, $key => $value];
+                self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors'], $type . ' ' . $key);
+            }
+            $node['settings'] = [
+                $field => $items,
+                'images_dimensions' => json_encode(array_slice($snapshot, 0, 20), JSON_THROW_ON_ERROR),
+                'manual_dimensions' => implode("\n", array_slice($manual, 0, 20)),
+            ];
+            $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+            self::assertSame([], $result['errors'], $type);
+            self::assertSame('/uploads/1.png | 320 | 200', $result['data']['elements'][0]['settings']['manual_dimensions'], $type);
+            self::assertCount(1, json_decode($result['data']['elements'][0]['settings']['images_dimensions'], true), $type);
+        }
+    }
+
+    public function testPortfolioSupportsDimensionsForAllTwentyFourProjects(): void
+    {
+        $node = $this->element('portfolio');
+        $items = [];
+        $sizes = [];
+        $snapshot = [];
+        foreach (range(1, 24) as $index) {
+            $items[] = '/uploads/' . $index . '.png | Image | Projet | Art';
+            $sizes[] = '/uploads/' . $index . '.png | ' . $index . ' | 100';
+            $snapshot[] = ['url' => '/uploads/' . $index . '.png', 'width' => $index, 'height' => 100];
+        }
+        $node['settings'] = ['items' => implode("\n", $items), 'manual_dimensions' => implode("\n", $sizes), 'images_dimensions' => json_encode($snapshot, JSON_THROW_ON_ERROR)];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertCount(24, json_decode($result['data']['elements'][0]['settings']['images_dimensions'], true));
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertSame(24, substr_count($html, ' height="100" loading="lazy"'));
+        self::assertStringContainsString('src="/uploads/24.png" alt="Image" width="24" height="100"', $html);
+        $node['settings']['manual_dimensions'] .= "\n/uploads/25.png | 25 | 100";
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        unset($node['settings']['manual_dimensions']);
+        $snapshot[] = ['url' => '/uploads/25.png', 'width' => 25, 'height' => 100];
+        $node['settings']['images_dimensions'] = json_encode($snapshot, JSON_THROW_ON_ERROR);
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+    }
+
     public function testPortfolioValidatesCardsAndRendersEveryProjectWithoutScript(): void
     {
         $node = $this->element('portfolio');
@@ -809,7 +947,7 @@ final class DocumentTest extends TestCase
         self::assertSame(2, substr_count($html, 'data-pb-portfolio-item'));
         self::assertStringContainsString('pb-portfolio-columns-2', $html);
         self::assertStringContainsString('data-pb-category="Identité &amp; création"', $html);
-        self::assertStringContainsString('src="/uploads/a.jpg" alt="Paysage &amp; ciel" width="800" height="600" loading="lazy"', $html);
+        self::assertStringContainsString('src="/uploads/a.jpg" alt="Paysage &amp; ciel" loading="lazy"', $html);
         self::assertStringContainsString('<h3><a href="/suite?x=1&amp;y=2">Projet A</a></h3>', $html);
         self::assertStringContainsString('<h3>Projet B</h3>', $html);
         self::assertStringContainsString('<p>Texte riche</p>', $html);
@@ -861,7 +999,7 @@ final class DocumentTest extends TestCase
         self::assertStringContainsString('data-pb-carousel-label="Nos &amp; projets"', $html);
         self::assertStringContainsString('src="/uploads/a.jpg" alt="Paysage &amp; ciel"', $html);
         self::assertStringContainsString('src="/uploads/b.jpg" alt=""', $html);
-        self::assertStringContainsString('width="1600" height="900" loading="lazy"', $html);
+        self::assertStringContainsString('alt="Paysage &amp; ciel" loading="lazy"', $html);
         self::assertStringContainsString('<h3>Bienvenue</h3><p>Texte riche</p>', $html);
         self::assertStringContainsString('<a href="/suite?x=1&amp;y=2">Voir</a>', $html);
         self::assertStringNotContainsString('<em>', $html);

@@ -131,35 +131,56 @@ final class Validator
                 }
                 $settings[$key] = $normalized;
             }
-            if (in_array($type, ['gallery', 'image_carousel', 'media_carousel'], true) && is_string($settings['images_dimensions'] ?? null)) {
-                // Keep metadata tied to its image URL, never to a position that
-                // can be reordered or edited, or to a video with the same URL.
-                $rows = MediaDimensions::parse($settings['images_dimensions'], $this->sanitizer);
-                if ($rows === null) {
-                    $errors[] = t('plugin::prime-builder.validation.settings');
-                } else {
-                    if ($type === 'media_carousel') {
-                        $items = MediaCarousel::parse(is_string($settings['items'] ?? null) ? $settings['items'] : '', $this->sanitizer) ?? [];
-                        $urls = [];
-                        foreach ($items as $entry) {
-                            if ($entry['type'] === 'image') {
-                                $urls[] = $entry['url'];
-                            }
+            if (in_array($type, ['gallery', 'image_carousel', 'media_carousel', 'slideshow', 'portfolio', 'testimonial_carousel'], true)
+                && (is_string($settings['images_dimensions'] ?? null) || is_string($settings['manual_dimensions'] ?? null))) {
+                // Bind both copied and manually supplied dimensions to an image
+                // URL, never to its position or to a video with the same URL.
+                $urls = [];
+                $itemLines = is_string($settings['items'] ?? null) ? $settings['items'] : '';
+                if ($type === 'media_carousel') {
+                    foreach (MediaCarousel::parse($itemLines, $this->sanitizer) ?? [] as $entry) {
+                        if ($entry['type'] === 'image') {
+                            $urls[] = $entry['url'];
                         }
-                        $rows = MediaDimensions::onlyUrls($rows, $urls);
-                    } else {
+                    }
+                } elseif (in_array($type, ['slideshow', 'portfolio', 'testimonial_carousel'], true)) {
+                    $entries = match ($type) {
+                        'slideshow' => Slideshow::parse($itemLines, $this->sanitizer),
+                        'portfolio' => Portfolio::parse($itemLines, $this->sanitizer),
+                        default => Testimonials::parse($itemLines, $this->sanitizer),
+                    };
+                    foreach ($entries ?? [] as $entry) {
+                        if ($entry['image'] !== '') {
+                            $urls[] = $entry['image'];
+                        }
+                    }
+                }
+                foreach (['images_dimensions', 'manual_dimensions'] as $key) {
+                    if (!is_string($settings[$key] ?? null)) {
+                        continue;
+                    }
+                    $rows = $key === 'manual_dimensions'
+                        ? MediaDimensions::parseManual($settings[$key], $this->sanitizer)
+                        : MediaDimensions::parse($settings[$key], $this->sanitizer);
+                    if ($rows === null || ($type !== 'portfolio' && count($rows) > MediaDimensions::STANDARD_MAX_ROWS)) {
+                        $errors[] = t('plugin::prime-builder.validation.settings');
+                        continue;
+                    }
+                    if (in_array($type, ['gallery', 'image_carousel'], true)) {
                         $images = is_string($settings['images'] ?? null) ? $settings['images'] : '';
                         $rows = MediaDimensions::onlyListed($rows, $images, $this->sanitizer);
+                    } else {
+                        $rows = MediaDimensions::onlyUrls($rows, $urls);
                     }
                     if ($rows === []) {
-                        unset($settings['images_dimensions']);
+                        unset($settings[$key]);
+                        continue;
+                    }
+                    $encoded = $key === 'manual_dimensions' ? MediaDimensions::serializeManual($rows) : MediaDimensions::serialize($rows);
+                    if ($encoded === null) {
+                        $errors[] = t('plugin::prime-builder.validation.settings');
                     } else {
-                        $encoded = MediaDimensions::serialize($rows);
-                        if ($encoded === null) {
-                            $errors[] = t('plugin::prime-builder.validation.settings');
-                        } else {
-                            $settings['images_dimensions'] = $encoded;
-                        }
+                        $settings[$key] = $encoded;
                     }
                 }
             }
@@ -243,6 +264,7 @@ final class Validator
             'json_object' => is_object(json_decode($value)) ? $value : null,
             'media_list' => $this->mediaList($value),
             'media_dimensions' => ($dimensions = MediaDimensions::parse($value, $this->sanitizer)) === null ? null : MediaDimensions::serialize($dimensions),
+            'media_dimensions_manual' => ($dimensions = MediaDimensions::parseManual($value, $this->sanitizer)) === null ? null : MediaDimensions::serializeManual($dimensions),
             'price_items' => $this->priceItems($value),
             'media_carousel_items' => ($media = MediaCarousel::parse($value, $this->sanitizer)) === null ? null : MediaCarousel::serialize($media),
             'slideshow_items' => ($slides = Slideshow::parse($value, $this->sanitizer)) === null ? null : Slideshow::serialize($slides),

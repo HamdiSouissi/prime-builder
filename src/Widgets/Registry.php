@@ -20,6 +20,8 @@ final class Registry
         $url = ['type' => 'url', 'max' => 2048];
         $icon = ['type' => 'enum', 'values' => ['star', 'check', 'heart', 'spark']];
         $dimension = ['type' => 'integer', 'min' => 1, 'max' => 10000];
+        $listDimensions = ['type' => 'media_dimensions', 'max' => MediaDimensions::MAX_BYTES, 'internal' => true];
+        $manualDimensions = ['type' => 'media_dimensions_manual', 'max' => MediaDimensions::MAX_BYTES, 'label' => 'plugin::prime-builder.ui.image_dimensions_manual'];
         $fields = [
             'container' => ['layout' => ['type' => 'enum', 'values' => ['flex', 'grid']], 'direction' => ['type' => 'enum', 'values' => ['column', 'row']], 'columns' => ['type' => 'integer', 'min' => 1, 'max' => 6]],
             'heading' => ['text' => $text, 'level' => ['type' => 'integer', 'min' => 1, 'max' => 6]],
@@ -43,20 +45,23 @@ final class Registry
             'testimonial_carousel' => [
                 'label' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.carousel_label'],
                 'items' => ['type' => 'testimonial_items', 'max' => 10000, 'label' => 'plugin::prime-builder.ui.testimonials_items'],
+                'images_dimensions' => $listDimensions, 'manual_dimensions' => $manualDimensions,
             ],
             'media_carousel' => [
                 'label' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.carousel_label'],
                 'items' => ['type' => 'media_carousel_items', 'max' => 15000, 'label' => 'plugin::prime-builder.ui.media_carousel_items'],
-                'images_dimensions' => ['type' => 'media_dimensions', 'max' => MediaDimensions::MAX_BYTES, 'internal' => true],
+                'images_dimensions' => $listDimensions, 'manual_dimensions' => $manualDimensions,
                 'caption_language' => ['type' => 'enum', 'values' => ['fr', 'en'], 'label' => 'plugin::prime-builder.ui.caption_language'],
             ],
             'slideshow' => [
                 'label' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.slideshow_label'],
                 'items' => ['type' => 'slideshow_items', 'max' => 15000, 'label' => 'plugin::prime-builder.ui.slideshow_items'],
+                'images_dimensions' => $listDimensions, 'manual_dimensions' => $manualDimensions,
                 'level' => ['type' => 'integer', 'min' => 2, 'max' => 6],
             ],
             'portfolio' => [
                 'items' => ['type' => 'portfolio_items', 'max' => 15000, 'label' => 'plugin::prime-builder.ui.portfolio_items'],
+                'images_dimensions' => $listDimensions, 'manual_dimensions' => $manualDimensions,
                 'columns' => ['type' => 'integer', 'min' => 1, 'max' => 4],
                 'level' => ['type' => 'integer', 'min' => 2, 'max' => 6],
             ],
@@ -166,12 +171,12 @@ final class Registry
             'counter' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 1000000000], 'prefix' => $text, 'suffix' => $text, 'title' => $text],
             'gallery' => [
                 'images' => ['type' => 'media_list', 'max' => 10000],
-                'images_dimensions' => ['type' => 'media_dimensions', 'max' => MediaDimensions::MAX_BYTES, 'internal' => true],
+                'images_dimensions' => $listDimensions, 'manual_dimensions' => $manualDimensions,
             ],
             'image_carousel' => [
                 'label' => ['type' => 'text', 'max' => 1000, 'label' => 'plugin::prime-builder.ui.carousel_label'],
                 'images' => ['type' => 'media_list', 'max' => 10000],
-                'images_dimensions' => ['type' => 'media_dimensions', 'max' => MediaDimensions::MAX_BYTES, 'internal' => true],
+                'images_dimensions' => $listDimensions, 'manual_dimensions' => $manualDimensions,
             ],
             'video' => ['url' => $url, 'video_title' => $text, 'captions' => $url, 'caption_language' => ['type' => 'enum', 'values' => ['fr', 'en']], 'transcript' => ['type' => 'rich', 'max' => 20000]],
             'audio' => ['url' => $url, 'transcript' => ['type' => 'rich', 'max' => 20000]],

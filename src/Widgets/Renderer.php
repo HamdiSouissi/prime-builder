@@ -523,6 +523,7 @@ final class Renderer
             return '<p>' . self::escape(t('plugin::prime-builder.ui.testimonials_empty')) . '</p>';
         }
         $label = $this->fieldText($settings, 'label', t('plugin::prime-builder.widgets.testimonial_carousel'));
+        $dimensions = $this->imageListDimensions($settings);
         $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.' . $key));
         $html = '<div class="pb-testimonials" data-pb-carousel data-pb-carousel-label="' . self::escape($label) . '"'
             . ' data-pb-carousel-role="' . $copy('carousel_role') . '" data-pb-carousel-slide-role="' . $copy('carousel_slide_role') . '"'
@@ -533,7 +534,7 @@ final class Renderer
             if ($row['author'] !== '' || $row['job'] !== '' || $row['image'] !== '') {
                 $html .= '<figcaption>';
                 if ($row['image'] !== '') {
-                    $html .= '<img src="' . self::escape($row['image']) . '" alt="" width="96" height="96" loading="lazy" decoding="async">';
+                    $html .= '<img src="' . self::escape($row['image']) . '" alt=""' . self::dimensionAttributes($dimensions, $row['image']) . ' loading="lazy" decoding="async">';
                 }
                 if ($row['author'] !== '' || $row['job'] !== '') {
                     $html .= '<span>' . ($row['author'] !== '' ? '<cite>' . self::escape($row['author']) . '</cite>' : '')
@@ -590,6 +591,7 @@ final class Renderer
             return '<p>' . self::escape(t('plugin::prime-builder.ui.slideshow_empty')) . '</p>';
         }
         $label = $this->fieldText($settings, 'label', t('plugin::prime-builder.widgets.slideshow'));
+        $dimensions = $this->imageListDimensions($settings);
         $level = max(2, min(6, (int) ($settings['level'] ?? 2)));
         $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.' . $key));
         $html = '<div class="pb-slide-show" data-pb-carousel data-pb-carousel-label="' . self::escape($label) . '"'
@@ -598,7 +600,7 @@ final class Renderer
             . ' data-pb-carousel-position="' . $copy('slideshow_position') . '"><div class="pb-slideshow-slides">';
         foreach ($slides as $slide) {
             $html .= '<article class="pb-slideshow-slide" data-pb-slide><img src="' . self::escape($slide['image']) . '" alt="'
-                . self::escape($slide['alt']) . '" width="1600" height="900" loading="lazy" decoding="async">';
+                . self::escape($slide['alt']) . '"' . self::dimensionAttributes($dimensions, $slide['image']) . ' loading="lazy" decoding="async">';
             if ($slide['title'] !== '' || $slide['description'] !== '' || $slide['link'] !== '') {
                 $html .= '<div class="pb-slideshow-content">';
                 if ($slide['title'] !== '') {
@@ -626,6 +628,7 @@ final class Renderer
         }
         $columns = max(1, min(4, (int) ($settings['columns'] ?? 3)));
         $level = max(2, min(6, (int) ($settings['level'] ?? 3)));
+        $dimensions = $this->imageListDimensions($settings);
         $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.' . $key));
         $html = '<div data-pb-portfolio data-pb-portfolio-filter-label="' . $copy('portfolio_filter_label') . '"'
             . ' data-pb-portfolio-all="' . $copy('portfolio_all') . '" data-pb-portfolio-category="' . $copy('portfolio_category') . '"'
@@ -634,7 +637,7 @@ final class Renderer
         foreach ($items as $item) {
             $title = self::escape($item['title']);
             $html .= '<li class="pb-portfolio-item" data-pb-portfolio-item data-pb-category="' . self::escape($item['category']) . '"><article>'
-                . '<img src="' . self::escape($item['image']) . '" alt="' . self::escape($item['alt']) . '" width="800" height="600" loading="lazy" decoding="async">'
+                . '<img src="' . self::escape($item['image']) . '" alt="' . self::escape($item['alt']) . '"' . self::dimensionAttributes($dimensions, $item['image']) . ' loading="lazy" decoding="async">'
                 . '<div class="pb-portfolio-copy"><p class="pb-portfolio-category">' . self::escape($item['category']) . '</p><h' . $level . '>'
                 . ($item['link'] !== '' ? '<a href="' . self::escape($item['link']) . '">' . $title . '</a>' : $title)
                 . '</h' . $level . '>';
@@ -819,9 +822,13 @@ final class Renderer
     private function imageListDimensions(array $settings): array
     {
         $input = is_string($settings['images_dimensions'] ?? null) ? $settings['images_dimensions'] : '[]';
+        $manual = is_string($settings['manual_dimensions'] ?? null) ? $settings['manual_dimensions'] : '';
         $result = [];
-        foreach (MediaDimensions::parse($input, $this->sanitizer) ?? [] as $row) {
-            $result[$row['url']] = ['width' => $row['width'], 'height' => $row['height']];
+        // Explicit author values override a library snapshot for the same URL.
+        foreach ([MediaDimensions::parse($input, $this->sanitizer) ?? [], MediaDimensions::parseManual($manual, $this->sanitizer) ?? []] as $rows) {
+            foreach ($rows as $row) {
+                $result[$row['url']] = ['width' => $row['width'], 'height' => $row['height']];
+            }
         }
         return $result;
     }
