@@ -2,6 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { History, add, changedElement, containsWidget, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from '../../assets/js/model.js';
 
+test('single-image sources discard stale dimensions and copy only complete valid media sizes', async () => {
+  const { replaceImageSource } = await import('../../assets/js/model.js');
+  assert.equal(typeof replaceImageSource, 'function');
+  const original = { url: '/wide.png', alt: 'Large', width: 320, height: 200, title: 'Conservé' };
+  const snapshot = structuredClone(original);
+  assert.deepEqual(replaceImageSource(original, 'url', '/tall.png'), { url: '/tall.png', alt: 'Large', title: 'Conservé' });
+  assert.deepEqual(original, snapshot);
+  assert.deepEqual(replaceImageSource(original, 'url', '/wide.png'), snapshot);
+  assert.deepEqual(replaceImageSource(original, 'url', undefined), { alt: 'Large', title: 'Conservé' });
+  const selected = { url: '/tall.png', alt: 'Portrait', width: 150, height: 300 };
+  assert.deepEqual(replaceImageSource(original, 'url', selected.url, selected), { url: '/tall.png', alt: 'Portrait', width: 150, height: 300, title: 'Conservé' });
+  assert.deepEqual(replaceImageSource({ image_url: '/a', alt: 'Ancien', width: 10, height: 20 }, 'image_url', '/b', { url: '/b', alt: null, width: null, height: null }), { image_url: '/b', alt: '' });
+  assert.deepEqual(replaceImageSource(original, 'url', '/new.png', null), { url: '/new.png', alt: '', title: 'Conservé' });
+  for (const [width, height] of [[0, 20], [10, 10001], [1.5, 20], ['10', 20], [10, null], [Infinity, 20]]) {
+    const invalid = replaceImageSource(original, 'url', '/new.png', { url: '/new.png', alt: 'Nouvelle', width, height });
+    assert.deepEqual(invalid, { url: '/new.png', alt: 'Nouvelle', title: 'Conservé' });
+  }
+  assert.deepEqual(replaceImageSource(original, 'url', '/new.png', { alt: '', width: 1, height: 10000 }), { url: '/new.png', alt: '', width: 1, height: 10000, title: 'Conservé' });
+});
+
 test('media-library selections append atomically to image lists without losing existing images', async () => {
   const { appendMediaList } = await import('../../assets/js/model.js');
   assert.equal(typeof appendMediaList, 'function');

@@ -260,6 +260,19 @@ test('gallery and image carousel append real media selections without losing exi
     await expect(previewImages.nth(2)).toHaveAttribute('width', '320');
     await list.fill(combined);
 
+    // The editor retains the URL-keyed snapshot during an unsaved edit. The
+    // preview must first remove the absent image, then restore its dimensions
+    // if that same URL is reintroduced before saving.
+    await list.fill([original, `${media[1].url}|${media[1].alt}`].join('\n'));
+    await expect(previewImages).toHaveCount(2);
+    await expect(previewImages.nth(1)).toHaveAttribute('src', media[1].url);
+    await expect(previewImages.nth(1)).toHaveAttribute('width', '240');
+    await list.fill(combined);
+    await expect(previewImages).toHaveCount(3);
+    await expect(previewImages.nth(1)).toHaveAttribute('src', media[0].url);
+    await expect(previewImages.nth(1)).toHaveAttribute('width', '320');
+    await expect(previewImages.nth(1)).toHaveAttribute('height', '200');
+
     // A selection that would cross the 20-image limit is refused atomically.
     const nineteen = Array.from({ length: 19 }, () => original).join('\n');
     await list.fill(nineteen);

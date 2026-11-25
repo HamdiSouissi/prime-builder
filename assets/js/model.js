@@ -1,6 +1,27 @@
 /** Immutable tree operations shared by the editor and its tests. */
 export const clone = value => structuredClone(value);
 
+// Width and height describe one source, not the widget as a whole. A typed
+// replacement invalidates the old dimensions; a media selection supplies a
+// fresh pair only when both values are usable. The alternative stays editable.
+export function replaceImageSource(settings, field, source, selection) {
+  const next = { ...settings };
+  if (source === undefined) delete next[field]; else next[field] = source;
+  if (selection !== undefined || source !== settings[field]) {
+    delete next.width;
+    delete next.height;
+  }
+  if (selection !== undefined) {
+    next.alt = typeof selection?.alt === 'string' ? selection.alt : '';
+    if (Number.isInteger(selection?.width) && selection.width >= 1 && selection.width <= 10000 &&
+      Number.isInteger(selection?.height) && selection.height >= 1 && selection.height <= 10000) {
+      next.width = selection.width;
+      next.height = selection.height;
+    }
+  }
+  return next;
+}
+
 // Gallery and image-carousel fields use one URL|alternative-text row per image.
 // Keep the operation atomic: never silently drop selected images or truncate text.
 export function appendMediaList(current, selection) {

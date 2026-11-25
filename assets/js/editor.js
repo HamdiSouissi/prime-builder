@@ -1,4 +1,4 @@
-import { History, add, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
+import { History, add, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, replaceImageSource, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
 import { makeRichField } from './rich-text.js';
 
 const root = document.querySelector('[data-pb-app]');
@@ -547,6 +547,7 @@ function makeField(name, schema, current, onChange, allowVisualRich = true) {
     if (schema.max != null && schema.type === 'integer') input.max = schema.max;
     if (schema.max != null && schema.type !== 'integer' && schema.type !== 'datetime_utc') input.maxLength = schema.max;
   }
+  input.dataset.pbSetting = name;
   input.value = current ?? '';
   input.addEventListener(schema.type === 'enum' ? 'change' : 'input', () => {
     if (input.value === '') onChange(undefined);
@@ -576,6 +577,10 @@ function renderParentOptions(selectedElement) {
   }
   walk(history.present); parentSelect.value = currentParent;
 }
+function isImageSource(type, field) {
+  return (type === 'image' && field === 'url') ||
+    (['card', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(type) && field === 'image_url');
+}
 let mediaDependencies;
 async function openMedia(elementId, urlField, kind = 'image', multiple = false) {
   try {
@@ -592,7 +597,7 @@ async function openMedia(elementId, urlField, kind = 'image', multiple = false) 
     picker.openMediaPicker({ multiple, kinds: [kind], title: multiple ? ui.choose_images : ui.choose_media, onSelect: selection => {
       const node = find(history.present, elementId);
       if (!node) return;
-      const settings = { ...node.settings };
+      let settings = { ...node.settings };
       if (multiple) {
         // Do not apply a late picker result to a different selection or panel.
         if (selected !== elementId || panel !== 'settings' || tab !== 'content') return;
@@ -605,11 +610,8 @@ async function openMedia(elementId, urlField, kind = 'image', multiple = false) 
       } else {
         const media = Array.isArray(selection) ? selection[0] : selection;
         if (!media || typeof media.url !== 'string') return;
-        settings[urlField] = media.url;
-        if (['image', 'card', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(node.type) && typeof media.alt === 'string') settings.alt = media.alt;
-        if (['image', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(node.type)) {
-          for (const key of ['width', 'height']) if (Number.isInteger(media[key]) && media[key] > 0 && media[key] <= 10000) settings[key] = media[key];
-        }
+        if (isImageSource(node.type, urlField)) settings = replaceImageSource(settings, urlField, media.url, media);
+        else settings[urlField] = media.url;
       }
       commit(update(history.present, elementId, { settings }), false, multiple ? ui.choose_images : ui.choose_media); renderSettings();
       if (multiple) { $('[data-pb-media-list]')?.focus({ preventScroll: true }); $('[data-pb-live]').textContent = ui.media_list_added; }
@@ -655,8 +657,21 @@ function renderSettings() {
     for (const [name, schema] of Object.entries(definition?.fields || {})) {
       fields.append(makeField(name, schema, element.settings[name], value => {
         const current = find(history.present, selected); if (!current) return;
-        const settings = { ...current.settings };
-        if (value === undefined) delete settings[name]; else settings[name] = value;
+        let settings;
+        if (isImageSource(current.type, name)) {
+          settings = replaceImageSource(current.settings, name, value);
+          if (current.settings[name] !== value) {
+            // Keep the dimension controls in sync without rebuilding the panel
+            // (which would discard focus while the user types an address).
+            for (const key of ['width', 'height']) {
+              const control = fields.querySelector(`[data-pb-setting="${key}"]`);
+              if (control) control.value = '';
+            }
+          }
+        } else {
+          settings = { ...current.settings };
+          if (value === undefined) delete settings[name]; else settings[name] = value;
+        }
         commit(update(history.present, selected, { settings }), false, `${ui.content} : ${schema.label || ui[name] || name}`);
       }, element.type !== 'html'));
       if ((['image', 'video', 'audio'].includes(element.type) && name === 'url') || (['card', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(element.type) && name === 'image_url')) {

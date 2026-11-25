@@ -671,6 +671,47 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('onerror=', $entry->contentHtml);
     }
 
+    public function testSingleImageDimensionsPersistThroughBothApisWithoutInventedSizes(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('integer', $config['widgets']['card']['fields']['width']['type']);
+        self::assertSame(1, $config['widgets']['card']['fields']['width']['min']);
+        self::assertSame(10000, $config['widgets']['card']['fields']['height']['max']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'single image dimensions', ['*'])['token'];
+        $document = $this->document();
+        $elements = [];
+        foreach (['image' => 'url', 'image_box' => 'image_url', 'testimonial' => 'image_url', 'review' => 'image_url', 'call_to_action' => 'image_url', 'card' => 'image_url'] as $type => $field) {
+            $elements[] = ['id' => 'img_' . $type, 'type' => $type, 'settings' => [$field => '/uploads/photo.png', 'alt' => 'Photo', 'width' => 320, 'height' => 200], 'styles' => [], 'children' => []];
+        }
+        $document['blocks'][0]['data']['elements'] = $elements;
+        $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertSame(6, substr_count($entry->contentHtml, 'alt="Photo" width="320" height="200" loading="lazy"'));
+        self::assertSame(320, $entry->decodedContent()['blocks'][0]['data']['elements'][5]['settings']['width']);
+
+        foreach ($document['blocks'][0]['data']['elements'] as &$element) {
+            unset($element['settings']['width'], $element['settings']['height']);
+        }
+        unset($element);
+        $response = $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertSame(6, substr_count($entry->contentHtml, 'alt="Photo" loading="lazy"'));
+        self::assertStringNotContainsString(' width=', $entry->contentHtml);
+        self::assertStringNotContainsString(' height=', $entry->contentHtml);
+
+        $document['blocks'][0]['data']['elements'][5]['settings']['width'] = '1" onerror="evil()';
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringNotContainsString('onerror=', $entry->contentHtml);
+    }
+
     public function testGalleryAssetsAreConditionalAndFallbackLabelsAreLocalized(): void
     {
         $app = $this->activated(null);

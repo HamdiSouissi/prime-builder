@@ -34,7 +34,7 @@ final class Registry
             'anchor' => ['anchor' => ['type' => 'slug', 'max' => 64]],
             'list' => ['items' => ['type' => 'multiline', 'max' => 5000], 'list_type' => ['type' => 'enum', 'values' => ['unordered', 'ordered']]],
             'accordion' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000]],
-            'card' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000], 'image_url' => $url, 'alt' => $text, 'url' => ['type' => 'href', 'max' => 2048], 'button_text' => $text],
+            'card' => ['title' => $text, 'text' => ['type' => 'rich', 'max' => 10000], 'image_url' => $url, 'alt' => $text, 'width' => $dimension, 'height' => $dimension, 'url' => ['type' => 'href', 'max' => 2048], 'button_text' => $text],
             'icon_box' => ['icon' => $icon, 'title' => $text, 'text' => ['type' => 'rich', 'max' => 5000]],
             'icon' => ['icon' => $icon, 'accessible_label' => $text],
             'icon_list' => ['icon' => $icon, 'items' => ['type' => 'multiline', 'max' => 5000]],

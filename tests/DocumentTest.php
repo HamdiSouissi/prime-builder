@@ -627,6 +627,34 @@ final class DocumentTest extends TestCase
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
     }
 
+    public function testSingleImageWidgetsUseOnlyExplicitSafeDimensions(): void
+    {
+        $renderer = new Renderer(new Registry(), new HtmlSanitizer());
+        foreach (['image' => 'url', 'card' => 'image_url', 'image_box' => 'image_url', 'testimonial' => 'image_url', 'review' => 'image_url', 'call_to_action' => 'image_url'] as $type => $field) {
+            $settings = [$field => '/uploads/photo.jpg', 'alt' => 'Photo'];
+            $withoutSize = $this->renderBasicWidget($type, $settings);
+            self::assertStringContainsString('src="/uploads/photo.jpg" alt="Photo" loading="lazy" decoding="async"', $withoutSize, $type);
+            self::assertStringNotContainsString(' width=', $withoutSize, $type);
+            self::assertStringNotContainsString(' height=', $withoutSize, $type);
+            $withSize = $this->renderBasicWidget($type, $settings + ['width' => 320, 'height' => 200]);
+            self::assertStringContainsString('alt="Photo" width="320" height="200" loading="lazy"', $withSize, $type);
+            $widthOnly = $this->renderBasicWidget($type, $settings + ['width' => 1]);
+            self::assertStringContainsString('alt="Photo" width="1" loading="lazy"', $widthOnly, $type);
+            self::assertStringNotContainsString(' height=', $widthOnly, $type);
+            $heightOnly = $this->renderBasicWidget($type, $settings + ['height' => 10000]);
+            self::assertStringContainsString('alt="Photo" height="10000" loading="lazy"', $heightOnly, $type);
+            self::assertStringNotContainsString(' width=', $heightOnly, $type);
+            foreach ([0, 10001, 1.5, '12', false, null, []] as $invalid) {
+                $node = $this->element($type);
+                $node['settings'] = $settings + ['width' => $invalid, 'height' => $invalid];
+                self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors'], $type);
+                $raw = $renderer->render(['version' => 1, 'elements' => [$node]]);
+                self::assertStringNotContainsString(' width=', $raw, $type);
+                self::assertStringNotContainsString(' height=', $raw, $type);
+            }
+        }
+    }
+
     public function testTestimonialRendersQuotationAttributionAndOptionalPortrait(): void
     {
         $html = $this->renderBasicWidget('testimonial', ['text' => '<p>Très <strong>utile</strong>.</p>', 'author' => 'Camille', 'job_title' => 'Designer', 'image_url' => '/uploads/portrait.jpg', 'alt' => '', 'width' => 100, 'height' => 100]);

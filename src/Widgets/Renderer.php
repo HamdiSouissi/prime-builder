@@ -197,8 +197,6 @@ final class Renderer
         $href = $this->sanitizer->sanitizeHref($url) ?? '';
         $resource = $this->sanitizer->sanitizeResourceUrl($url) ?? '';
         $level = max(1, min(6, (int) ($settings['level'] ?? 2)));
-        $width = max(1, min(10000, (int) ($settings['width'] ?? 800)));
-        $height = max(1, min(10000, (int) ($settings['height'] ?? 600)));
         $value = max(0, min(100, (int) ($settings['value'] ?? 0)));
         $callback = $definition['render'] ?? null;
         if (is_callable($callback)) {
@@ -211,7 +209,7 @@ final class Renderer
             'heading' => '<h' . $level . '>' . $text . '</h' . $level . '>',
             'text' => $rich,
             'html' => $this->renderHtmlWidget($id, $settings),
-            'image' => $resource !== '' ? '<img src="' . self::escape($resource) . '" alt="' . self::escape((string) ($settings['alt'] ?? '')) . '" width="' . $width . '" height="' . $height . '" loading="lazy" decoding="async">' : '',
+            'image' => $resource !== '' ? '<img src="' . self::escape($resource) . '" alt="' . self::escape((string) ($settings['alt'] ?? '')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async">' : '',
             'button' => $href !== '' ? '<a class="pb-button-link" href="' . self::escape($href) . '">' . $text . '</a>' : '',
             'separator' => '<hr>',
             'quote' => '<blockquote>' . $rich . (isset($settings['author']) && $settings['author'] !== '' ? '<cite>' . self::escape((string) $settings['author']) . '</cite>' : '') . '</blockquote>',
@@ -403,13 +401,26 @@ final class Renderer
     }
 
     /** @param array<string, mixed> $settings */
+    private static function imageDimensionAttributes(array $settings): string
+    {
+        $attributes = '';
+        foreach (['width', 'height'] as $name) {
+            $value = $settings[$name] ?? null;
+            if (is_int($value) && $value >= 1 && $value <= 10000) {
+                $attributes .= ' ' . $name . '="' . $value . '"';
+            }
+        }
+        return $attributes;
+    }
+
+    /** @param array<string, mixed> $settings */
     private function renderCard(array $settings): string
     {
         $image = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'image_url'));
         $link = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
         $html = '<article class="pb-card-content">';
         if ($image !== null) {
-            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '" loading="lazy" decoding="async">';
+            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async">';
         }
         $title = $this->fieldText($settings, 'title');
         if ($title !== '') {
@@ -465,13 +476,11 @@ final class Renderer
     private function renderImageBox(array $settings): string
     {
         $image = $this->sanitizer->sanitizeResourceUrl($this->fieldText($settings, 'image_url'));
-        $width = max(1, min(10000, (int) ($settings['width'] ?? 800)));
-        $height = max(1, min(10000, (int) ($settings['height'] ?? 600)));
         $title = $this->fieldText($settings, 'title');
         $url = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
         $html = '<div>';
         if ($image !== null && $image !== '') {
-            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '" width="' . $width . '" height="' . $height . '" loading="lazy" decoding="async">';
+            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async">';
         }
         if ($title !== '') {
             $html .= '<h3>' . self::escape($title) . '</h3>';
@@ -493,9 +502,7 @@ final class Renderer
         if (($image !== null && $image !== '') || $author !== '' || $job !== '') {
             $html .= '<figcaption>';
             if ($image !== null && $image !== '') {
-                $width = max(1, min(10000, (int) ($settings['width'] ?? 100)));
-                $height = max(1, min(10000, (int) ($settings['height'] ?? 100)));
-                $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '" width="' . $width . '" height="' . $height . '" loading="lazy" decoding="async"> ';
+                $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async"> ';
             }
             if ($author !== '') {
                 $html .= '<cite>' . self::escape($author) . '</cite>';
@@ -656,9 +663,7 @@ final class Renderer
         if (($image !== null && $image !== '') || $author !== '' || $job !== '') {
             $html .= '<div class="pb-review-credit">';
             if ($image !== null && $image !== '') {
-                $width = max(1, min(10000, (int) ($settings['width'] ?? 100)));
-                $height = max(1, min(10000, (int) ($settings['height'] ?? 100)));
-                $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '" width="' . $width . '" height="' . $height . '" loading="lazy" decoding="async">';
+                $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async">';
             }
             if ($author !== '' || $job !== '') {
                 $html .= '<p>' . ($author !== '' ? '<cite>' . self::escape($author) . '</cite>' : '')
@@ -698,9 +703,7 @@ final class Renderer
         $url = $this->sanitizer->sanitizeHref($this->fieldText($settings, 'url'));
         $html = '<div class="pb-cta-content">';
         if ($image !== null && $image !== '') {
-            $width = max(1, min(10000, (int) ($settings['width'] ?? 800)));
-            $height = max(1, min(10000, (int) ($settings['height'] ?? 600)));
-            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '" width="' . $width . '" height="' . $height . '" loading="lazy" decoding="async">';
+            $html .= '<img src="' . self::escape($image) . '" alt="' . self::escape($this->fieldText($settings, 'alt')) . '"' . self::imageDimensionAttributes($settings) . ' loading="lazy" decoding="async">';
         }
         $html .= '<div class="pb-cta-copy">';
         if ($title !== '') {
