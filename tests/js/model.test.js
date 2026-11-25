@@ -84,6 +84,37 @@ test('media-library selections retain bounded intrinsic dimensions without chang
   assert.equal(bounded.images, '/min-max.png|\n/too-wide.png|\n/fraction.png|');
 });
 
+test('media carousel appends selected images atomically and keys dimensions by image URL', async () => {
+  const { appendMediaCarouselSelection } = await import('../../assets/js/model.js');
+  assert.equal(typeof appendMediaCarouselSelection, 'function');
+  const previous = 'video | /clip.webm | Démo | /captions.vtt | Texte\r\nimage | /old.png | Ancienne\r\n';
+  const old = [{ url: '/old.png', width: 640, height: 480 }, { url: '/clip.webm', width: 1, height: 1 }];
+  const selection = [
+    { kind: 'image', url: '/wide.png', alt: 'Paysage\nclair', width: 320, height: 200 },
+    { kind: 'image', url: '/unknown.png', alt: null, width: 800, height: null },
+  ];
+  const copy = structuredClone(selection);
+  const result = appendMediaCarouselSelection(previous, JSON.stringify(old), selection);
+  assert.equal(result.items, 'video | /clip.webm | Démo | /captions.vtt | Texte\nimage | /old.png | Ancienne\nimage|/wide.png|Paysage clair\nimage|/unknown.png|');
+  assert.deepEqual(JSON.parse(result.dimensions), [old[0], { url: '/wide.png', width: 320, height: 200 }]);
+  assert.deepEqual(selection, copy);
+  assert.deepEqual(appendMediaCarouselSelection('', undefined, [{ kind: 'image', url: '/a', width: 1, height: 10000 }]), { items: 'image|/a|', dimensions: '[{"url":"/a","width":1,"height":10000}]' });
+  assert.deepEqual(appendMediaCarouselSelection('', '', [{ kind: 'image', url: '/a', width: 1.5, height: 2 }]), { items: 'image|/a|', dimensions: '' });
+  assert.equal(appendMediaCarouselSelection('/old\n\n/old2', '', [selection[0]]), null);
+  assert.equal(appendMediaCarouselSelection('', '', []), null);
+  assert.equal(appendMediaCarouselSelection('', '{bad', [selection[0]]), null);
+  assert.equal(appendMediaCarouselSelection('', '', [{ kind: 'video', url: '/clip.webm' }]), null);
+  assert.equal(appendMediaCarouselSelection('', '', [{ kind: 'image', url: '/bad|url' }]), null);
+  assert.equal(appendMediaCarouselSelection('', '', [{ kind: 'image', url: '/a', alt: 'texte | ambigu' }]), null);
+  assert.notEqual(appendMediaCarouselSelection('', '', [{ kind: 'image', url: '/a', alt: 'é'.repeat(150) }]), null);
+  assert.equal(appendMediaCarouselSelection('', '', [{ kind: 'image', url: '/a', alt: 'é'.repeat(151) }]), null);
+  assert.equal(appendMediaCarouselSelection('', '', [{ kind: 'image', url: '/' + 'a'.repeat(2048) }]), null);
+  const nineteen = Array.from({ length: 19 }, (_, index) => `image|/${index}|`).join('\n');
+  assert.notEqual(appendMediaCarouselSelection(nineteen, '', [selection[0]]), null);
+  assert.equal(appendMediaCarouselSelection(nineteen, '', selection), null);
+  assert.equal(appendMediaCarouselSelection('/' + 'a'.repeat(14990), '', [selection[0]]), null);
+});
+
 test('validated old nodes receive optional defaults without losing other values', () => {
   const input = [
     { id: 'empty', type: 'container', settings: null, styles: null, children: null, label: 'Existing' },

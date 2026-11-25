@@ -746,6 +746,55 @@ final class DocumentTest extends TestCase
         self::assertFileExists(dirname(__DIR__) . '/assets/css/widgets/media_carousel.css');
     }
 
+    public function testMediaCarouselDimensionsFollowImageUrlsAndNeverVideosOrEditedUrls(): void
+    {
+        $node = $this->element('media_carousel');
+        $sizes = [
+            ['url' => '/uploads/wide.png', 'width' => 320, 'height' => 200],
+            ['url' => '/uploads/tall.png', 'width' => 150, 'height' => 300],
+            ['url' => '/uploads/demo.webm', 'width' => 1, 'height' => 10000],
+            ['url' => '/uploads/missing.png', 'width' => 1, 'height' => 1],
+        ];
+        $node['settings'] = [
+            'items' => "image | /uploads/wide.png | Large | Vue\nimage | /uploads/tall.png | Portrait\nimage | /uploads/legacy.png | Ancienne\nvideo | /uploads/demo.webm | Démo | /uploads/demo.vtt | Texte",
+            'images_dimensions' => json_encode($sizes, JSON_THROW_ON_ERROR),
+        ];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $settings = $result['data']['elements'][0]['settings'];
+        self::assertSame(array_slice($sizes, 0, 2), json_decode($settings['images_dimensions'], true));
+        self::assertSame([], $this->validator()->validate($result['data'])['errors']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertStringContainsString('<img src="/uploads/wide.png" alt="Large" width="320" height="200" loading="lazy"', $html);
+        self::assertStringContainsString('<img src="/uploads/tall.png" alt="Portrait" width="150" height="300" loading="lazy"', $html);
+        self::assertStringContainsString('<img src="/uploads/legacy.png" alt="Ancienne" loading="lazy"', $html);
+        self::assertStringContainsString('<video controls preload="none" aria-label="Démo">', $html);
+
+        // Reorder and change an address while keeping the old metadata: only a
+        // still-listed image may inherit it, not another row or a video.
+        $node['settings']['items'] = "image | /uploads/tall.png | Portrait\nimage | /uploads/replaced.png | Large\nvideo | /uploads/wide.png | Démo";
+        $changed = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $changed['errors']);
+        self::assertSame([$sizes[1]], json_decode($changed['data']['elements'][0]['settings']['images_dimensions'], true));
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($changed['data']);
+        self::assertStringContainsString('alt="Portrait" width="150" height="300" loading="lazy"', $html);
+        self::assertStringContainsString('alt="Large" loading="lazy"', $html);
+        self::assertStringNotContainsString('width="320"', $html);
+
+        $node['settings']['images_dimensions'] = json_encode([['url' => '/uploads/tall.png', 'width' => 1, 'height' => 10000]], JSON_THROW_ON_ERROR);
+        self::assertSame([], $this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        foreach ([
+            [['url' => '/uploads/tall.png', 'width' => 0, 'height' => 1]],
+            [['url' => '/uploads/tall.png', 'width' => 1, 'height' => 10001]],
+            [['url' => '/uploads/tall.png', 'width' => 1.5, 'height' => 1]],
+            [['url' => '/uploads/tall.png', 'width' => '1" onerror="alert(1)', 'height' => 1]],
+            [$sizes[0], $sizes[0]],
+        ] as $bad) {
+            $node['settings']['images_dimensions'] = json_encode($bad, JSON_THROW_ON_ERROR);
+            self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+        }
+    }
+
     public function testPortfolioValidatesCardsAndRendersEveryProjectWithoutScript(): void
     {
         $node = $this->element('portfolio');

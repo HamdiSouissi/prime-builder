@@ -1,4 +1,4 @@
-import { History, add, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, replaceImageSource, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
+import { History, add, appendMediaCarouselSelection, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, replaceImageSource, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
 import { makeRichField } from './rich-text.js';
 
 const root = document.querySelector('[data-pb-app]');
@@ -607,11 +607,20 @@ async function openMedia(elementId, urlField, kind, multiple, opener) {
       let settings = { ...node.settings };
       if (multiple) {
         const current = typeof settings[urlField] === 'string' ? settings[urlField] : '';
-        const result = appendMediaSelection(current, settings.images_dimensions, Array.isArray(selection) ? selection : [selection]);
-        if (result === null) { void showMessage(ui.media_list_error); return; }
-        settings[urlField] = result.images;
-        if (result.dimensions) settings.images_dimensions = result.dimensions;
-        else delete settings.images_dimensions;
+        const images = Array.isArray(selection) ? selection : [selection];
+        if (node.type === 'media_carousel' && urlField === 'items') {
+          const result = appendMediaCarouselSelection(current, settings.images_dimensions, images);
+          if (result === null) { void showMessage(ui.media_carousel_add_error); return; }
+          settings[urlField] = result.items;
+          if (result.dimensions) settings.images_dimensions = result.dimensions;
+          else delete settings.images_dimensions;
+        } else {
+          const result = appendMediaSelection(current, settings.images_dimensions, images);
+          if (result === null) { void showMessage(ui.media_list_error); return; }
+          settings[urlField] = result.images;
+          if (result.dimensions) settings.images_dimensions = result.dimensions;
+          else delete settings.images_dimensions;
+        }
       } else {
         const media = Array.isArray(selection) ? selection[0] : selection;
         if (!media || typeof media.url !== 'string') return;
@@ -701,7 +710,8 @@ function renderSettings() {
       if ((['image', 'video', 'audio'].includes(element.type) && name === 'url') || (['card', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(element.type) && name === 'image_url')) {
         const choose = text('button', ui.choose_media, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMedia = '';
         choose.addEventListener('click', () => openMedia(element.id, name, ['video', 'audio'].includes(element.type) ? element.type : 'image', false, choose)); fields.append(choose);
-      } else if (['gallery', 'image_carousel'].includes(element.type) && name === 'images' && schema.type === 'media_list') {
+      } else if ((['gallery', 'image_carousel'].includes(element.type) && name === 'images' && schema.type === 'media_list') ||
+        (element.type === 'media_carousel' && name === 'items' && schema.type === 'media_carousel_items')) {
         const choose = text('button', ui.choose_images, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMediaList = '';
         choose.addEventListener('click', () => openMedia(element.id, name, 'image', true, choose)); fields.append(choose);
       }

@@ -46,13 +46,12 @@ export function appendMediaList(current, selection) {
 
 // Dimensions are an optional snapshot keyed by the image URL, not its row
 // number: reordering or editing alternatives must not swap image proportions.
-export function appendMediaSelection(current, rawDimensions, selection) {
-  const images = appendMediaList(current, selection);
-  if (images === null || (rawDimensions !== undefined && typeof rawDimensions !== 'string')) return null;
+function selectedDimensions(rawDimensions, listed, selection, maximum = 20) {
+  if (rawDimensions !== undefined && typeof rawDimensions !== 'string') return null;
   const bytes = value => new TextEncoder().encode(value).length;
   let prior;
   try { prior = rawDimensions ? JSON.parse(rawDimensions) : []; } catch { return null; }
-  if (!Array.isArray(prior) || prior.length > 20 || (rawDimensions && bytes(rawDimensions) > 25000)) return null;
+  if (!Array.isArray(prior) || prior.length > maximum || (rawDimensions && bytes(rawDimensions) > 25000)) return null;
   const dimensions = new Map();
   for (const item of prior) {
     if (!item || Array.isArray(item) || typeof item !== 'object' || Object.keys(item).length !== 3 ||
@@ -61,7 +60,6 @@ export function appendMediaSelection(current, rawDimensions, selection) {
       !Number.isInteger(item.height) || item.height < 1 || item.height > 10000 || dimensions.has(item.url)) return null;
     dimensions.set(item.url, { url: item.url, width: item.width, height: item.height });
   }
-  const listed = new Set(images.split(/\r\n|[\n\r\v\f\u0085\u2028\u2029]/u).map(line => line.split('|', 1)[0].trim()));
   for (const url of dimensions.keys()) if (!listed.has(url)) dimensions.delete(url);
   for (const item of selection) {
     const url = item.url.trim();
@@ -70,8 +68,43 @@ export function appendMediaSelection(current, rawDimensions, selection) {
       dimensions.set(url, { url, width: item.width, height: item.height });
     } else dimensions.delete(url);
   }
+  if (dimensions.size > maximum) return null;
   const encoded = dimensions.size ? JSON.stringify([...dimensions.values()]) : '';
-  return bytes(encoded) <= 25000 ? { images, dimensions: encoded } : null;
+  return bytes(encoded) <= 25000 ? encoded : null;
+}
+export function appendMediaSelection(current, rawDimensions, selection) {
+  const images = appendMediaList(current, selection);
+  if (images === null) return null;
+  const listed = new Set(images.split(/\r\n|[\n\r\v\f\u0085\u2028\u2029]/u).map(line => line.split('|', 1)[0].trim()));
+  const dimensions = selectedDimensions(rawDimensions, listed, selection);
+  return dimensions === null ? null : { images, dimensions };
+}
+// Media-carousel rows can also contain videos. Keep image dimensions in the
+// URL-keyed snapshot so editing an address cannot reuse its former size.
+export function appendMediaCarouselSelection(current, rawDimensions, selection) {
+  if (typeof current !== 'string' || !Array.isArray(selection) || selection.length === 0) return null;
+  const base = current.trim() ? current.trimEnd() : '';
+  const newline = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/u;
+  const existing = base ? base.split(newline) : [];
+  if (existing.some(line => !line.trim()) || existing.length + selection.length > 20) return null;
+  const bytes = value => new TextEncoder().encode(value).length;
+  const appended = [];
+  for (const item of selection) {
+    if (!item || item.kind !== 'image' || typeof item.url !== 'string') return null;
+    const url = item.url.trim();
+    if (!url || bytes(url) > 2048 || /[|\u0000-\u001f\u007f\u0085\u2028\u2029]/u.test(url)) return null;
+    const alt = typeof item.alt === 'string' ? item.alt.replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/gu, ' ').trim() : '';
+    if (alt.includes('|') || bytes(alt) > 300) return null;
+    appended.push(`image|${url}|${alt}`);
+  }
+  const items = [...existing, ...appended].join('\n');
+  if (bytes(items) > 15000) return null;
+  const listed = new Set(items.split(newline).map(line => {
+    const parts = line.split('|');
+    return parts[0].trim() === 'image' ? parts[1]?.trim() : undefined;
+  }).filter(Boolean));
+  const dimensions = selectedDimensions(rawDimensions, listed, selection);
+  return dimensions === null ? null : { items, dimensions };
 }
 export function id() { return `pb_${globalThis.crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`; }
 // Only fill optional node fields on an already validated tree. This is not a

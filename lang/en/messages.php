@@ -511,6 +511,7 @@ return [
         'choose_images' => 'Add images from the media library',
         'media_list_added' => 'Images added to the list.',
         'media_list_error' => 'This selection could not be added. Check the URLs and alternative text: at most 20 images, 300 bytes per text and 10,000 bytes total. No images were added.',
+        'media_carousel_add_error' => 'These images could not be added. Check the URLs and alternative text without “|”: at most 20 media items, 300 bytes per text and 15,000 bytes total. No images were added.',
         'media_grid' => 'Available media',
         'media_error' => 'The media library is unavailable. You can enter a URL.',
         'rich_visual' => 'Visual editor',

@@ -554,6 +554,7 @@ final class Renderer
             return '<p>' . self::escape(t('plugin::prime-builder.ui.media_carousel_empty')) . '</p>';
         }
         $label = $this->fieldText($settings, 'label', t('plugin::prime-builder.widgets.media_carousel'));
+        $dimensions = $this->imageListDimensions($settings);
         $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.ui.' . $key));
         $language = ($settings['caption_language'] ?? 'fr') === 'en' ? 'en' : 'fr';
         $html = '<div class="pb-media-carousel" data-pb-carousel data-pb-carousel-label="' . self::escape($label) . '"'
@@ -563,7 +564,7 @@ final class Renderer
         foreach ($rows as $row) {
             $html .= '<div data-pb-slide><figure>';
             if ($row['type'] === 'image') {
-                $html .= '<img src="' . self::escape($row['url']) . '" alt="' . self::escape($row['description']) . '" loading="lazy" decoding="async">';
+                $html .= '<img src="' . self::escape($row['url']) . '" alt="' . self::escape($row['description']) . '"' . self::dimensionAttributes($dimensions, $row['url']) . ' loading="lazy" decoding="async">';
                 if ($row['caption'] !== '') {
                     $html .= '<figcaption>' . self::escape($row['caption']) . '</figcaption>';
                 }

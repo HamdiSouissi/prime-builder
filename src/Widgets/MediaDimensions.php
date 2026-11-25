@@ -56,7 +56,18 @@ final class MediaDimensions
                 $urls[$url] = true;
             }
         }
-        return array_values(array_filter($rows, static fn (array $row): bool => isset($urls[$row['url']])));
+        return self::onlyUrls($rows, array_keys($urls));
+    }
+
+    /**
+     * @param list<array{url: string, width: int, height: int}> $rows
+     * @param list<string> $urls
+     * @return list<array{url: string, width: int, height: int}>
+     */
+    public static function onlyUrls(array $rows, array $urls): array
+    {
+        $listed = array_fill_keys($urls, true);
+        return array_values(array_filter($rows, static fn (array $row): bool => isset($listed[$row['url']])));
     }
 
     /** @param list<array{url: string, width: int, height: int}> $rows */

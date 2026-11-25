@@ -845,6 +845,49 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/image_carousel.js', $assets->renderScripts());
     }
 
+    public function testMediaCarouselImageDimensionsPersistAndRejectInvalidValuesInBothApis(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertArrayNotHasKey('images_dimensions', $config['widgets']['media_carousel']['fields']);
+        self::assertStringContainsString('15 000 octets', $config['ui']['media_carousel_add_error']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'media carousel dimensions', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'media', 'type' => 'media_carousel',
+            'settings' => [
+                'items' => "image | /uploads/wide.png | Paysage\nimage | /uploads/old.png | Ancienne\nvideo | /uploads/demo.webm | Démo",
+                'images_dimensions' => json_encode([['url' => '/uploads/wide.png', 'width' => 320, 'height' => 200]], JSON_THROW_ON_ERROR),
+            ],
+            'styles' => [], 'children' => [],
+        ]];
+        $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('alt="Paysage" width="320" height="200" loading="lazy"', $entry->contentHtml);
+        self::assertStringContainsString('alt="Ancienne" loading="lazy"', $entry->contentHtml);
+        self::assertStringContainsString('<video controls preload="none" aria-label="Démo">', $entry->contentHtml);
+        self::assertSame($document['blocks'][0]['data']['elements'][0]['settings']['items'], $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['items']);
+
+        $document['blocks'][0]['data']['elements'][0]['settings']['items'] = 'image | /uploads/tall.png | Portrait';
+        $response = $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('alt="Portrait" loading="lazy"', $entry->contentHtml);
+        self::assertStringNotContainsString('width="320"', $entry->contentHtml);
+        self::assertArrayNotHasKey('images_dimensions', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']);
+
+        $document['blocks'][0]['data']['elements'][0]['settings']['images_dimensions'] = json_encode([['url' => '/uploads/tall.png', 'width' => '1" onerror="evil()', 'height' => 300]], JSON_THROW_ON_ERROR);
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('alt="Portrait" loading="lazy"', $entry->contentHtml);
+        self::assertStringNotContainsString('onerror=', $entry->contentHtml);
+    }
+
     public function testPortfolioPersistsAndLoadsItsAssetsOnlyWhereNeeded(): void
     {
         $app = $this->activated('admin');

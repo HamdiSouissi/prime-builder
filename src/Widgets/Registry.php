@@ -47,6 +47,7 @@ final class Registry
             'media_carousel' => [
                 'label' => ['type' => 'text', 'max' => 200, 'label' => 'plugin::prime-builder.ui.carousel_label'],
                 'items' => ['type' => 'media_carousel_items', 'max' => 15000, 'label' => 'plugin::prime-builder.ui.media_carousel_items'],
+                'images_dimensions' => ['type' => 'media_dimensions', 'max' => MediaDimensions::MAX_BYTES, 'internal' => true],
                 'caption_language' => ['type' => 'enum', 'values' => ['fr', 'en'], 'label' => 'plugin::prime-builder.ui.caption_language'],
             ],
             'slideshow' => [

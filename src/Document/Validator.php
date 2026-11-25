@@ -131,15 +131,26 @@ final class Validator
                 }
                 $settings[$key] = $normalized;
             }
-            if (in_array($type, ['gallery', 'image_carousel'], true) && is_string($settings['images_dimensions'] ?? null)) {
-                // Keep metadata tied to its URL, never to a position that can be
-                // reordered or edited in the text field.
+            if (in_array($type, ['gallery', 'image_carousel', 'media_carousel'], true) && is_string($settings['images_dimensions'] ?? null)) {
+                // Keep metadata tied to its image URL, never to a position that
+                // can be reordered or edited, or to a video with the same URL.
                 $rows = MediaDimensions::parse($settings['images_dimensions'], $this->sanitizer);
-                $images = is_string($settings['images'] ?? null) ? $settings['images'] : '';
                 if ($rows === null) {
                     $errors[] = t('plugin::prime-builder.validation.settings');
                 } else {
-                    $rows = MediaDimensions::onlyListed($rows, $images, $this->sanitizer);
+                    if ($type === 'media_carousel') {
+                        $items = MediaCarousel::parse(is_string($settings['items'] ?? null) ? $settings['items'] : '', $this->sanitizer) ?? [];
+                        $urls = [];
+                        foreach ($items as $entry) {
+                            if ($entry['type'] === 'image') {
+                                $urls[] = $entry['url'];
+                            }
+                        }
+                        $rows = MediaDimensions::onlyUrls($rows, $urls);
+                    } else {
+                        $images = is_string($settings['images'] ?? null) ? $settings['images'] : '';
+                        $rows = MediaDimensions::onlyListed($rows, $images, $this->sanitizer);
+                    }
                     if ($rows === []) {
                         unset($settings['images_dimensions']);
                     } else {

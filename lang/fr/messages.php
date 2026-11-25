@@ -511,6 +511,7 @@ return [
         'choose_images' => 'Ajouter des images de la médiathèque',
         'media_list_added' => 'Images ajoutées à la liste.',
         'media_list_error' => 'Impossible d’ajouter cette sélection. Vérifiez les URL et textes alternatifs : 20 images au maximum, 300 octets par texte et 10 000 octets au total. Aucune image n’a été ajoutée.',
+        'media_carousel_add_error' => 'Impossible d’ajouter ces images. Vérifiez les URL et textes alternatifs sans « | » : 20 médias au maximum, 300 octets par texte et 15 000 octets au total. Aucune image n’a été ajoutée.',
         'media_grid' => 'Médias disponibles',
         'media_error' => 'La médiathèque est indisponible. Vous pouvez saisir une URL.',
         'rich_visual' => 'Éditeur visuel',
