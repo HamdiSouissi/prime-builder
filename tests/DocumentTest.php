@@ -1801,6 +1801,42 @@ final class DocumentTest extends TestCase
         self::assertStringNotContainsString('pb-toc-article', $withoutToc);
     }
 
+    public function testTableOfContentsDistinguishesInvisibleAndPrivateUseCharacters(): void
+    {
+        $toc = $this->element('table_of_contents', 'toc');
+        $privateUse = "\u{E000}";
+        $unassigned = "\u{0378}";
+        $invisible = "\u{200D}\u{034F}\u{FE0F}";
+        $privateHeading = $this->element('heading', 'private');
+        $privateHeading['settings'] = ['text' => $privateUse];
+        $futureHeading = $this->element('heading', 'future');
+        $futureHeading['settings'] = ['text' => $unassigned];
+        $invisibleHeading = $this->element('heading', 'invisible');
+        $invisibleHeading['settings'] = ['text' => $invisible];
+        $text = $this->element('text', 'unicode');
+        $text['settings'] = ['text' => '<h2>' . $invisible . '</h2><h2>' . $privateUse . '</h2><h2>' . $unassigned . '</h2><h2>Neige ❄️</h2>'];
+        $elements = [$toc, $privateHeading, $futureHeading, $invisibleHeading, $text];
+        foreach (["\u{115F}", "\u{17B4}", "\u{180F}", "\u{2065}", "\u{3164}", "\u{FFA0}", "\u{FFF0}", "\u{E0100}"] as $i => $value) {
+            $node = $this->element('heading', 'ignorable-' . $i);
+            $node['settings'] = ['text' => $value];
+            $elements[] = $node;
+        }
+        $result = $this->validator()->validate(['version' => 1, 'elements' => $elements]);
+        self::assertSame([], $result['errors']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        foreach (range(0, 7) as $i) {
+            self::assertStringNotContainsString('href="#pb-toc-ignorable-' . $i . '"', $html);
+        }
+        self::assertStringContainsString('<a href="#pb-toc-private">' . $privateUse . '</a>', $html);
+        self::assertStringContainsString('<a href="#pb-toc-future">' . $unassigned . '</a>', $html);
+        self::assertStringNotContainsString('href="#pb-toc-invisible"', $html);
+        self::assertStringNotContainsString('href="#pb-toc-unicode-rich-1"', $html);
+        self::assertStringContainsString('<a href="#pb-toc-unicode-rich-2">' . $privateUse . '</a>', $html);
+        self::assertStringContainsString('<a href="#pb-toc-unicode-rich-3">' . $unassigned . '</a>', $html);
+        self::assertStringContainsString('<a href="#pb-toc-unicode-rich-4">Neige ❄️</a>', $html);
+        self::assertStringContainsString('<h2>' . $invisible . '</h2>', $html);
+    }
+
     public function testTableOfContentsBoundsItsLinksAndShowsWhenHeadingsAreOmitted(): void
     {
         $toc = $this->element('table_of_contents', 'toc');

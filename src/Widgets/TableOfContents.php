@@ -221,8 +221,16 @@ final class TableOfContents
 
     private static function hasVisibleText(string $text): bool
     {
-        // Whitespace and invisible Unicode controls alone create unnamed links.
-        return preg_match('/[^\s\p{Z}\p{C}]/u', $text) === 1;
+        // Exclude controls, format characters and default-ignorable characters
+        // such as variation selectors and the combining grapheme joiner. Do not
+        // exclude all of \p{C}: private-use and unassigned code points may be
+        // rendered by a custom font or a newer Unicode version.
+        return preg_match(
+            '/[^\s\p{Z}\p{Cc}\p{Cf}\x{034F}\x{115F}-\x{1160}\x{17B4}-\x{17B5}'
+            . '\x{180B}-\x{180F}\x{2065}\x{3164}\x{FE00}-\x{FE0F}\x{FFA0}'
+            . '\x{FFF0}-\x{FFF8}\x{E0000}-\x{E0FFF}]/u',
+            $text,
+        ) === 1;
     }
 
     private static function label(string $text): string
