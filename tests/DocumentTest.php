@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PrimeBuilder\Tests;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Prime\Content\ContentTypeRegistry;
 use Prime\Content\EntryQuery;
@@ -13,6 +14,7 @@ use Prime\Hooks\Hooks;
 use Prime\Security\HtmlSanitizer;
 use Prime\Site\PermalinkSettings;
 use Prime\Site\UrlGenerator;
+use Prime\Themes\ThemeAssetRegistry;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
@@ -482,6 +484,86 @@ final class DocumentTest extends TestCase
         self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
     }
 
+    /**
+     * Positive rendering assertions for simple widgets that previously had only
+     * the default-envelope smoke test. Each data set is reported separately.
+     *
+     * @return array<string, array{string, array<string, mixed>, list<string>}>
+     */
+    public static function simpleWidgetCases(): array
+    {
+        return [
+            'button' => ['button', ['text' => 'Découvrir & comprendre', 'url' => '/guide?one=1&two=2'], ['<a class="pb-button-link"', 'href="/guide?one=1&amp;two=2"', '>Découvrir &amp; comprendre</a>']],
+            'separator' => ['separator', [], ['<hr>']],
+            'quote' => ['quote', ['text' => '<p>Une <strong>citation</strong>.</p>', 'author' => 'A & B'], ['<blockquote><p>Une <strong>citation</strong>.</p>', '<cite>A &amp; B</cite></blockquote>']],
+            'alert' => ['alert', ['text' => '<p><strong>Attention</strong> à ceci.</p>'], ['<div class="pb-alert-content"><p><strong>Attention</strong> à ceci.</p></div>']],
+            'progress' => ['progress', ['text' => 'Progression', 'value' => 65], ['<label>Progression <progress max="100" value="65">65%</progress></label>']],
+            'anchor' => ['anchor', ['anchor' => 'contact'], ['<span id="contact"></span>']],
+            'list' => ['list', ['items' => "Premier\nDeuxième & dernier", 'list_type' => 'ordered'], ['<ol><li>Premier</li><li>Deuxième &amp; dernier</li></ol>']],
+            'accordion' => ['accordion', ['title' => 'Questions', 'text' => '<p>Une réponse.</p>'], ['<details><summary>Questions</summary>', '<p>Une réponse.</p></div></details>']],
+            'icon_box' => ['icon_box', ['icon' => 'check', 'title' => 'Sécurité', 'text' => '<p>Contrôlée</p>'], ['aria-hidden="true">✓</span>', '<h3>Sécurité</h3>', '<p>Contrôlée</p>']],
+            'counter' => ['counter', ['value' => 42, 'prefix' => '+', 'suffix' => ' & plus', 'title' => 'Projets'], ['<div class="pb-counter-value">+42 &amp; plus</div>', '<p>Projets</p>']],
+            'tabs' => ['tabs', ['label' => 'Sections', 'title_1' => 'Premier', 'text_1' => '<p>Un</p>', 'title_2' => 'Second', 'text_2' => '<p>Deux</p>'], ['data-pb-tabs-label="Sections"', 'id="pb-tab-widget-1"><h3 data-pb-tab-heading>Premier</h3><p>Un</p>', 'id="pb-tab-widget-2"><h3 data-pb-tab-heading>Second</h3><p>Deux</p>']],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     * @param list<string> $expected
+     */
+    #[DataProvider('simpleWidgetCases')]
+    public function testSimpleWidgetRendersItsActualContent(string $type, array $settings, array $expected): void
+    {
+        $html = $this->renderBasicWidget($type, $settings);
+        foreach ($expected as $fragment) {
+            self::assertStringContainsString($fragment, $html, $type);
+        }
+        self::assertStringNotContainsString('<script', $html, $type);
+    }
+
+    public function testCounterAffixesKeepIntentionalSpacesAndRemainPlainText(): void
+    {
+        $node = $this->element('counter', 'counter');
+        $node['settings'] = ['value' => 42, 'prefix' => '€ ', 'suffix' => ' kg', 'title' => 'Charge'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame('€ ', $result['data']['elements'][0]['settings']['prefix']);
+        self::assertSame(' kg', $result['data']['elements'][0]['settings']['suffix']);
+        $renderer = new Renderer(new Registry(), new HtmlSanitizer());
+        self::assertStringContainsString('>€ 42 kg</div>', $renderer->render($result['data']));
+
+        // A whitespace-only affix is still data, not an absent value.
+        $node['settings'] = ['value' => 42, 'prefix' => ' ', 'suffix' => ' '];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame(' ', $result['data']['elements'][0]['settings']['prefix']);
+        self::assertSame(' ', $result['data']['elements'][0]['settings']['suffix']);
+        self::assertStringContainsString('> 42 </div>', $renderer->render($result['data']));
+
+        $node['settings'] = ['value' => 1, 'prefix' => "<b>Prix</b>\r\n", 'suffix' => ' & <img src=x onerror=alert(1)>'];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        self::assertSame('Prix ', $result['data']['elements'][0]['settings']['prefix']);
+        self::assertSame(' & ', $result['data']['elements'][0]['settings']['suffix']);
+        $html = $renderer->render($result['data']);
+        self::assertStringContainsString('>Prix 1 &amp; </div>', $html);
+        self::assertStringNotContainsString('<img', $html);
+        self::assertStringNotContainsString('onerror', $html);
+        $node['settings']['suffix'] = str_repeat('x', 1001);
+        self::assertNotEmpty($this->validator()->validate(['version' => 1, 'elements' => [$node]])['errors']);
+    }
+
+    public function testSpacerProducesAStyledEmptyElement(): void
+    {
+        $node = $this->element('spacer', 'space');
+        $node['styles'] = ['desktop' => ['min_height' => 48]];
+        $result = $this->validator()->validate(['version' => 1, 'elements' => [$node]]);
+        self::assertSame([], $result['errors']);
+        $html = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertStringContainsString('data-pb-id="space"></div>', $html);
+        self::assertStringContainsString('min-height:48px;', (new Compiler())->compile($result['data']));
+    }
+
     public function testAllBuiltInWidgetsRenderWithoutThrowing(): void
     {
         $registry = new Registry();
@@ -586,6 +668,56 @@ final class DocumentTest extends TestCase
         self::assertSame(null, Assets::safeUrl('/assets/plugins/prime-builder/../evil.css', 'css'));
         self::assertSame(null, Assets::safeUrl('/assets/plugins/prime-builder/js/tabs.js', 'css'));
         self::assertSame(null, Assets::safeUrl('//evil.test/widget.css', 'css'));
+    }
+
+    public function testEveryBuiltInWidgetRegistersOnlyItsDeclaredPublicAssets(): void
+    {
+        // Independent catalogue: fail if a built-in gains an unexpected asset,
+        // loses a required one, or points at a missing file.
+        $styled = array_fill_keys(explode(' ', 'container button spacer quote alert progress accordion card icon_box image_box counter tabs toggle gallery image_carousel map video audio posts form call_to_action price_table price_list countdown review flip_box animated_heading code testimonial_carousel media_carousel slideshow portfolio search_form navigation breadcrumbs site_title site_logo entry_title entry_excerpt entry_content entry_featured_image entry_info entry_navigation entry_author archive_title archive_list share_buttons table_of_contents'), true);
+        $scriptGroups = [
+            'tabs' => 'tabs', 'countdown' => 'countdown', 'flip_box' => 'flip_box', 'portfolio' => 'portfolio', 'share_buttons' => 'share_buttons',
+            'posts' => 'content', 'current_content' => 'content', 'theme_zone' => 'content', 'search_form' => 'content', 'navigation' => 'content', 'breadcrumbs' => 'content', 'site_title' => 'content', 'site_logo' => 'content', 'entry_title' => 'content', 'entry_excerpt' => 'content', 'entry_featured_image' => 'content', 'entry_info' => 'content', 'entry_navigation' => 'content', 'entry_author' => 'content',
+            'map' => 'map', 'image_carousel' => 'image_carousel', 'testimonial_carousel' => 'image_carousel', 'media_carousel' => 'image_carousel', 'slideshow' => 'image_carousel', 'gallery' => 'gallery', 'video' => 'video', 'form' => 'forms',
+        ];
+        $definitions = (new Registry())->all();
+        $builtIns = explode(' ', 'container heading text image button separator spacer quote alert progress anchor list accordion card icon_box icon icon_list image_box testimonial testimonial_carousel media_carousel slideshow portfolio review flip_box animated_heading code call_to_action price_table price_list countdown search_form navigation breadcrumbs site_title site_logo entry_title entry_excerpt entry_content entry_featured_image entry_info entry_navigation entry_author archive_title archive_list share_buttons table_of_contents toggle social theme_zone map star_rating counter gallery image_carousel video audio posts current_content form prime_block html original_content original_group tabs');
+        self::assertEqualsCanonicalizing($builtIns, array_keys($definitions));
+        foreach (array_keys($styled + $scriptGroups) as $type) {
+            self::assertArrayHasKey($type, $definitions);
+        }
+        foreach ($definitions as $type => $definition) {
+            $style = isset($styled[$type]) ? '/assets/plugins/prime-builder/css/widgets/' . $type . '.css' : null;
+            $script = isset($scriptGroups[$type]) ? '/assets/plugins/prime-builder/js/' . $scriptGroups[$type] . '.js' : null;
+            self::assertSame($style, $definition['style'] ?? null, $type);
+            self::assertSame($script, $definition['script'] ?? null, $type);
+            foreach ([$style, $script] as $url) {
+                if ($url !== null) {
+                    $relative = substr($url, strlen('/assets/plugins/prime-builder/'));
+                    self::assertFileExists(dirname(__DIR__) . '/assets/' . $relative, $type);
+                }
+            }
+            // Duplicate instances do not duplicate resources. No unrelated
+            // built-in stylesheet or script is added to this registry.
+            $types = Assets::collectTypes([['type' => $type], ['type' => $type]]);
+            self::assertSame([$type => true], $types);
+            $assets = new ThemeAssetRegistry();
+            Assets::register($assets, $types, $definitions);
+            self::assertSame($style === null ? [] : [$style], array_column($assets->resolvedStyles(), 'url'), $type);
+            self::assertSame($script === null ? [] : [$script], array_column($assets->resolvedScripts(), 'url'), $type);
+        }
+        $assets = new ThemeAssetRegistry();
+        Assets::register($assets, [], $definitions);
+        self::assertSame([], $assets->resolvedStyles());
+        self::assertSame([], $assets->resolvedScripts());
+
+        $types = Assets::collectTypes([['type' => 'container', 'children' => [
+            ['type' => 'slideshow'], ['type' => 'image_carousel'], ['type' => 'slideshow'],
+        ]]]);
+        $assets = new ThemeAssetRegistry();
+        Assets::register($assets, $types, $definitions);
+        self::assertSame(3, count($assets->resolvedStyles()));
+        self::assertSame(['/assets/plugins/prime-builder/js/image_carousel.js'], array_column($assets->resolvedScripts(), 'url'));
     }
 
     public function testBasicWidgetsAreCategorizedAndNeedNoPublicScript(): void

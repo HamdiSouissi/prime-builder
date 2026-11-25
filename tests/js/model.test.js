@@ -279,6 +279,44 @@ test('duplicating a converted heading does not duplicate its public anchor', () 
   assert.equal(Object.hasOwn(tree[1].settings, 'block_anchor'), false);
   assert.equal(heading.settings.block_anchor, 'bonjour');
 });
+test('copying a subtree avoids manual anchor collisions without changing links or the source', async () => {
+  const { freshIds } = await import('../../assets/js/model.js');
+  assert.equal(typeof freshIds, 'function');
+  const makeAnchor = name => ({ ...createElement('anchor'), settings: { anchor: name } });
+  const container = createElement('container');
+  const first = makeAnchor('contact'), alreadySuffixed = makeAnchor('contact-2');
+  const longest = makeAnchor('a'.repeat(64));
+  const link = { ...createElement('button'), settings: { text: 'Contact', url: '#contact' } };
+  const legacy = { ...createElement('prime_block'), settings: { block_type: 'heading', block_anchor: 'ancien', block_data: '{"text":"Titre"}' } };
+  container.children = [first, alreadySuffixed, longest, link, legacy];
+  const source = structuredClone(container);
+  const duplicated = duplicate([container], container.id);
+  assert.equal(duplicated[0].children[0].settings.anchor, 'contact');
+  assert.equal(duplicated[1].children[0].settings.anchor, 'contact-3');
+  assert.equal(duplicated[1].children[1].settings.anchor, 'contact-2-2');
+  assert.match(duplicated[1].children[2].settings.anchor, /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/);
+  assert.equal(duplicated[1].children[2].settings.anchor.length, 64);
+  assert.notEqual(duplicated[1].children[2].settings.anchor, longest.settings.anchor);
+  assert.equal(duplicated[1].children[3].settings.url, '#contact');
+  assert.equal(Object.hasOwn(duplicated[1].children[4].settings, 'block_anchor'), false);
+  assert.deepEqual(container, source);
+
+  const pasted = freshIds([container], { copied: true, into: duplicated });
+  assert.equal(pasted[0].children[0].settings.anchor, 'contact-4');
+  const replacements = freshIds([container], { copied: true });
+  assert.equal(replacements[0].children[0].settings.anchor, 'contact');
+  assert.equal(replacements[0].children[1].settings.anchor, 'contact-2');
+  assert.notEqual(replacements[0].id, container.id);
+  const imported = freshIds([container]);
+  assert.equal(imported[0].children[4].settings.block_anchor, 'ancien');
+  assert.deepEqual(container, source);
+
+  const historic = { ...createElement('prime_block'), id: 'core', settings: { block_type: 'heading', block_anchor: 'ancien' } };
+  const collisions = freshIds([makeAnchor('ancien'), makeAnchor('pb-core'), makeAnchor('ancien')], { copied: true, into: [historic] });
+  assert.deepEqual(collisions.map(node => node.settings.anchor), ['ancien-2', 'pb-core-2', 'ancien-3']);
+  assert.equal(historic.settings.block_anchor, 'ancien');
+});
+
 test('moving a container into its descendant is rejected', () => {
   const a = createElement('container'), b = createElement('container');
   const tree = add(add([], a), b, a.id);

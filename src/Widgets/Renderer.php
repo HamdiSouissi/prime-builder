@@ -240,7 +240,7 @@ final class Renderer
             'social' => $this->renderSocial($settings),
             'map' => $this->renderMap($settings),
             'star_rating' => $this->renderStarRating($settings),
-            'counter' => '<div class="pb-counter-value">' . self::escape($this->fieldText($settings, 'prefix')) . max(0, min(1000000000, (int) ($settings['value'] ?? 0))) . self::escape($this->fieldText($settings, 'suffix')) . '</div><p>' . self::escape($this->fieldText($settings, 'title')) . '</p>',
+            'counter' => '<div class="pb-counter-value">' . self::escape(is_string($settings['prefix'] ?? null) ? $settings['prefix'] : '') . max(0, min(1000000000, (int) ($settings['value'] ?? 0))) . self::escape(is_string($settings['suffix'] ?? null) ? $settings['suffix'] : '') . '</div><p>' . self::escape($this->fieldText($settings, 'title')) . '</p>',
             'tabs' => $this->renderTabs($settings, $id),
             'gallery' => $this->renderGallery($settings),
             'image_carousel' => $this->renderImageCarousel($settings),

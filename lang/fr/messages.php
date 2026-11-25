@@ -388,6 +388,7 @@ return [
         'reset_style' => 'Réinitialiser le style',
         'copied' => 'Élément copié dans le constructeur.',
         'pasted' => 'Élément collé.',
+        'anchor_copy_warning' => 'Les ancres de la copie peuvent être renommées. Les liens ne sont pas modifiés automatiquement : vérifiez leurs destinations.',
         'heading' => 'Titre',
         'list' => 'Liste',
         'quote' => 'Citation',

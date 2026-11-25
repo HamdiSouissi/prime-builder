@@ -1,4 +1,4 @@
-import { History, add, appendMediaCarouselSelection, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, replaceImageSource, replaceStructuredImage, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
+import { History, add, appendMediaCarouselSelection, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, freshIds, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, replaceImageSource, replaceStructuredImage, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
 import { makeRichField } from './rich-text.js';
 
 const root = document.querySelector('[data-pb-app]');
@@ -322,27 +322,30 @@ treeDropArea.addEventListener('drop', event => {
   clearDropMarker(); applyDrop(event.dataTransfer, null, 'inside', false);
 });
 document.addEventListener('dragend', clearDropMarker);
-function freshIds(elements, removeAnchors = false) {
-  const copy = structuredClone(elements);
-  const visit = node => {
-    node.id = id();
-    if (removeAnchors && node.type === 'prime_block' && node.settings) delete node.settings.block_anchor;
-    (node.children || []).forEach(visit);
-  };
-  copy.forEach(visit);
-  return copy;
+function hasCopiedAnchors(elements) {
+  return elements.some(node => (node.type === 'anchor' && Boolean(node.settings?.anchor)) ||
+    (node.type === 'prime_block' && Boolean(node.settings?.block_anchor)) || hasCopiedAnchors(node.children || []));
 }
+function warnCopiedAnchors(elements) {
+  if (hasCopiedAnchors(elements)) $('[data-pb-anchor-warning]').hidden = false;
+}
+$('[data-pb-anchor-warning-close]').addEventListener('click', () => {
+  $('[data-pb-anchor-warning]').hidden = true;
+  $('[data-pb-panel="navigator"]').focus();
+});
 async function insertTemplate(template) {
   if (!ensureLayout() || (!config.canHtml && hasHtml(template.elements))) return;
   if (template.kind === 'page' && history.present.length && !await showMessage(ui.confirm_template, true)) return;
-  const nodes = freshIds(template.elements, true);
-  if (template.kind === 'page') commit(nodes, true, `${ui.insert} : ${template.name}`);
+  const nodes = freshIds(template.elements, { copied: true, into: template.kind === 'page' ? [] : history.present });
+  let changed;
+  if (template.kind === 'page') changed = commit(nodes, true, `${ui.insert} : ${template.name}`);
   else {
     let next = history.present;
     const parent = find(next, selected);
     for (const node of nodes) next = add(next, node, isContainer(parent) ? parent.id : null, containerTypes);
-    commit(next, true, `${ui.insert} : ${template.name}`);
+    changed = commit(next, true, `${ui.insert} : ${template.name}`);
   }
+  if (changed) warnCopiedAnchors(template.elements);
   selected = null; panel = 'navigator'; renderPanel();
 }
 function renderLibrary() {
@@ -983,10 +986,10 @@ function performElementAction(action) {
   }
   if (action === 'paste') {
     if (!clipboard || cannotCopyHtml(clipboard)) return;
-    const copy = freshIds([clipboard], true)[0];
+    const copy = freshIds([clipboard], { copied: true, into: history.present })[0];
     const next = isContainer(element) ? add(history.present, copy, element.id, containerTypes) : insertAfter(history.present, element.id, copy);
     selected = copy.id; tab = 'content'; panel = 'settings';
-    commit(next, true, `${ui.paste} : ${elementLabel(copy)}`);
+    if (commit(next, true, `${ui.paste} : ${elementLabel(copy)}`)) warnCopiedAnchors([clipboard]);
     $('[data-pb-live]').textContent = ui.pasted;
     return;
   }
@@ -994,7 +997,10 @@ function performElementAction(action) {
   let changed = false;
   if (action === 'paste_style' && clipboard && !readOnly) changed = commit(update(history.present, element.id, { styles: structuredClone(clipboard.styles || {}) }), false, label);
   if (action === 'reset_style' && !readOnly) changed = commit(update(history.present, element.id, { styles: {} }), false, label);
-  if (action === 'duplicate' && !cannotCopyHtml(element)) changed = commit(duplicate(history.present, element.id), false, label);
+  if (action === 'duplicate' && !cannotCopyHtml(element)) {
+    changed = commit(duplicate(history.present, element.id), false, label);
+    if (changed) warnCopiedAnchors([element]);
+  }
   if (action === 'move_up') changed = commit(reorder(history.present, element.id, -1), false, label);
   if (action === 'move_down') changed = commit(reorder(history.present, element.id, 1), false, label);
   if (action === 'remove') { changed = commit(remove(history.present, element.id), false, label); selected = null; panel = 'widgets'; }

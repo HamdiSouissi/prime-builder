@@ -955,6 +955,57 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('onerror=', $entry->contentHtml);
     }
 
+    public function testCounterAffixSpacingPersistsThroughBothApis(): void
+    {
+        $app = $this->activated('admin');
+        $config = $this->editorConfig($app, 1);
+        self::assertSame('text', $config['widgets']['counter']['fields']['prefix']['type']);
+        self::assertSame('text', $config['widgets']['counter']['fields']['suffix']['type']);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'counter affixes', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'counter', 'type' => 'counter',
+            'settings' => ['value' => 42, 'prefix' => '€ ', 'suffix' => ' kg', 'title' => 'Charge'],
+            'styles' => [], 'children' => [],
+        ]];
+        $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertSame('€ ', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['prefix']);
+        self::assertSame(' kg', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['suffix']);
+        self::assertStringContainsString('>€ 42 kg</div>', $entry->contentHtml);
+
+        $document['blocks'][0]['data']['elements'][0]['settings']['prefix'] = 'Environ ';
+        $document['blocks'][0]['data']['elements'][0]['settings']['suffix'] = ' %';
+        $response = $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertSame('Environ ', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['prefix']);
+        self::assertSame(' %', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['suffix']);
+        self::assertStringContainsString('>Environ 42 %</div>', $entry->contentHtml);
+
+        $document['blocks'][0]['data']['elements'][0]['settings']['prefix'] = ' ';
+        $document['blocks'][0]['data']['elements'][0]['settings']['suffix'] = ' ';
+        foreach (['/api/prime-builder/v1/documents/1', '/api/v1/content/post/1'] as $url) {
+            $response = $this->send($app, 'PATCH', $url, ['content' => $document], $token);
+            self::assertSame(200, $response->status(), $response->body());
+            $entry = $app->get(EntryRepository::class)->find(1);
+            self::assertNotNull($entry);
+            self::assertSame(' ', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['prefix']);
+            self::assertSame(' ', $entry->decodedContent()['blocks'][0]['data']['elements'][0]['settings']['suffix']);
+            self::assertStringContainsString('> 42 </div>', $entry->contentHtml);
+        }
+
+        $document['blocks'][0]['data']['elements'][0]['settings']['suffix'] = str_repeat('x', 1001);
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/content/post/1', ['content' => $document], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('> 42 </div>', $entry->contentHtml);
+    }
+
     public function testPortfolioPersistsAndLoadsItsAssetsOnlyWhereNeeded(): void
     {
         $app = $this->activated('admin');

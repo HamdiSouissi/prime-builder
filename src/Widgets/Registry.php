@@ -168,7 +168,7 @@ final class Registry
             'theme_zone' => ['zone' => ['type' => 'zone_slug', 'max' => 80, 'label' => 'plugin::prime-builder.ui.theme_zone_select']],
             'map' => ['title' => ['type' => 'text', 'max' => 1000, 'label' => 'plugin::prime-builder.ui.map_title'], 'latitude' => ['type' => 'latitude', 'max' => 16, 'label' => 'plugin::prime-builder.ui.map_latitude'], 'longitude' => ['type' => 'longitude', 'max' => 16, 'label' => 'plugin::prime-builder.ui.map_longitude'], 'zoom' => ['type' => 'integer', 'min' => 3, 'max' => 18, 'label' => 'plugin::prime-builder.ui.map_zoom']],
             'star_rating' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 5]],
-            'counter' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 1000000000], 'prefix' => $text, 'suffix' => $text, 'title' => $text],
+            'counter' => ['value' => ['type' => 'integer', 'min' => 0, 'max' => 1000000000], 'prefix' => ['type' => 'text', 'max' => 1000, 'preserve_whitespace' => true], 'suffix' => ['type' => 'text', 'max' => 1000, 'preserve_whitespace' => true], 'title' => $text],
             'gallery' => [
                 'images' => ['type' => 'media_list', 'max' => 10000],
                 'images_dimensions' => $listDimensions, 'manual_dimensions' => $manualDimensions,

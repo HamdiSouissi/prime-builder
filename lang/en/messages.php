@@ -388,6 +388,7 @@ return [
         'reset_style' => 'Reset style',
         'copied' => 'Element copied in the builder.',
         'pasted' => 'Element pasted.',
+        'anchor_copy_warning' => 'Anchors in the copy may be renamed. Links are not changed automatically: check their destinations.',
         'heading' => 'Heading',
         'list' => 'List',
         'quote' => 'Quote',

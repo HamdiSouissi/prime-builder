@@ -31,6 +31,7 @@ declare(strict_types=1);
     <p class="pb-conversion-warning" data-pb-conversion-warning role="alert"<?= $conversionFailed ? '' : ' hidden' ?>><?= $this->e(t('plugin::prime-builder.ui.conversion_failed')) ?></p>
     <p class="pb-conversion-warning" data-pb-preview-warning role="alert" hidden><?= $this->e(t('plugin::prime-builder.ui.preview_location_error')) ?></p>
     <p class="pb-conversion-warning" data-pb-group-warning role="status" aria-live="polite" hidden><?= $this->e(t('plugin::prime-builder.ui.original_group_warning')) ?></p>
+    <div class="pb-conversion-warning pb-anchor-warning" data-pb-anchor-warning role="status" hidden><span><?= $this->e(t('plugin::prime-builder.ui.anchor_copy_warning')) ?></span><button type="button" data-pb-anchor-warning-close><?= $this->e(t('plugin::prime-builder.ui.close')) ?></button></div>
     <div class="pb-workspace">
         <aside class="pb-sidebar" aria-label="<?= $this->e(t('plugin::prime-builder.ui.sidebar')) ?>">
             <div class="pb-panel-head"><div><span class="pb-eyebrow"><?= $this->e(t('plugin::prime-builder.ui.eyebrow')) ?></span><h1><?= $this->e(t('plugin::prime-builder.ui.editor_title')) ?></h1></div><span class="pb-panel-dot" aria-hidden="true"></span></div>

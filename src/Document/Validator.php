@@ -256,7 +256,11 @@ final class Validator
             return $original !== null && ($this->entryId === null || $original['entry'] === $this->entryId) ? $value : null;
         }
         return match ($type) {
-            'text', 'multiline' => trim(strip_tags($value)),
+            // Counter affixes may intentionally contain a separating space.
+            // Keep them plain text and normalize line breaks for a single-line input.
+            'text', 'multiline' => ($schema['preserve_whitespace'] ?? false) === true
+                ? str_replace(["\r\n", "\r", "\n"], ' ', strip_tags($value))
+                : trim(strip_tags($value)),
             // Code is data, not HTML: preserve whitespace and tags for the escaped renderer.
             'code' => str_contains($value, "\0") ? null : $value,
             'datetime_utc' => $value === '' || Countdown::canonical($value) !== null ? $value : null,

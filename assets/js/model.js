@@ -302,18 +302,59 @@ export function reorder(elements, elementId, direction) {
   }
   return next;
 }
+// Give inserted nodes new IDs. On a copy, retain a manual menu anchor only
+// when it is not already used by another known Builder anchor or Prime heading.
+// Links are intentionally left untouched: callers must tell the user to check
+// them, since a link can legitimately target content outside the copied subtree.
+export function freshIds(elements, { copied = false, into = [] } = {}) {
+  const result = clone(elements);
+  const walk = (nodes, callback) => {
+    for (const node of nodes) { callback(node); walk(node.children || [], callback); }
+  };
+  const ids = new Set();
+  walk(into, node => { if (typeof node.id === 'string') ids.add(node.id); });
+  walk(result, node => {
+    let next;
+    do { next = id(); } while (ids.has(next));
+    node.id = next; ids.add(next);
+    // Converted headings keep their historic public anchor only in the source.
+    if (copied && node.type === 'prime_block' && node.settings) delete node.settings.block_anchor;
+  });
+  if (!copied) return result;
+  const used = new Set();
+  const reserve = node => {
+    if (node.type === 'anchor' && typeof node.settings?.anchor === 'string' && node.settings.anchor) used.add(node.settings.anchor);
+    if (node.type === 'prime_block') {
+      if (typeof node.settings?.block_anchor === 'string' && node.settings.block_anchor) used.add(node.settings.block_anchor);
+      if (typeof node.id === 'string') used.add(`pb-${node.id}`);
+    }
+  };
+  walk(into, reserve);
+  // Newly generated Prime heading anchors must also remain available.
+  walk(result, node => { if (node.type === 'prime_block') used.add(`pb-${node.id}`); });
+  const originals = new Set();
+  walk(result, node => { if (node.type === 'anchor' && typeof node.settings?.anchor === 'string' && node.settings.anchor) originals.add(node.settings.anchor); });
+  walk(result, node => {
+    if (node.type !== 'anchor' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(node.settings?.anchor || '')) return;
+    const original = node.settings.anchor;
+    let candidate = original;
+    if (used.has(candidate)) {
+      let number = 2;
+      do {
+        const suffix = `-${number++}`;
+        candidate = original.slice(0, 64 - suffix.length) + suffix;
+      } while (used.has(candidate) || originals.has(candidate));
+      node.settings.anchor = candidate;
+    }
+    used.add(candidate);
+  });
+  return result;
+}
 export function duplicate(elements, elementId) {
   const next = clone(elements);
   const found = locate(next, elementId);
   if (!found) return next;
-  const copy = clone(found.element);
-  const renew = node => {
-    node.id = id();
-    // Converted headings keep their historic anchor; a duplicate must not reuse it.
-    if (node.type === 'prime_block' && node.settings) delete node.settings.block_anchor;
-    (node.children || []).forEach(renew);
-  };
-  renew(copy);
+  const [copy] = freshIds([found.element], { copied: true, into: next });
   found.list.splice(found.index + 1, 0, copy);
   return next;
 }
