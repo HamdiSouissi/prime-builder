@@ -2,26 +2,28 @@
 
 ## État actuel
 
-**A est terminé ; B est clos pour la V1 par décision du demandeur**, qui accepte les lignes encore partielles du catalogue. Les constats et résultats B conservés ci-dessous sont historiques : ils ne constituent pas une demande de rouvrir B. **D — Theme Builder est implémenté et testé localement ; son premier run CI a échoué et la correction du test doit encore être vérifiée en CI.** Le travail reste partiel et n’est pas prêt pour la production : les jalons suivants sont E (formulaires), F (popups), C (widgets globaux et dynamique), puis G (finitions), dans cet ordre.
+**A est terminé ; B est clos pour la V1 par décision du demandeur**, qui accepte les lignes encore partielles du catalogue. Les constats et résultats B conservés ci-dessous sont historiques : ils ne constituent pas une demande de rouvrir B. **D — Theme Builder est implémenté et sa CI est verte**, avec les limites précisées ci-dessous. Le travail reste partiel et n’est pas prêt pour la production : les jalons suivants sont E (formulaires), F (popups), C (widgets globaux et dynamique), puis G (finitions), dans cet ordre.
 
-Dernière révision poussée et CI verte observée avant D : `15c08e754ccf89e642f107e3c1ffc91bab5686c7`, [run 45698080003](https://github.com/HamdiSouissi/prime-builder/actions/runs/45698080003), `completed/success`. Ce run ne contient **pas** le Theme Builder D. Un fichier ne peut pas contenir son propre SHA ni les résultats futurs de sa CI ; pour la tête effective, consulter `git ls-remote origin refs/heads/arena/2d5ecf33-prime-builder` et le run associé.
+Révision D et correction du test poussées : `51e6d8523c6ec221a2604621a96ea468dbe501ad`, [run 45758874543](https://github.com/HamdiSouissi/prime-builder/actions/runs/45758874543), `completed/success` sur huit jobs. Un fichier ne peut pas contenir son propre SHA ni les résultats futurs de sa CI ; pour la tête effective, consulter `git ls-remote origin refs/heads/arena/2d5ecf33-prime-builder` et le run associé.
 
-| Job | Ligne finale observée sur `45698080003` |
+| Job | Ligne finale observée sur `45758874543` |
 |---|---|
 | `lint` | `No syntax errors detected in content/plugins/prime-builder/.php-cs-fixer.dist.php` ; `[OK] No errors` |
-| `cs` | `Found 0 of 67 files that can be fixed in 3.383 seconds, 138.00 MB memory used` |
-| `phpunit (main)` | `OK (212 tests, 6071 assertions)` sur MySQL 8 |
-| `phpunit (1.0.1)` | `OK (212 tests, 6075 assertions)` sur MySQL 8 |
+| `cs` | `Found 0 of 75 files that can be fixed in 2.787 seconds, 130.00 MB memory used` |
+| `phpunit (main)` | `OK (220 tests, 6402 assertions)` sur MySQL 8 |
+| `phpunit (1.0.1)` | `OK (220 tests, 6406 assertions)` sur MySQL 8 |
 | `js` | `# tests 58` ; `# pass 58` ; `# fail 0` |
 | `i18n` | `Catalogue de traduction cohérent.` |
 | `smoke` | `Smoke: all routes, public content and document CSS passed.` |
-| `e2e` | `110 passed (8.9m)` ; désactivation/réactivation et désinstallation `success` |
+| `e2e` | `111 passed (9.9m)` ; désactivation/réactivation et désinstallation `success` |
 
-## Jalon D — Theme Builder : vérifications locales, correction CI à observer
+GitHub signale le forçage d’actions Node 20 vers Node 24.
+
+## Jalon D — Theme Builder : vérifications et limites
 
 Le premier run D, `1fd6d469f09f95c99737d5ca513db74925b5b4f8`, [45757131119](https://github.com/HamdiSouissi/prime-builder/actions/runs/45757131119), est `completed/failure`. Sept jobs sont verts : syntaxe `No syntax errors detected in content/plugins/prime-builder/.php-cs-fixer.dist.php`, PHPStan `[OK] No errors`, PHP-CS-Fixer `Found 0 of 75 files that can be fixed in 3.099 seconds, 130.00 MB memory used`, PHPUnit/MySQL 8 `OK (220 tests, 6402 assertions)` sur main et `OK (220 tests, 6406 assertions)` sur 1.0.1, Node `# tests 58` / `# pass 58` / `# fail 0`, traduction `Catalogue de traduction cohérent.` et smoke `Smoke: all routes, public content and document CSS passed.`. Le job navigateur donne `1 failed` et `110 passed (9.8m)` : le nouveau parcours D passe (`18.6s`), mais le scénario historique « compose and publish a page using the CMS theme » signale `target-size` sur trois liens de l’en-tête Aurora dans l’iframe ; les étapes de réactivation et désinstallation sont ignorées. GitHub signale le forçage d’actions Node 20 vers Node 24.
 
-La sauvegarde recharge l’aperçu après avoir annoncé « Enregistré ». Un diagnostic local qui retarde la feuille Aurora reproduit exactement les trois cibles `target-size` avant chargement (liens de 19 px), puis ne relève plus de violation sérieuse ou critique après chargement ; cela étaye une course, sans établir avec certitude l’état de la feuille pendant le run CI. Le scénario attend maintenant la navigation et le chargement complet de l’iframe, vérifie la réponse CSS et son application, puis exécute le même audit axe ; la feuille est volontairement bloquée pour vérifier que l’attente ne se termine pas prématurément. Les sept premiers scénarios CI, dans le même ordre, donnent localement `7 passed (1.2m)` sur une fixture 1.0.2/MySQL 5.7. Aucun contrôle axe n’a été désactivé ; la correction doit encore passer la CI.
+La sauvegarde recharge l’aperçu après avoir annoncé « Enregistré ». Un diagnostic local qui retarde la feuille Aurora reproduit exactement les trois cibles `target-size` avant chargement (liens de 19 px), puis ne relève plus de violation sérieuse ou critique après chargement ; cela étaye une course, sans établir avec certitude l’état de la feuille pendant le run CI. Le scénario attend maintenant la navigation et le chargement complet de l’iframe, vérifie la réponse CSS et son application, puis exécute le même audit axe ; la feuille est volontairement bloquée pour vérifier que l’attente ne se termine pas prématurément. Les sept premiers scénarios CI, dans le même ordre, donnent localement `7 passed (1.2m)` sur une fixture 1.0.2/MySQL 5.7 et `7 passed (1.2m)` sur une fixture distincte 1.0.1/MySQL 5.7, toutes deux à un seul processus PHP. Aucun contrôle axe n’a été désactivé ; la correction est verte dans le run cité en tête.
 
 Six types de modèles sont modifiables dans l’éditeur, avec conditions, exclusions et priorité ; les anciennes copies et leurs restrictions restent distinctes. `ThemeConditionsTest`, `PageRequestTest`, les tests `testThemeModels…` et `testThemeModel…` dans `tests/IntegrationTest.php` couvrent notamment la sélection, les droits, la recherche privée, le HTML filtré, l’import, la taille, le cache, les widgets contextuels, les requêtes de pages de plugins et la restauration du thème. Les changements concomitants de conditions et de mise en page ne sont pas atomiques ; un contrôle de conflit de mise en page est présent mais ne supprime pas cette course. Les anciennes copies demeurent prioritaires seulement si aucun nouveau modèle correspondant ne s’applique. Les contraintes de thème, de CSP, de caches externes et de contenu public sont détaillées dans `README.md` et `docs/developpement.md`.
 
@@ -31,7 +33,7 @@ Node : `# tests 58` / `# pass 58` / `# fail 0` ; PHPStan niveau 8 sources et tes
 
 ## Jalon A — corrections : terminé
 
-Révision et run : `2a02837e7062d18cd9933363c11a75c1a6e94c90`, [44965923577](https://github.com/HamdiSouissi/prime-builder/actions/runs/44965923577) ; les huit jobs et leurs lignes finales sont donnés ci-dessus. Les tests vérifient conversion et repli convenu, 403/succès des capacités, dialogue, styles et parcours complet du menu au clavier. Les captures du formulaire public et de sa boîte ont été examinées à 1440 et 375 px sur une fixture locale SQLite ; la CI teste aussi MySQL. Les audits automatisés et captures ne constituent pas un audit manuel complet WCAG ou sécurité.
+Révision et run : `2a02837e7062d18cd9933363c11a75c1a6e94c90`, [44965923577](https://github.com/HamdiSouissi/prime-builder/actions/runs/44965923577) ; les résultats historiques sont conservés dans [l’archive](docs/HISTORIQUE-CI.md). Les tests vérifient conversion et repli convenu, 403/succès des capacités, dialogue, styles et parcours complet du menu au clavier. Les captures du formulaire public et de sa boîte ont été examinées à 1440 et 375 px sur une fixture locale SQLite ; la CI teste aussi MySQL. Les audits automatisés et captures ne constituent pas un audit manuel complet WCAG ou sécurité.
 
 La limite API générale est augmentée uniquement dans la fixture E2E jetable ; les limites propres au formulaire sont testées séparément. Sous Prime CMS 1.0.1, l’adaptateur HTTP est actif seulement tant que le plugin est chargé et que l’alias n’est pas remplacé ; 1.0.2 est recommandé. Si les frontières des anciens blocs sont indéductibles, leur HTML est conservé dans un seul élément en lecture seule : réglages originaux perdus et rendu dynamique figé.
 
@@ -375,7 +377,7 @@ La révision des classes `fa56b4285e825f6532bc6c8e4ad4323526b29946` est poussée
 
 ## Prochaines étapes et vérifications
 
-- **D** : pousser la tranche et observer les huit jobs de la CI ; noter leur résultat réel avant de commencer E.
+- **D** : livré et vert dans le run indiqué en tête, sous les limites documentées.
 - **E** : constructeur de champs, fichiers privés, étapes, e-mails en file, recherche/export et rétention réglable. La base actuelle est un formulaire fixe sans e-mail ni fichier ; sa purge à 30 jours dépend du planificateur.
 - **F**, puis **C**, puis **G** : popups accessibles, widgets globaux et contenu dynamique, puis finitions et version. Ne pas commencer un jalon avant que le précédent soit vert.
 - **B** est clos pour la V1 ; ses limites documentées ne sont pas à reprendre dans les jalons ci-dessus.
@@ -411,8 +413,8 @@ Statuts demandés : **Fait et testé**, **Fait sans test automatique**, **Non fa
 | 3.4 Pro et contenu courant, tous les widgets | **Non fait** — partiel : catalogue implémenté avec des limites fonctionnelles et contextuelles ; voir §5. | `src/Widgets/Content.php` |
 | 3.4 Widgets globaux | **Non fait** : aucun stockage ni mise à jour partagée. | — |
 | 3.4 Blocs Prime existants | **Non fait** — partiel : pont vers huit types statiques non privilégiés seulement ; `IT::testPrimeBlockPersistsCoreHtmlWithoutAllowingPrivilegedBlocks`. | `src/Widgets/PrimeBlock.php`, `src/Document/Converter.php` |
-| 3.5 Types de modèles et conditions du Theme Builder | **Fait et testé localement**, CI D à observer : six types, règles, exclusions et priorités ; `ThemeConditionsTest`, `IntegrationTest` et `theme-builder.spec.mjs`. Courses et compatibilité détaillées ci-dessus. | `src/Theme/{Conditions,Models,Partials}.php` |
-| 3.5 Branchement au thème et remplacement en-tête/pied | **Fait et testé localement**, CI D à observer : `site.partial` et candidats complets, restauration à la désactivation ; un thème doit appeler les hooks, le layout propre peut différer. | `src/Plugin.php`, `views/site/prime-builder-theme/content.php` |
+| 3.5 Types de modèles et conditions du Theme Builder | **Fait et testé** : six types, règles, exclusions et priorités ; `ThemeConditionsTest`, `IntegrationTest` et `theme-builder.spec.mjs`, CI `45758874543`. Courses et compatibilité détaillées ci-dessus. | `src/Theme/{Conditions,Models,Partials}.php` |
+| 3.5 Branchement au thème et remplacement en-tête/pied | **Fait et testé** : `site.partial` et candidats complets, restauration à la désactivation, CI `45758874543` ; un thème doit appeler les hooks, le layout propre peut différer. | `src/Plugin.php`, `views/site/prime-builder-theme/content.php` |
 | 3.6 Champs de formulaire | **Non fait — partiel** : trois champs fixes nom, e-mail et message ; pas de constructeur ni de fichiers ou étapes. | `src/Widgets/Renderer.php` |
 | 3.6 API publique, pot de miel, délai et débit | **Fait et testé pour le formulaire fixe** : jeton HMAC 3–1 800 s à usage unique, pot de miel et quotas ; quatre tests d’intégration sur deux CMS/MySQL et E2E dans `44965292806`. | `src/Controller/ContactForms.php`, `src/Forms/` |
 | 3.6 Actions, envois, e-mails et export | **Non fait — partiel** : stockage et suppression dans une boîte protégée ; pas d’e-mail, recherche ou export. | `src/Forms/Submissions.php`, `views/admin/submissions.php` |
@@ -431,9 +433,9 @@ Statuts demandés : **Fait et testé**, **Fait sans test automatique**, **Non fa
 | 4 Performance | **Non fait** — partiel : scripts conditionnels et une requête partagée pour les articles ; dimensions explicites, copiées ou déduites prudemment pour les six widgets à image individuelle et six listes, selon les métadonnées locales reconnues. Les dimensions inconnues ne sont pas inventées. Pas de budget réseau ni cache global complets. | `src/Widgets/{Content,Renderer,MediaDimensions}.php`, `src/Document/MediaReferences.php`, `src/Plugin.php` |
 | 4 Accessibilité | **Non fait** — partiel : axe sérieux/critique vert sur les scénarios indiqués ; pas d’audit WCAG 2.2 AA complet. | `tests/e2e/editor.spec.mjs`, `assets/` |
 | 4 Robustesse/désactivation | **Fait et testé** pour les cas couverts : `DT::testCrashingExtensionDoesNotBreakOtherElements`, IT et parcours CLI de désactivation ; pas de garantie universelle pour les extensions ou thèmes. | `src/Widgets/Renderer.php`, `tests/e2e/lifecycle-check.php` |
-| 5 PHPUnit | **Non fait** — partiel : validateurs, rendu, CSS, accès et cycle de vie couverts ; tests de formulaire fixe verts sur MySQL dans `44965292806` ; conditions de thème testées localement ; uploads et balises absents. | `tests/*.php` |
+| 5 PHPUnit | **Non fait** — partiel : validateurs, rendu, CSS, accès et cycle de vie couverts ; tests de formulaire fixe verts sur MySQL dans `44965292806` ; conditions de thème vertes dans `45758874543` ; uploads et balises absents. | `tests/*.php` |
 | 5 JavaScript | **Non fait** — partiel : modèle, historique et responsive ; pas de tests unitaires de toutes les interactions et raccourcis. | `tests/js/model.test.js` |
-| 5 Playwright + axe | **Non fait** — partiel : construction souris/clavier, import, formulaire fixe et thème statique passés en CI ; nouveau Theme Builder testé localement, CI à observer ; popup absent. | `tests/e2e/` |
+| 5 Playwright + axe | **Non fait** — partiel : construction souris/clavier, import, formulaire fixe, ancien thème statique et nouveau Theme Builder passés en CI `45758874543` ; popup absent. | `tests/e2e/` |
 | 5 PHPStan 8 et PHP-CS-Fixer | **Fait et testé** sur le PHP analysé/configuré, résultats exacts dans « État actuel ». PHPStan vise `src`, `views`, `lang`, `migrations`, `tests`, `tools` et la configuration du fixer ; le lint et le fixer couvrent les fichiers PHP du plugin. | `phpstan.neon`, `.github/workflows/ci.yml` |
 | 5 CI complète | **Non fait** — partiel : huit jobs indépendants et artefact navigateur ; couverture fonctionnelle complète impossible tant que les fonctions manquent. | `.github/workflows/ci.yml` |
 | 6 Livrables et version | **Non fait** — partiel : structure, langues, tests et docs présents ; version 0.1.0 et pas les modules manquants ni gabarits d’e-mail demandés. | `plugin.json`, `CHANGELOG.md`, `src/`, `views/` |
