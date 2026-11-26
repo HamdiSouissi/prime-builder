@@ -1,5 +1,10 @@
 # Journal des changements
 
+## Non publié — popups
+
+- Modèles de popup composés dans l’éditeur, conditions, cinq déclencheurs et fréquence par navigateur. Dialogue natif avec Échap et gestion du focus ; les déclencheurs automatiques commencent par une invitation non modale, avec opt-in révocable pour l’onglet.
+- JavaScript et dialogue natif requis ; stockage refusé, formulaire dans un popup, compatibilité des thèmes et tests d’assistance ont les limites décrites dans [README.md](README.md) et [RETOUR.md](RETOUR.md).
+
 ## 0.1.2 — notifications de formulaire
 
 - Notification administrateur et accusé facultatifs par la file du CMS, avec gabarits génériques ; une adresse administrateur est conservée dans les réglages privés, pas dans le document public.

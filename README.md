@@ -2,7 +2,7 @@
 
 Plugin de composition visuelle pour Prime CMS 1.0.1 et versions ultérieures compatibles. Il utilise le moteur de contenu et le thème actifs de Prime CMS, sans dépendance PHP ou JavaScript tierce à l’exécution.
 
-> **État : prototype partiel, version 0.1.2.** Il ne constitue pas encore un remplacement complet d’un constructeur visuel professionnel. Le Theme Builder propose six types de modèles conditionnels, avec les limites de compatibilité indiquées ci-dessous ; les formulaires proposent des champs personnalisables, des fichiers privés, des étapes et des notifications en file. Les popups, les widgets globaux et de nombreuses fonctions demandées restent à faire. Ne l’utilisez pas en production sans revue, sauvegarde et tests adaptés à votre site. Voir [RETOUR.md](RETOUR.md).
+> **État : prototype partiel, version 0.1.2.** Il ne constitue pas encore un remplacement complet d’un constructeur visuel professionnel. Le Theme Builder propose six types de modèles conditionnels et des popups, avec les limites de compatibilité indiquées ci-dessous ; les formulaires proposent des champs personnalisables, des fichiers privés, des étapes et des notifications en file. Les widgets globaux et de nombreuses fonctions demandées restent à faire. Ne l’utilisez pas en production sans revue, sauvegarde et tests adaptés à votre site. Voir [RETOUR.md](RETOUR.md).
 
 ## Prérequis
 
@@ -127,6 +127,16 @@ Les nouveaux modèles acceptent notamment les listes d’articles, le contenu ac
 Les modèles sont limités à 160 Kio de données JSON chacun. L’éditeur détecte les changements de mise en page déjà enregistrés depuis son ouverture, mais cette vérification et la limite de nombre ne sont pas atomiques. Les conditions et la mise en page sont enregistrées ensemble : des modifications simultanées peuvent s’écraser, y compris une désactivation. Évitez les modifications concurrentes et vérifiez l’état final ; il n’y a pas de révisions CMS pour ces modèles.
 
 La modification des réglages purge le cache de pages du CMS ; lorsqu’un modèle est actif, ce cache est contourné pour prendre en compte ses dépendances contextuelles. Les caches externes et CDN restent à la charge du site. Les feuilles CSS sont conservées par empreinte ; si un instantané manque, une feuille correspondant à un modèle actuel peut être reconstruite. Tester le site, les conflits avec d’autres extensions et la désactivation sur une copie.
+
+## Popups
+
+Avec `prime_builder.theme_builder`, créer un modèle de type **Popup** dans Theme Builder, le composer avec **Modifier visuellement**, puis définir ses conditions, son déclencheur et sa fréquence avant de l’activer. La limite de 50 modèles est partagée avec les autres modèles de thème. Chaque popup applicable est indépendant : les inclusions, exclusions et priorités suivent les mêmes règles que pour les modèles de thème. Les aperçus privés ne les affichent pas. La fenêtre utilise son nom comme titre accessible ; choisissez un nom compréhensible pour les visiteurs.
+
+Par défaut le déclencheur est le **clic**. Dans une page, saisir comme adresse d’un lien ou d’un bouton l’ancre `#pb-popup-` suivie de l’identifiant indiqué sur la page de réglage du popup. Le lien ne fonctionne que là où le popup est actif et où ses conditions correspondent. Les autres déclencheurs sont le chargement après 0 à 120 secondes, le défilement de 1 à 100 %, la sortie du pointeur par le haut de la fenêtre et l’inactivité de 5 à 1 800 secondes. La détection de sortie dépend du pointeur et ne constitue pas un déclencheur fiable sur écran tactile.
+
+**Pas de fenêtre modale surprise par défaut** : un déclencheur automatique présente d’abord une invitation non modale et annoncée, sans déplacer le focus. Le visiteur peut l’ouvrir ou la masquer ; il peut aussi autoriser explicitement les ouvertures automatiques pour l’onglet, puis révoquer ce choix dans l’invitation ou la fenêtre. Cette autorisation est partagée entre les popups et conservée dans le stockage de session de l’onglet. Les invitations sont mises en file pendant qu’un autre dialogue natif est ouvert ; leur ordre dépend de leur déclenchement. Le dialogue utilise le `<dialog>` natif, piège le focus, se ferme avec Échap et rend le focus au déclencheur quand il existe. Il n’utilise pas d’animation, y compris avec mouvement réduit.
+
+La fréquence est **toujours**, **une fois par onglet**, ou **une fois par période** de 1 à 365 jours ; une ouverture ou le masquage de l’invitation consomme la fréquence. Elle est stockée dans le navigateur et non sur le serveur. Si le stockage est refusé, la limite ne dure que jusqu’à la navigation suivante ; elle n’est pas une protection d’accès ni une mesure fiable entre navigateurs. Sans JavaScript ou sans prise en charge des dialogues natifs, la fenêtre reste fermée. Le formulaire de contact et les fragments liés à une entrée ne sont pas pris en charge dans un popup ; les autres limites des modèles contextuels, des caches et des modifications concurrentes s’appliquent. Aucun test avec un lecteur d’écran réel n’a encore été effectué.
 
 ## Formulaire de contact
 

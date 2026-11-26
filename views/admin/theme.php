@@ -9,6 +9,7 @@ declare(strict_types=1);
 /** @var list<array<string, mixed>> $choices */
 /** @var list<array<string, mixed>> $sourceChoices */
 /** @var list<array<string, mixed>> $models */
+/** @var string $modelFilter */
 /** @var string|null $error */
 $this->layout('admin::layouts/app');
 ?>
@@ -22,6 +23,11 @@ $this->layout('admin::layouts/app');
     <section class="pc-card" aria-labelledby="pb-models-title">
         <header class="pc-card__header"><h2 class="pc-card__title" id="pb-models-title"><?= $this->e(t('plugin::prime-builder.theme.models')) ?></h2></header>
         <div class="pc-card__body pc-stack pc-stack--md">
+            <form method="get" action="/admin/prime-builder/theme" class="pb-theme-actions">
+                <label class="pc-label" for="pb-model-filter"><?= $this->e(t('plugin::prime-builder.theme.filter')) ?></label>
+                <select class="pc-input" id="pb-model-filter" name="kind"><option value="all"><?= $this->e(t('plugin::prime-builder.theme.filter_all')) ?></option><?php foreach (\PrimeBuilder\Theme\Models::KINDS as $kind): ?><option value="<?= $this->e($kind) ?>"<?= $modelFilter === $kind ? ' selected' : '' ?>><?= $this->e(t('plugin::prime-builder.theme.kind_' . $kind)) ?></option><?php endforeach; ?></select>
+                <button class="pc-btn pc-btn--secondary" type="submit"><?= $this->e(t('plugin::prime-builder.theme.filter_apply')) ?></button>
+            </form>
             <?php if ($models === []): ?><p><?= $this->e(t('plugin::prime-builder.theme.empty')) ?></p><?php endif; ?>
             <?php foreach ($models as $model): ?>
                 <article class="pb-theme-model-row">

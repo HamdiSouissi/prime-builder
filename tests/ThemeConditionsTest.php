@@ -63,8 +63,11 @@ final class ThemeConditionsTest extends TestCase
         self::assertTrue(Models::supports('search', $search));
         self::assertTrue(Models::supports('not_found', $notFound));
         self::assertTrue(Models::supports('header', PageContext::plugin('/test', 'Test', '')));
+        self::assertTrue(Models::supports('popup', PageContext::plugin('/test', 'Test', '')));
+        self::assertTrue(Models::supports('popup', $entryPage));
         self::assertFalse(Models::supports('single', PageContext::plugin('/test', 'Test', '')));
         self::assertFalse(Models::supports('single', PageContext::redirect('/old', '/new')));
+        self::assertFalse(Models::supports('popup', PageContext::redirect('/old', '/new')));
     }
 
     public function testMalformedRulesNeverBecomeGlobalAndDuplicatesAreRemoved(): void

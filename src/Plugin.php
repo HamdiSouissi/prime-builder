@@ -53,6 +53,7 @@ use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Forms\Notifications;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
+use PrimeBuilder\Popup\Popups;
 use PrimeBuilder\Security\EffectiveApiAuthentication;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
@@ -116,6 +117,7 @@ final class Plugin extends AbstractPlugin
         );
         $context->app()->container()->singleton(MediaReferences::class, static fn (): MediaReferences => $mediaReferences);
         $partials = new Partials($context);
+        $popups = new Popups($context);
         $zoneLayouts = new ZoneLayouts($context->app()->get(ThemeManager::class), $context->app()->get(ZoneRepository::class));
         $identity = new SiteIdentity($context->app());
         $content = new Content(
@@ -468,6 +470,66 @@ final class Plugin extends AbstractPlugin
             $hasMap = $hasMap || isset($types['map']);
             Assets::register($assets, $types, $registry->all());
         });
+        // Popups are independent models. Register only matching, revalidated
+        // layouts; the foot hook below emits closed dialogs without inline code.
+        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, $popups, $registry, &$hasMap): void {
+            if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
+                return;
+            }
+            $matches = $popups->matching($page);
+            if ($matches === []) {
+                return;
+            }
+            $assets->style('prime-builder-popup', $context->url('css/popup.css'), ['prime-builder-base']);
+            $assets->script('prime-builder-popup', $context->url('js/popup.js'));
+            $compiler = new Compiler((int) Configuration::get($context->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767));
+            $snapshots = new Snapshots($context->app()->storagePath('prime-builder/styles'));
+            $seen = [];
+            foreach ($assets->resolvedStyles() as $asset) {
+                $seen[explode('?', $asset['url'], 2)[0]] = true;
+            }
+            $types = [];
+            foreach ($matches as $match) {
+                $layout = $match['layout'];
+                $css = $compiler->compile($layout, legacy: false);
+                if ($css !== '') {
+                    $file = substr(hash('sha256', $css), 0, 16) . '.css';
+                    $url = '/prime-builder/theme/' . $file;
+                    if (!isset($seen[$url])) {
+                        $snapshots->remember('theme-' . $file, $css);
+                        $assets->style('prime-builder-popup-' . (string) $match['model']['id'], $url, ['prime-builder-kit']);
+                        $seen[$url] = true;
+                    }
+                }
+                $types += Assets::collectTypes(is_array($layout['elements'] ?? null) ? $layout['elements'] : []);
+            }
+            $hasMap = $hasMap || isset($types['map']);
+            $definitions = $registry->all();
+            foreach (['posts', 'current_content', 'theme_zone', 'site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'search_form'] as $type) {
+                if (($definitions[$type]['script'] ?? null) === '/assets/plugins/prime-builder/js/content.js') {
+                    unset($definitions[$type]['script']);
+                }
+            }
+            if (($definitions['share_buttons']['script'] ?? null) === '/assets/plugins/prime-builder/js/share_buttons.js') {
+                unset($definitions['share_buttons']['script']);
+            }
+            Assets::register($assets, $types, $definitions);
+        });
+        $context->hooks()->filter('site.foot', static function (mixed $previous, mixed $page) use ($context, $popups, $registry, $content, $blocks, $originals, $htmlContent, $mediaReferences, $pageRequest): mixed {
+            if (!is_string($previous) || !$page instanceof PageContext) {
+                return $previous;
+            }
+            $matches = $popups->matching($page);
+            if ($matches === []) {
+                return $previous;
+            }
+            $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page));
+            $html = '';
+            foreach ($matches as $match) {
+                $html .= $popups->render($match, $renderer);
+            }
+            return $previous . $html;
+        });
         $context->hooks()->filter('site.csp', static function (mixed $directives) use (&$hasMap): mixed {
             if (!$hasMap || !is_array($directives)) {
                 return $directives;
@@ -485,9 +547,10 @@ final class Plugin extends AbstractPlugin
             }
             return $directives;
         });
-        $context->hooks()->on('settings.updated', static function (mixed $name) use ($context, $partials, $theme, $themeModels): void {
+        $context->hooks()->on('settings.updated', static function (mixed $name) use ($context, $partials, $popups, $theme, $themeModels): void {
             if (is_string($name) && str_starts_with($name, 'plugin.prime-builder.')) {
                 $partials->invalidate();
+                $popups->invalidate();
                 $theme->invalidate();
                 $themeModels->invalidate();
                 $context->app()->get(\Prime\Cache\CacheManager::class)->clearPages();
@@ -498,7 +561,8 @@ final class Plugin extends AbstractPlugin
                 return $checks;
             }
             $checks[] = ['id' => 'prime-builder.status', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.label'), 'status' => 'ok', 'value' => t('plugin::prime-builder.system.active')];
-            $assetsPresent = is_file($context->path('assets/js/editor.js')) && is_file($context->path('assets/css/editor.css')) && is_file($context->path('assets/css/public.css'));
+            $assetsPresent = is_file($context->path('assets/js/editor.js')) && is_file($context->path('assets/css/editor.css'))
+                && is_file($context->path('assets/css/public.css')) && is_file($context->path('assets/js/popup.js')) && is_file($context->path('assets/css/popup.css'));
             $checks[] = ['id' => 'prime-builder.assets', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.assets'), 'status' => $assetsPresent ? 'ok' : 'error', 'value' => t($assetsPresent ? 'plugin::prime-builder.system.present' : 'plugin::prime-builder.system.missing')];
             $tablet = (int) Configuration::get($context->settings(), 'breakpoint_tablet', 1024);
             $mobile = (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767);

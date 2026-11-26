@@ -40,10 +40,23 @@ $renderRule = function (string $group, string $type, string $value): void {
         <section class="pc-card">
             <div class="pc-card__body pc-stack pc-stack--md">
                 <p><strong><?= $this->e(t('plugin::prime-builder.theme.kind_' . $model['kind'])) ?></strong></p>
-                <p><?= $this->e(t('plugin::prime-builder.theme.conditions_help')) ?></p>
+                <p><?= $this->e(t('plugin::prime-builder.' . ($model['kind'] === 'popup' ? 'popup.conditions_help' : 'theme.conditions_help'))) ?></p>
                 <div class="pc-field"><label class="pc-label" for="pb-name"><?= $this->e(t('plugin::prime-builder.theme.name')) ?></label><input class="pc-input" id="pb-name" name="name" maxlength="100" required value="<?= $this->e((string) $model['name']) ?>"></div>
-                <div class="pc-field"><label class="pc-label" for="pb-priority"><?= $this->e(t('plugin::prime-builder.theme.priority')) ?></label><input class="pc-input" id="pb-priority" name="priority" type="number" min="-1000" max="1000" required value="<?= $this->e((string) $model['priority']) ?>" aria-describedby="pb-priority-help"><p class="pc-field__help" id="pb-priority-help"><?= $this->e(t('plugin::prime-builder.theme.priority_help')) ?></p></div>
+                <div class="pc-field"><label class="pc-label" for="pb-priority"><?= $this->e(t('plugin::prime-builder.theme.priority')) ?></label><input class="pc-input" id="pb-priority" name="priority" type="number" min="-1000" max="1000" required value="<?= $this->e((string) $model['priority']) ?>" aria-describedby="pb-priority-help"><p class="pc-field__help" id="pb-priority-help"><?= $this->e(t('plugin::prime-builder.' . ($model['kind'] === 'popup' ? 'popup.priority_help' : 'theme.priority_help'))) ?></p></div>
                 <label><input type="checkbox" name="enabled" value="1"<?= $model['enabled'] ? ' checked' : '' ?>> <?= $this->e(t('plugin::prime-builder.theme.enabled')) ?></label>
+                <?php if ($model['kind'] === 'popup' && is_array($model['popup'] ?? null)): $popup = $model['popup']; ?>
+                    <fieldset class="pb-theme-rules pc-stack pc-stack--md">
+                        <legend><?= $this->e(t('plugin::prime-builder.popup.settings')) ?></legend>
+                        <p><?= $this->e(t('plugin::prime-builder.popup.consent_help')) ?></p>
+                        <div class="pc-field"><label class="pc-label" for="pb-popup-trigger"><?= $this->e(t('plugin::prime-builder.popup.trigger')) ?></label><select class="pc-input" id="pb-popup-trigger" name="popup_trigger"><?php foreach (\PrimeBuilder\Popup\Options::TRIGGERS as $trigger): ?><option value="<?= $this->e($trigger) ?>"<?= $popup['trigger'] === $trigger ? ' selected' : '' ?>><?= $this->e(t('plugin::prime-builder.popup.trigger_' . $trigger)) ?></option><?php endforeach; ?></select></div>
+                        <div class="pc-field"><label class="pc-label" for="pb-popup-delay"><?= $this->e(t('plugin::prime-builder.popup.delay')) ?></label><input class="pc-input" id="pb-popup-delay" name="popup_delay" type="number" min="0" max="120" required value="<?= $this->e((string) $popup['delay']) ?>"></div>
+                        <div class="pc-field"><label class="pc-label" for="pb-popup-scroll"><?= $this->e(t('plugin::prime-builder.popup.scroll')) ?></label><input class="pc-input" id="pb-popup-scroll" name="popup_scroll" type="number" min="1" max="100" required value="<?= $this->e((string) $popup['scroll']) ?>"></div>
+                        <div class="pc-field"><label class="pc-label" for="pb-popup-idle"><?= $this->e(t('plugin::prime-builder.popup.idle')) ?></label><input class="pc-input" id="pb-popup-idle" name="popup_idle" type="number" min="5" max="1800" required value="<?= $this->e((string) $popup['idle']) ?>"></div>
+                        <div class="pc-field"><label class="pc-label" for="pb-popup-frequency"><?= $this->e(t('plugin::prime-builder.popup.frequency')) ?></label><select class="pc-input" id="pb-popup-frequency" name="popup_frequency"><?php foreach (\PrimeBuilder\Popup\Options::FREQUENCIES as $frequency): ?><option value="<?= $this->e($frequency) ?>"<?= $popup['frequency'] === $frequency ? ' selected' : '' ?>><?= $this->e(t('plugin::prime-builder.popup.frequency_' . $frequency)) ?></option><?php endforeach; ?></select></div>
+                        <div class="pc-field"><label class="pc-label" for="pb-popup-days"><?= $this->e(t('plugin::prime-builder.popup.days')) ?></label><input class="pc-input" id="pb-popup-days" name="popup_days" type="number" min="1" max="365" required value="<?= $this->e((string) $popup['days']) ?>"></div>
+                        <p><?= $this->e(t('plugin::prime-builder.popup.link_help')) ?> <code>#pb-popup-<?= $this->e((string) $model['id']) ?></code></p>
+                    </fieldset>
+                <?php endif; ?>
                 <?php foreach (['include', 'exclude'] as $group): ?>
                     <fieldset class="pb-theme-rules" data-pb-rule-group="<?= $this->e($group) ?>">
                         <legend><?= $this->e(t('plugin::prime-builder.theme.' . $group . '_rules')) ?></legend>

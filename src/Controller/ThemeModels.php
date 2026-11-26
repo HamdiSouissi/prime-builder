@@ -26,6 +26,7 @@ use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\MediaReferences;
 use PrimeBuilder\Document\SavedTemplates;
 use PrimeBuilder\Document\Validator;
+use PrimeBuilder\Popup\Options as PopupOptions;
 use PrimeBuilder\Theme\Conditions;
 use PrimeBuilder\Theme\Models;
 use PrimeBuilder\Theme\Partials;
@@ -117,8 +118,17 @@ final class ThemeModels
         $enabled = $request->body('enabled');
         $include = $this->submittedRules($request, 'include');
         $exclude = $this->submittedRules($request, 'exclude');
+        $popup = null;
+        if ($model['kind'] === 'popup') {
+            $popup = PopupOptions::fromForm([
+                'trigger' => $request->body('popup_trigger'), 'delay' => $request->body('popup_delay'),
+                'scroll' => $request->body('popup_scroll'), 'idle' => $request->body('popup_idle'),
+                'frequency' => $request->body('popup_frequency'), 'days' => $request->body('popup_days'),
+            ]);
+        }
         $priorityValid = is_string($priority) && preg_match('/^-?(0|[1-9][0-9]{0,3})$/D', $priority) === 1 && (int) $priority >= -1000 && (int) $priority <= 1000;
         if ($name === null || !$priorityValid || !in_array($enabled, [null, '1'], true) || $include === null || $include === [] || $exclude === null
+            || ($model['kind'] === 'popup' && $popup === null)
             || !$this->referencesValid($include, $user) || !$this->referencesValid($exclude, $user)) {
             return $this->metadataForm($request, $user, $model, 'invalid', 422);
         }
@@ -133,6 +143,9 @@ final class ThemeModels
         $model['enabled'] = $enabled === '1';
         $model['include'] = $include;
         $model['exclude'] = $exclude;
+        if ($popup !== null) {
+            $model['popup'] = $popup;
+        }
         if (!$this->models->save($model)) {
             return $this->metadataForm($request, $user, $model, 'invalid', 422);
         }

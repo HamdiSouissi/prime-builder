@@ -5576,6 +5576,134 @@ final class IntegrationTest extends TestCase
         self::assertSame($css->body(), $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''))->body());
     }
 
+    public function testPopupModelsAreValidatedConditionalAndUseIsolatedAssets(): void
+    {
+        $app = $this->activated('admin');
+        $kernel = $app->get(Kernel::class);
+        $csrf = $app->get(Csrf::class)->token();
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'popup editor', ['*'])['token'];
+        $post = static fn (string $url, array $fields): Response => $kernel->handle(Request::create('POST', $url, body: ['_csrf_token' => $csrf] + $fields));
+        self::assertSame(419, $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/create', body: ['name' => 'Popup', 'kind' => 'popup', 'source' => '']))->status());
+        $create = static function (string $name) use ($post): string {
+            $response = $post('/admin/prime-builder/theme/create', ['name' => $name, 'kind' => 'popup', 'source' => '']);
+            self::assertSame(302, $response->status(), $response->body());
+            self::assertSame(1, preg_match('~([a-f0-9]{32})$~D', (string) $response->header('Location'), $matches));
+            return $matches[1] ?? '';
+        };
+        $id = $create('Fenêtre de test');
+        $metadata = $this->send($app, 'GET', '/admin/prime-builder/theme/' . $id);
+        self::assertSame(200, $metadata->status());
+        self::assertStringContainsString('#pb-popup-' . $id, $metadata->body());
+        self::assertStringContainsString('name="popup_trigger"', $metadata->body());
+        self::assertStringContainsString('no-store', (string) $metadata->header('Cache-Control'));
+        self::assertStringContainsString('Fenêtre de test', $this->send($app, 'GET', '/admin/prime-builder/theme?kind=popup')->body());
+        self::assertStringNotContainsString('Fenêtre de test', $this->send($app, 'GET', '/admin/prime-builder/theme?kind=header')->body());
+        $editor = $this->send($app, 'GET', '/admin/prime-builder/theme/' . $id . '/edit');
+        self::assertSame(200, $editor->status());
+        self::assertSame(1, preg_match('/<textarea hidden data-pb-config>(.*?)<\/textarea>/s', $editor->body(), $configMatch));
+        $config = json_decode(html_entity_decode($configMatch[1] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8'), true);
+        self::assertSame('popup', $config['themeKind']);
+        self::assertTrue($config['widgets']['form']['hidden']);
+        $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => [[
+            'id' => 'title', 'type' => 'heading', 'settings' => ['text' => 'Contenu & sûr', 'level' => 2], 'styles' => ['desktop' => ['color' => '#123456']], 'children' => [],
+        ]]]]]];
+        $saveLayout = fn (string $modelId): Response => $this->send($app, 'PATCH', '/api/prime-builder/v1/theme-models/' . $modelId, ['content' => $document, 'source_hash' => \PrimeBuilder\Theme\Models::sourceHash([])], $token);
+        self::assertSame(200, $saveLayout($id)->status());
+        $fields = [
+            'name' => 'Fenêtre de test', 'priority' => '10', 'enabled' => '1',
+            'include_type' => ['all'], 'include_value' => [''], 'exclude_type' => ['entry'], 'exclude_value' => ['3'],
+            'popup_trigger' => 'load', 'popup_delay' => '0', 'popup_scroll' => '25', 'popup_idle' => '5', 'popup_frequency' => 'days', 'popup_days' => '2',
+        ];
+        foreach ([['popup_trigger', 'forged'], ['popup_delay', '-1'], ['popup_scroll', '101'], ['popup_idle', '0'], ['popup_frequency', 'once'], ['popup_days', '1e2'], ['popup_days', ['2']]] as [$field, $invalid]) {
+            $bad = $fields;
+            $bad[$field] = $invalid;
+            self::assertSame(422, $post('/admin/prime-builder/theme/' . $id, $bad)->status(), (string) $field);
+        }
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        $models = new \PrimeBuilder\Theme\Models($plugin->settings(), $app->get(Settings::class));
+        $before = $models->find($id);
+        self::assertNotNull($before);
+        self::assertFalse($before['enabled']);
+        self::assertSame(302, $post('/admin/prime-builder/theme/' . $id, $fields)->status());
+        $after = $models->find($id);
+        self::assertNotNull($after);
+        self::assertSame(['trigger' => 'load', 'delay' => 0, 'scroll' => 25, 'idle' => 5, 'frequency' => 'days', 'days' => 2], $after['popup']);
+        $second = $create('Deuxième fenêtre');
+        self::assertSame(200, $saveLayout($second)->status());
+        $fields['name'] = 'Deuxième fenêtre';
+        $fields['priority'] = '-10';
+        $fields['popup_trigger'] = 'click';
+        self::assertSame(302, $post('/admin/prime-builder/theme/' . $second, $fields)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        $excluded = $app->get(EntryRepository::class)->find(3);
+        self::assertNotNull($entry);
+        self::assertNotNull($excluded);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry);
+        $excludedPage = new PageContext(type: PageContext::TYPE_ENTRY, entry: $excluded);
+        $preview = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry, isPreview: true);
+        $hooks = $app->get(Hooks::class);
+        $markup = $hooks->apply('site.foot', 'existing foot', $page);
+        self::assertIsString($markup);
+        self::assertStringStartsWith('existing foot', $markup);
+        self::assertStringContainsString('data-pb-popup="' . $id . '"', $markup);
+        self::assertStringContainsString('data-pb-popup="' . $second . '"', $markup);
+        self::assertLessThan((int) strpos($markup, 'data-pb-popup="' . $second . '"'), (int) strpos($markup, 'data-pb-popup="' . $id . '"'), 'Priority orders equally specific popup invitations');
+        self::assertStringContainsString('aria-modal="true"', $markup);
+        self::assertStringContainsString('data-pb-trigger="load"', $markup);
+        self::assertStringContainsString('data-pb-popup-offer hidden', $markup);
+        self::assertStringContainsString('Contenu &amp; sûr', $markup);
+        self::assertStringNotContainsString('<script>', $markup);
+        self::assertSame(2, preg_match_all('/data-pb-id="(pbt_popup_[a-zA-Z0-9_]+)"/', $markup, $widgetIds));
+        self::assertNotSame($widgetIds[1][0], $widgetIds[1][1]);
+        self::assertSame('existing foot', $hooks->apply('site.foot', 'existing foot', $excludedPage));
+        self::assertSame('existing foot', $hooks->apply('site.foot', 'existing foot', $preview));
+        self::assertFalse($app->get(\Prime\Cache\PageCache::class)->isCacheableRequest(Request::create('GET', '/article-publie')));
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringContainsString('/assets/plugins/prime-builder/js/popup.js', $assets->renderScripts());
+        self::assertStringContainsString('/assets/plugins/prime-builder/css/popup.css', $assets->renderStyles());
+        $popupCss = '';
+        foreach ($assets->resolvedStyles() as $asset) {
+            if ($asset['handle'] === 'prime-builder-popup-' . $id) {
+                $popupCss = $asset['url'];
+            }
+        }
+        self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\.css)~', $popupCss, $cssMatch));
+        $cssUrl = '/prime-builder/theme/' . ($cssMatch[1] ?? '');
+        $css = $this->send($app, 'GET', $cssUrl);
+        self::assertSame(200, $css->status());
+        self::assertStringContainsString('#123456', $css->body());
+        $snapshot = $app->storagePath('prime-builder/styles/theme-' . ($cssMatch[1] ?? ''));
+        self::assertFileExists($snapshot);
+        self::assertTrue(unlink($snapshot));
+        self::assertSame($css->body(), $this->send($app, 'GET', $cssUrl)->body(), 'A missing popup stylesheet is rebuilt with the same namespace');
+        $excludedAssets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $excludedAssets, $excludedPage);
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/popup.js', $excludedAssets->renderScripts());
+        $previewAssets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $previewAssets, $preview);
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/popup.js', $previewAssets->renderScripts());
+        $original = $models->find($id);
+        self::assertNotNull($original);
+        unset($original['id']);
+        $corrupt = $original;
+        $corrupt['popup'] = ['trigger' => 'forged'];
+        $plugin->settings()->set('theme_model.' . $id, $corrupt, false);
+        self::assertStringNotContainsString('data-pb-popup="' . $id . '"', (string) $hooks->apply('site.foot', '', $page), 'Malformed persisted options fail closed');
+        $corrupt = $original;
+        $corrupt['elements'] = [['id' => 'form', 'type' => 'form', 'settings' => [], 'styles' => [], 'children' => []]];
+        $plugin->settings()->set('theme_model.' . $id, $corrupt, false);
+        self::assertStringNotContainsString('data-pb-popup="' . $id . '"', (string) $hooks->apply('site.foot', '', $page), 'Unsupported persisted widgets are revalidated');
+        $plugin->settings()->set('theme_model.' . $id, $original, false);
+        self::assertStringContainsString('data-pb-popup="' . $id . '"', (string) $hooks->apply('site.foot', '', $page));
+        self::assertSame(302, $post('/admin/prime-builder/theme/' . $second . '/delete', [])->status());
+        self::assertStringNotContainsString('data-pb-popup="' . $second . '"', (string) $hooks->apply('site.foot', '', $page));
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/theme/' . $id)->status());
+        $unauthorized = $this->tokens($app)->issue($this->user($app, 2), 'no popup permission', ['*'])['token'];
+        self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/theme-models/' . $id, ['content' => $document, 'source_hash' => \PrimeBuilder\Theme\Models::sourceHash([])], $unauthorized)->status());
+    }
+
     public function testThemeModelsAreEditableConditionalAndRestoreTheTheme(): void
     {
         $app = $this->activated('admin');

@@ -150,7 +150,7 @@ final class Partials
             }
             $layout = $this->normalize($elements, contextual: true);
             if ($layout !== null) {
-                $layouts[] = self::namespaceLayout($layout, $kind);
+                $layouts[] = self::namespaceLayout($layout, self::modelSlot($model));
             }
         }
         return $layouts;
@@ -237,6 +237,15 @@ final class Partials
         return false;
     }
 
+    /** @param array<string, mixed> $model */
+    public static function modelSlot(array $model): string
+    {
+        $kind = is_string($model['kind'] ?? null) ? $model['kind'] : '';
+        // Several popups may match one page, so their widget IDs, anchors and
+        // styles must remain independent even when their source IDs are equal.
+        return $kind === 'popup' ? 'popup_' . substr(hash('sha256', (string) ($model['id'] ?? '')), 0, 16) : $kind;
+    }
+
     /**
      * Widget IDs must not collide with the page or the other theme slot. Built-in
      * anchors and links to them are also namespaced within the chosen template.
@@ -244,7 +253,7 @@ final class Partials
      * @param array<string, mixed> $layout
      * @return array<string, mixed>
      */
-    private static function namespaceLayout(array $layout, string $slot): array
+    public static function namespaceLayout(array $layout, string $slot): array
     {
         $anchors = [];
         $collect = static function (array $elements) use (&$collect, &$anchors, $slot): void {

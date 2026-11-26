@@ -8,11 +8,12 @@ use Prime\Plugins\PluginSettings;
 use Prime\Settings\Settings;
 use Prime\Site\PageContext;
 use PrimeBuilder\Document\SavedTemplates;
+use PrimeBuilder\Popup\Options as PopupOptions;
 
 /** Independently stored theme models; library snapshots and old partials remain untouched. */
 final class Models
 {
-    public const KINDS = ['header', 'footer', 'single', 'archive', 'search', 'not_found'];
+    public const KINDS = ['header', 'footer', 'single', 'archive', 'search', 'not_found', 'popup'];
     public const MAX_MODELS = 50;
     private const PREFIX = 'theme_model.';
     /** @var list<array<string, mixed>>|null */
@@ -66,6 +67,9 @@ final class Models
             'id' => $id, 'name' => $name, 'kind' => $kind, 'enabled' => false, 'priority' => 0,
             'include' => [['type' => 'all', 'value' => '']], 'exclude' => [], 'elements' => $elements,
         ];
+        if ($kind === 'popup') {
+            $model['popup'] = PopupOptions::defaults();
+        }
         return $this->save($model) ? $model : null;
     }
 
@@ -141,11 +145,11 @@ final class Models
             return false;
         }
         if ($page->isPlugin()) {
-            // Plugin pages are already framed by the CMS, but still call theme partials.
-            return in_array($kind, ['header', 'footer'], true);
+            // Plugin pages are already framed by the CMS, but still call theme partials and foot.
+            return in_array($kind, ['header', 'footer', 'popup'], true);
         }
         return match ($kind) {
-            'header', 'footer' => true,
+            'header', 'footer', 'popup' => true,
             'single' => $page->entry !== null && ($page->isEntry() || $page->isFront()),
             'archive' => Conditions::isArchive($page),
             'search' => $page->isSearch(),
@@ -177,9 +181,17 @@ final class Models
         if ($include === null || $include === [] || $exclude === null) {
             return null;
         }
-        return [
+        $result = [
             'id' => $id, 'name' => $value['name'], 'kind' => $value['kind'], 'enabled' => $value['enabled'],
             'priority' => $value['priority'], 'include' => $include, 'exclude' => $exclude, 'elements' => $value['elements'],
         ];
+        if ($value['kind'] === 'popup') {
+            $options = PopupOptions::normalize($value['popup'] ?? null);
+            if ($options === null) {
+                return null;
+            }
+            $result['popup'] = $options;
+        }
+        return $result;
     }
 }

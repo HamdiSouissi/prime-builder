@@ -219,6 +219,12 @@ final class ThemeBuilder
                 $choices[] = $item + ['kind' => 'section'];
             }
         }
+        $filter = $request->query('kind', 'all');
+        $filter = is_string($filter) && in_array($filter, ['all', ...Models::KINDS], true) ? $filter : 'all';
+        $models = (new Models($this->plugin->settings(), $this->plugin->app()->get(Settings::class)))->all();
+        if ($filter !== 'all') {
+            $models = array_values(array_filter($models, static fn (array $model): bool => $model['kind'] === $filter));
+        }
         $title = t('plugin::prime-builder.theme.title');
         $data = $this->plugin->app()->get(AdminContext::class)->build($request, $title, [
             'pageHeading' => $title,
@@ -229,7 +235,8 @@ final class ThemeBuilder
             'values' => $values,
             'choices' => $choices,
             'sourceChoices' => $this->templates->all(),
-            'models' => (new Models($this->plugin->settings(), $this->plugin->app()->get(Settings::class)))->all(),
+            'models' => $models,
+            'modelFilter' => $filter,
             'error' => $error,
         ]);
         if (is_array($data['adminStyles'] ?? null)) {
