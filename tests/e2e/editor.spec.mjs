@@ -75,9 +75,45 @@ test('compose and publish a page using the CMS theme', async ({ page }) => {
   await page.getByLabel('Texte', { exact: true }).fill('Une page composée dans Prime Builder');
   await expect(page.frameLocator('[data-pb-frame]').locator('.pb-heading h2')).toHaveText('Une page composée dans Prime Builder');
   await page.locator('[data-pb-status]').selectOption('published');
-  await page.locator('[data-pb-save]').click();
-  await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
-  await expectAccessible(page);
+  const previewElement = await page.locator('[data-pb-frame]').elementHandle();
+  expect(previewElement).not.toBeNull();
+  const preview = await previewElement.contentFrame();
+  expect(preview).not.toBeNull();
+  const sheetPath = await preview.locator('link[href*="/themes/aurora/"]').first().getAttribute('href');
+  expect(sheetPath).toBeTruthy();
+  const sheetUrl = new URL(sheetPath, page.url()).href;
+  let releaseSheet, signalSheet;
+  const sheetGate = new Promise(resolve => { releaseSheet = resolve; });
+  const sheetRequested = new Promise(resolve => { signalSheet = resolve; });
+  const holdSheet = async route => { signalSheet(); await sheetGate; await route.continue(); };
+  await page.route(sheetUrl, holdSheet);
+  let previewLoaded = false;
+  const loaded = page.waitForEvent('framenavigated', frame => frame === preview).then(async frame => {
+    await frame.waitForLoadState('load');
+    previewLoaded = true;
+  });
+  // Attach a rejection handler even if an earlier assertion fails before the await below.
+  void loaded.catch(() => {});
+  try {
+    const cssResponse = page.waitForResponse(response => response.url() === sheetUrl);
+    await page.locator('[data-pb-save]').click();
+    await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
+    await sheetRequested;
+    await preview.locator('.site-nav__link').first().waitFor({ state: 'attached' });
+    // Saving reloads the iframe. Audit its finished theme, not the temporarily
+    // unstyled DOM that can exist while a stylesheet is still in flight.
+    expect(await preview.evaluate(() => document.readyState)).not.toBe('complete');
+    expect(previewLoaded).toBe(false);
+    releaseSheet();
+    expect((await cssResponse).ok()).toBe(true);
+    await loaded;
+    await expect(preview.locator('.site-nav__link').first()).toHaveCSS('display', 'inline-flex');
+    await expect(preview.locator('.pb-heading h2')).toHaveText('Une page composée dans Prime Builder');
+    await expectAccessible(page);
+  } finally {
+    releaseSheet();
+    await page.unroute(sheetUrl, holdSheet);
+  }
   await page.screenshot({ path: test.info().outputPath('editor-desktop.png'), fullPage: true });
   await page.goto('/test-prime-builder');
   await expect(page.getByRole('heading', { name: 'Une page composée dans Prime Builder' })).toBeVisible();
