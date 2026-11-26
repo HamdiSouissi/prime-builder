@@ -1,5 +1,6 @@
 import { History, add, appendMediaCarouselSelection, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, firstInvalidWidgetClasses, freshIds, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, normalizeWidgetClasses, remove, reorder, replaceImageSource, replaceStructuredImage, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
 import { makeRichField } from './rich-text.js';
+import { firstInvalidFormFields, makeFormFieldsControl } from './form-fields.js';
 
 const root = document.querySelector('[data-pb-app]');
 const config = JSON.parse(root.querySelector('[data-pb-config]').value);
@@ -528,6 +529,7 @@ function makeStyleControl(name, schema, current, onChange) {
   row.append(input, units); wrapper.append(row); return wrapper;
 }
 function makeField(name, schema, current, onChange, allowVisualRich = true) {
+  if (schema.type === 'form_fields') return makeFormFieldsControl({ current, onChange, ui, id });
   if (['color', 'length', 'offset', 'z_index'].includes(schema.type)) return makeStyleControl(name, schema, current, onChange);
   if (schema.type === 'rich' && allowVisualRich) return makeRichField({ name, label: schema.label || ui[name] || name, schema, current, onChange, ui, id });
   const wrapper = document.createElement('label'); wrapper.className = 'pb-field';
@@ -1286,6 +1288,13 @@ async function save() {
     selected = invalid.id; tab = 'advanced'; panel = 'settings'; renderPanel();
     $('[data-pb-save-state]').textContent = ui.widget_classes_error;
     $('[data-pb-classes]')?.focus();
+    return;
+  }
+  const invalidForm = firstInvalidFormFields(history.present);
+  if (invalidForm) {
+    selected = invalidForm.id; tab = 'content'; panel = 'settings'; renderPanel();
+    $('[data-pb-save-state]').textContent = ui.form_fields_invalid;
+    $('[data-pb-form-editor] input, [data-pb-form-editor] button')?.focus();
     return;
   }
   const snapshot = JSON.stringify(history.present);

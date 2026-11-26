@@ -11,6 +11,7 @@ use Prime\Security\HtmlSanitizer;
 use Prime\Site\PageContext;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\MediaReferences;
+use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Styles\CssClasses;
 use PrimeBuilder\Styles\Scope;
 use Throwable;
@@ -393,8 +394,8 @@ final class Renderer
     }
 
     /**
-     * This first form has fixed fields. The start token is fetched anonymously by JS,
-     * never embedded in saved or cached HTML. The server checks the published entry.
+     * A missing schema retains the original fixed form. Tokens are fetched by
+     * JS and never embedded in saved or cached HTML.
      *
      * @param array<string, mixed> $settings
      */
@@ -404,17 +405,88 @@ final class Renderer
         $prefix = 'pb-form-' . $id;
         $title = $this->fieldText($settings, 'title');
         $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.forms.' . $key));
-        return '<form class="pb-contact-form" method="post" action="/api/prime-builder/v1/forms/' . $entryId . '/submit" data-pb-form data-pb-node="' . self::escape($id) . '"'
-            . ' data-pb-error="' . $copy('error') . '" data-pb-wait="' . $copy('wait') . '" data-pb-sent="' . $copy('sent') . '" data-pb-limited="' . $copy('limited') . '">'
-            . ($title !== '' ? '<h3>' . self::escape($title) . '</h3>' : '')
-            . '<p>' . $copy('required') . '</p>'
+        $custom = array_key_exists('form_fields', $settings);
+        $fields = $custom && is_string($settings['form_fields']) ? Fields::parse($settings['form_fields']) : null;
+        if ($custom && $fields === null) {
+            // Corrupt or unvalidated stored data must not fall back to another form.
+            return '';
+        }
+        $content = $fields !== null ? $this->renderCustomFields($fields, $prefix) : '<p>' . $copy('required') . '</p>'
             . '<label for="' . self::escape($prefix) . '-name">' . $copy('name') . '</label><input id="' . self::escape($prefix) . '-name" name="name" type="text" autocomplete="name" maxlength="160" required>'
             . '<label for="' . self::escape($prefix) . '-email">' . $copy('email') . '</label><input id="' . self::escape($prefix) . '-email" name="email" type="email" autocomplete="email" maxlength="254" required>'
-            . '<label for="' . self::escape($prefix) . '-message">' . $copy('message') . '</label><textarea id="' . self::escape($prefix) . '-message" name="message" rows="5" maxlength="5000" required></textarea>'
+            . '<label for="' . self::escape($prefix) . '-message">' . $copy('message') . '</label><textarea id="' . self::escape($prefix) . '-message" name="message" rows="5" maxlength="5000" required></textarea>';
+        return '<form class="pb-contact-form" method="post" action="/api/prime-builder/v1/forms/' . $entryId . '/submit" data-pb-form data-pb-node="' . self::escape($id) . '"'
+            . ($custom ? ' data-pb-custom="1" data-pb-required-error="' . $copy('choose_required') . '"' : '')
+            . ' data-pb-error="' . $copy('error') . '" data-pb-wait="' . $copy('wait') . '" data-pb-sent="' . $copy('sent') . '" data-pb-limited="' . $copy('limited') . '">'
+            . ($title !== '' ? '<h3>' . self::escape($title) . '</h3>' : '')
+            . $content
             . '<div class="pb-contact-trap" aria-hidden="true"><label for="' . self::escape($prefix) . '-website">' . $copy('trap') . '</label><input id="' . self::escape($prefix) . '-website" name="website" type="text" tabindex="-1" autocomplete="off"></div>'
+            . ($custom ? '<div class="pb-form-navigation"><button type="button" class="pb-form-previous" data-pb-form-previous hidden>' . $copy('step_previous') . '</button><button type="button" class="pb-form-next" data-pb-form-next hidden>' . $copy('step_next') . '</button></div>' : '')
             . '<button class="pb-contact-submit" type="submit" disabled>' . self::escape($this->fieldText($settings, 'button_text', t('plugin::prime-builder.forms.submit'))) . '</button>'
             . '<p class="pb-contact-status" role="status" aria-live="polite" data-pb-form-status></p>'
             . '<noscript><p>' . $copy('javascript') . '</p></noscript></form>';
+    }
+
+    /**
+     * @param list<array{id: string, type: string, label: string, required: bool, step: int, options: list<string>, value: string}> $fields
+     */
+    private function renderCustomFields(array $fields, string $prefix): string
+    {
+        $maxStep = max([1, ...array_column($fields, 'step')]);
+        $output = '';
+        for ($step = 1; $step <= $maxStep; $step++) {
+            $legend = $maxStep > 1
+                ? t('plugin::prime-builder.forms.step', ['current' => $step, 'total' => $maxStep])
+                : t('plugin::prime-builder.forms.fields');
+            $output .= '<fieldset class="pb-form-step" data-pb-form-step><legend tabindex="-1">' . self::escape($legend) . '</legend>';
+            foreach ($fields as $field) {
+                if ($field['step'] !== $step) {
+                    continue;
+                }
+                $name = self::escape($field['id']);
+                $id = self::escape($prefix . '-' . $field['id']);
+                $label = self::escape($field['label']);
+                $required = $field['required'] ? ' required' : '';
+                $suffix = $field['required'] ? ' <span class="pb-form-required">' . self::escape(t('plugin::prime-builder.forms.field_required')) . '</span>' : '';
+                $output .= '<div class="pb-form-field" data-pb-field="' . $name . '" data-pb-kind="' . $field['type'] . '" data-pb-required="' . ($field['required'] ? '1' : '0') . '"' . ($field['type'] === 'hidden' ? ' hidden' : '') . '>';
+                if ($field['type'] === 'hidden') {
+                    $output .= '<input type="hidden" id="' . $id . '" name="' . $name . '" value="' . self::escape($field['value']) . '">';
+                } elseif (in_array($field['type'], ['checkbox', 'radio'], true)) {
+                    $output .= '<fieldset class="pb-form-choices"><legend>' . $label . $suffix . '</legend>';
+                    foreach ($field['options'] as $index => $option) {
+                        $choiceId = $id . '-' . $index;
+                        // Required checkbox groups are checked together by JS; required
+                        // on each individual checkbox would incorrectly require all of them.
+                        $choiceRequired = $field['type'] === 'radio' && $index === 0 ? $required : '';
+                        $output .= '<div class="pb-form-choice"><input type="' . $field['type'] . '" id="' . $choiceId . '" name="' . $name . '" value="' . self::escape($option) . '"' . $choiceRequired . '><label for="' . $choiceId . '">' . self::escape($option) . '</label></div>';
+                    }
+                    $output .= '</fieldset>';
+                } elseif ($field['type'] === 'acceptance') {
+                    $output .= '<div class="pb-form-choice"><input type="checkbox" id="' . $id . '" name="' . $name . '" value="1"' . $required . '><label for="' . $id . '">' . $label . $suffix . '</label></div>';
+                } elseif ($field['type'] === 'select') {
+                    $output .= '<label for="' . $id . '">' . $label . $suffix . '</label><select id="' . $id . '" name="' . $name . '"' . $required . '><option value="">' . self::escape(t('plugin::prime-builder.forms.choose')) . '</option>';
+                    foreach ($field['options'] as $option) {
+                        $output .= '<option value="' . self::escape($option) . '">' . self::escape($option) . '</option>';
+                    }
+                    $output .= '</select>';
+                } elseif ($field['type'] === 'textarea') {
+                    $output .= '<label for="' . $id . '">' . $label . $suffix . '</label><textarea id="' . $id . '" name="' . $name . '" rows="5" maxlength="2000"' . $required . '></textarea>';
+                } else {
+                    $type = $field['type'] === 'phone' ? 'tel' : $field['type'];
+                    $extra = match ($type) {
+                        'text' => ' maxlength="160"',
+                        'email' => ' maxlength="254"',
+                        'tel' => ' maxlength="40"',
+                        'number' => ' step="any"',
+                        default => '',
+                    };
+                    $output .= '<label for="' . $id . '">' . $label . $suffix . '</label><input id="' . $id . '" name="' . $name . '" type="' . $type . '"' . $extra . $required . '>';
+                }
+                $output .= '</div>';
+            }
+            $output .= '</fieldset>';
+        }
+        return $output;
     }
 
     /** @param array<string, mixed> $settings */

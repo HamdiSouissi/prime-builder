@@ -197,7 +197,12 @@ final class Registry
                 'show_excerpt' => ['type' => 'enum', 'values' => ['show', 'hide']],
             ],
             'current_content' => ['source' => ['type' => 'enum', 'values' => ['title', 'excerpt', 'published', 'author']]],
-            'form' => ['title' => $text, 'button_text' => $text],
+            'form' => [
+                'title' => $text,
+                'button_text' => $text,
+                // Missing schema keeps the original three-field contact form intact.
+                'form_fields' => ['type' => 'form_fields', 'max' => 20000, 'label' => 'plugin::prime-builder.ui.form_fields'],
+            ],
             'prime_block' => ['block_type' => ['type' => 'enum', 'values' => PrimeBlock::ALLOWED], 'block_data' => ['type' => 'json_object', 'max' => 20000], 'block_anchor' => ['type' => 'text', 'max' => 100]],
             'html' => [
                 'markup' => ['type' => 'rich', 'max' => 20000],

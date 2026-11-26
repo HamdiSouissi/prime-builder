@@ -6,6 +6,7 @@ namespace PrimeBuilder\Document;
 
 use Prime\Editor\BlockRegistry;
 use Prime\Security\HtmlSanitizer;
+use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Styles\CssClasses;
 use PrimeBuilder\Styles\Values;
 use PrimeBuilder\Widgets\Countdown;
@@ -275,6 +276,7 @@ final class Validator
             'datetime_utc' => $value === '' || Countdown::canonical($value) !== null ? $value : null,
             'latitude', 'longitude' => $value === '' || Map::coordinate($value, $type === 'latitude') !== null ? trim($value) : null,
             'json_object' => is_object(json_decode($value)) ? $value : null,
+            'form_fields' => Fields::canonical($value),
             'media_list' => $this->mediaList($value),
             'media_dimensions' => ($dimensions = MediaDimensions::parse($value, $this->sanitizer)) === null ? null : MediaDimensions::serialize($dimensions),
             'media_dimensions_manual' => ($dimensions = MediaDimensions::parseManual($value, $this->sanitizer)) === null ? null : MediaDimensions::serializeManual($dimensions),

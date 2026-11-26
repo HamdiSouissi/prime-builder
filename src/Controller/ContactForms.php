@@ -16,12 +16,13 @@ use Prime\Plugins\PluginContext;
 use PrimeBuilder\Configuration;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Forms\CsvExport;
+use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
 use PrimeBuilder\Forms\Tokens;
 use PrimeBuilder\Widgets\Content;
 
-/** A first, deliberately fixed contact form and its protected submission inbox. */
+/** Public, cache-compatible forms and their protected submission inbox. */
 final class ContactForms
 {
     private readonly Submissions $submissions;
@@ -115,7 +116,7 @@ final class ContactForms
     {
         $node = $request->query('node');
         $entryId = self::positiveId($id);
-        if ($entryId === null || !is_string($node) || !$this->publicForm($entryId, $node)) {
+        if ($entryId === null || !is_string($node) || $this->publicForm($entryId, $node) === null) {
             return $this->error($request, 'not_found', 404);
         }
         $tokens = Tokens::fromAppKey($this->plugin->app()->config()->get('app.key'));
@@ -135,7 +136,8 @@ final class ContactForms
         $body = $request->attribute('api.body');
         $entryId = self::positiveId($id);
         $node = is_array($body) && is_string($body['node'] ?? null) ? $body['node'] : '';
-        if ($entryId === null || !$this->publicForm($entryId, $node)) {
+        $settings = $entryId !== null ? $this->publicForm($entryId, $node) : null;
+        if ($entryId === null || $settings === null) {
             return $this->error($request, 'not_found', 404);
         }
         $tokens = Tokens::fromAppKey($this->plugin->app()->config()->get('app.key'));
@@ -149,15 +151,20 @@ final class ContactForms
         if (!is_array($body) || strlen($request->rawBody()) > 24000) {
             return $this->error($request, 'validation_failed', 422);
         }
+        $custom = array_key_exists('form_fields', $settings);
+        $allowed = $custom ? ['node', 'fields', 'website', 'token'] : ['node', 'name', 'email', 'message', 'website', 'token'];
         foreach (array_keys($body) as $key) {
-            if (!is_string($key) || !in_array($key, ['node', 'name', 'email', 'message', 'website', 'token'], true)) {
+            if (!is_string($key) || !in_array($key, $allowed, true)) {
                 return $this->error($request, 'validation_failed', 422);
             }
         }
-        foreach (['name', 'email', 'message', 'website', 'token'] as $key) {
+        foreach ($custom ? ['website', 'token'] : ['name', 'email', 'message', 'website', 'token'] as $key) {
             if (!is_string($body[$key] ?? null)) {
                 return $this->error($request, 'validation_failed', 422);
             }
+        }
+        if ($custom && !is_array($body['fields'] ?? null)) {
+            return $this->error($request, 'validation_failed', 422);
         }
         if ($body['website'] !== '') {
             // Do not help automated fillers distinguish the trap; no data is stored.
@@ -166,19 +173,30 @@ final class ContactForms
         if (!$tokens->valid($body['token'], $entryId, $node, $request->ip(), $now)) {
             return $this->error($request, 'validation_failed', 422);
         }
-        $name = trim($body['name']);
-        $email = trim($body['email']);
-        $message = trim(str_replace(["\r\n", "\r"], "\n", $body['message']));
-        if ($name === '' || $email === '' || $message === ''
-            || !mb_check_encoding($name . $email . $message, 'UTF-8')
-            || mb_strlen($name, 'UTF-8') > 160 || strlen($name) > 640
-            || strlen($email) > 254 || filter_var($email, FILTER_VALIDATE_EMAIL) === false
-            || mb_strlen($message, 'UTF-8') > 5000 || strlen($message) > 20000
-            || preg_match('/[\x00-\x1f\x7f]/', $name . $email) === 1
-            || preg_match('/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/', $message) === 1) {
-            return $this->error($request, 'validation_failed', 422);
+        if ($custom) {
+            // Never accept the definition supplied by the visitor. Use the current,
+            // visible, published widget again, including after a start token was issued.
+            $fields = Fields::parse((string) $settings['form_fields']);
+            $values = $fields !== null ? Fields::submitted($fields, $body['fields']) : null;
+            if ($values === null) {
+                return $this->error($request, 'validation_failed', 422);
+            }
+        } else {
+            $name = trim($body['name']);
+            $email = trim($body['email']);
+            $message = trim(str_replace(["\r\n", "\r"], "\n", $body['message']));
+            if ($name === '' || $email === '' || $message === ''
+                || !mb_check_encoding($name . $email . $message, 'UTF-8')
+                || mb_strlen($name, 'UTF-8') > 160 || strlen($name) > 640
+                || strlen($email) > 254 || filter_var($email, FILTER_VALIDATE_EMAIL) === false
+                || mb_strlen($message, 'UTF-8') > 5000 || strlen($message) > 20000
+                || preg_match('/[\x00-\x1f\x7f]/', $name . $email) === 1
+                || preg_match('/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/', $message) === 1) {
+                return $this->error($request, 'validation_failed', 422);
+            }
+            $values = ['name' => $name, 'email' => $email, 'message' => $message];
         }
-        $created = $this->submissions->create($entryId, $node, ['name' => $name, 'email' => $email, 'message' => $message], $tokens->usedHash($body['token']), $now);
+        $created = $this->submissions->create($entryId, $node, $values, $tokens->usedHash($body['token']), $now);
         if (!$created) {
             return $this->error($request, 'conflict', 409);
         }
@@ -196,36 +214,51 @@ final class ContactForms
         return preg_match('/^[1-9][0-9]{0,18}$/D', $id) === 1 && (string) (int) $id === $id ? (int) $id : null;
     }
 
-    private function publicForm(int $entryId, string $node): bool
+    /** @return array<string, mixed>|null */
+    private function publicForm(int $entryId, string $node): ?array
     {
         if (preg_match('/^[a-zA-Z0-9_-]{1,64}$/D', $node) !== 1) {
-            return false;
+            return null;
         }
         $entry = $this->plugin->app()->get(EntryRepository::class)->find($entryId, false);
         // A published page can still be unreachable below a draft, future,
         // missing or cyclic ancestor. Check again on both start and submit.
         if (!$entry instanceof Entry || !$this->plugin->app()->get(Content::class)->publiclyAccessibleEntry($entry)) {
-            return false;
+            return null;
         }
         $layout = Layout::fromDocument($entry->decodedContent());
-        return is_array($layout['elements'] ?? null) && self::containsVisibleForm($layout['elements'], $node);
+        $settings = is_array($layout['elements'] ?? null) ? self::visibleForm($layout['elements'], $node) : null;
+        if ($settings !== null && array_key_exists('form_fields', $settings)
+            && (!is_string($settings['form_fields']) || Fields::parse($settings['form_fields']) === null)) {
+            return null;
+        }
+        return $settings;
     }
 
-    /** @param array<mixed> $elements */
-    private static function containsVisibleForm(array $elements, string $node): bool
+    /**
+     * @param array<mixed> $elements
+     * @return array<string, mixed>|null
+     */
+    private static function visibleForm(array $elements, string $node): ?array
     {
         foreach ($elements as $element) {
             if (!is_array($element) || ($element['hidden'] ?? false) === true) {
                 continue;
             }
             if (($element['id'] ?? null) === $node && ($element['type'] ?? null) === 'form') {
-                return true;
+                // Older documents may omit settings altogether; they still render
+                // the original fixed form and must remain submittable.
+                $settings = $element['settings'] ?? [];
+                return is_array($settings) ? $settings : null;
             }
-            if (is_array($element['children'] ?? null) && self::containsVisibleForm($element['children'], $node)) {
-                return true;
+            if (is_array($element['children'] ?? null)) {
+                $found = self::visibleForm($element['children'], $node);
+                if ($found !== null) {
+                    return $found;
+                }
             }
         }
-        return false;
+        return null;
     }
 
     private function error(Request $request, string $code, int $status): Response

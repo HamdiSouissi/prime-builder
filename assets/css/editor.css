@@ -30,3 +30,6 @@
 @media(max-width:480px){.pb-anchor-warning{align-items:flex-start;padding:8px 14px}.pb-anchor-warning button{min-height:36px}}
 
 .pb-bottombar [hidden] { display: none !important; }
+
+/* Structured contact fields: all labels and reordering controls remain keyboard accessible. */
+.pb-form-editor{border-top:1px solid var(--pb-border);padding-top:16px;margin-top:8px}.pb-form-editor h3{font-size:14px;margin:0}.pb-form-editor .pb-intro{margin:8px 0 12px}.pb-form-editor-row{min-width:0;margin:0 0 12px;padding:12px;border:1px solid var(--pb-border);border-radius:9px}.pb-form-editor-row legend{font-size:12px;font-weight:700;max-width:100%;overflow-wrap:anywhere}.pb-form-editor-row .pb-field{margin-bottom:10px}.pb-form-editor-check{display:flex;align-items:center;gap:8px;font-size:12px;margin:8px 0}.pb-form-editor-check input{width:18px;height:18px}.pb-form-editor-actions{display:flex;flex-wrap:wrap;gap:6px}.pb-form-editor-button{min-height:36px;padding:7px 9px;border:1px solid #b7b9c1;border-radius:7px;background:#fff;color:#1a1d29;font-size:12px;font-weight:600;margin:0 6px 6px 0}.pb-form-editor-button:disabled{color:#6b7085;cursor:not-allowed}.pb-form-editor-error{font-size:12px;line-height:1.5;color:#a41c36}.pb-form-editor-error:empty{display:none}

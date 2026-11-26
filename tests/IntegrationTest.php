@@ -4457,6 +4457,139 @@ final class IntegrationTest extends TestCase
         self::assertSame(0, $count());
     }
 
+    public function testCustomFormPublishesEscapedFieldsAndValidatesAnonymousSubmissionsAgainstCurrentSchema(): void
+    {
+        $app = $this->activated(null);
+        $editorToken = $this->tokens($app)->issue($this->user($app, 1), 'custom form editor', ['*'])['token'];
+        $fields = [
+            ['id' => 'f_name', 'type' => 'text', 'label' => 'Nom <img src=x onerror=alert(1)>', 'required' => true, 'step' => 1, 'options' => [], 'value' => ''],
+            ['id' => 'f_email', 'type' => 'email', 'label' => 'E-mail', 'required' => true, 'step' => 1, 'options' => [], 'value' => ''],
+            ['id' => 'f_number', 'type' => 'number', 'label' => 'Quantité', 'required' => false, 'step' => 1, 'options' => [], 'value' => ''],
+            ['id' => 'f_choice', 'type' => 'checkbox', 'label' => 'Thèmes', 'required' => true, 'step' => 2, 'options' => ['Alpha', 'Bêta'], 'value' => ''],
+            ['id' => 'f_accept', 'type' => 'acceptance', 'label' => 'Accepter', 'required' => true, 'step' => 2, 'options' => [], 'value' => ''],
+            ['id' => 'f_source', 'type' => 'hidden', 'label' => 'Source', 'required' => false, 'step' => 2, 'options' => [], 'value' => 'newsletter'],
+        ];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'custom', 'type' => 'form', 'settings' => ['title' => 'Contact', 'form_fields' => (string) json_encode($fields)], 'styles' => [], 'children' => [],
+        ]];
+        $invalid = $document;
+        $invalid['blocks'][0]['data']['elements'][0]['settings']['form_fields'] = '[{"id":"website"}]';
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $invalid], $editorToken)->status());
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $editorToken);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('data-pb-custom="1"', $entry->contentHtml);
+        self::assertSame(2, substr_count($entry->contentHtml, 'data-pb-form-step'));
+        self::assertStringContainsString('Nom &lt;img src=x onerror=alert(1)&gt;', $entry->contentHtml);
+        self::assertStringNotContainsString('<img src=x', $entry->contentHtml);
+        self::assertStringNotContainsString('name="token"', $entry->contentHtml);
+        self::assertStringNotContainsString('_csrf', $entry->contentHtml);
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $path = '/api/prime-builder/v1/forms/1';
+        self::assertSame(200, $this->formRequest($app, 'GET', $path . '/start?node=custom', ip: '198.51.100.130')->status());
+        $payload = static fn (string $ip, int $age = 4): array => [
+            'node' => 'custom', 'token' => $tokens->issue(1, 'custom', $ip, time() - $age), 'website' => '',
+            'fields' => ['f_name' => '<script>danger()</script>', 'f_email' => 'example@example.test', 'f_number' => '3.5', 'f_choice' => ['Alpha'], 'f_accept' => true, 'f_source' => 'newsletter'],
+        ];
+        $count = fn (): int => $this->db($app)->table('prime_builder_submissions')->count();
+        $trap = $payload('198.51.100.131');
+        $trap['website'] = 'bot';
+        self::assertSame(201, $this->formRequest($app, 'POST', $path . '/submit', $trap, '198.51.100.131')->status());
+        self::assertSame(0, $count());
+        $early = $payload('198.51.100.132', 0);
+        self::assertSame(422, $this->formRequest($app, 'POST', $path . '/submit', $early, '198.51.100.132')->status());
+        $wrongIp = $payload('198.51.100.133');
+        self::assertSame(422, $this->formRequest($app, 'POST', $path . '/submit', $wrongIp, '198.51.100.134')->status());
+        $cases = [];
+        $bad = $payload('198.51.100.140');
+        $bad['fields']['f_choice'] = ['Forged'];
+        $cases[] = $bad;
+        $bad = $payload('198.51.100.141');
+        $bad['fields']['f_choice'] = [];
+        $cases[] = $bad;
+        $bad = $payload('198.51.100.142');
+        $bad['fields']['f_accept'] = false;
+        $cases[] = $bad;
+        $bad = $payload('198.51.100.143');
+        $bad['fields']['f_source'] = 'forged';
+        $cases[] = $bad;
+        $bad = $payload('198.51.100.144');
+        $bad['fields']['f_number'] = '1e9';
+        $cases[] = $bad;
+        $bad = $payload('198.51.100.145');
+        $bad['fields']['f_email'] = 'bad';
+        $cases[] = $bad;
+        $bad = $payload('198.51.100.146');
+        unset($bad['fields']['f_name']);
+        $cases[] = $bad;
+        $bad = $payload('198.51.100.147');
+        $bad['fields']['f_extra'] = 'x';
+        $cases[] = $bad;
+        $bad = $payload('198.51.100.148');
+        $bad['name'] = 'legacy field';
+        $cases[] = $bad;
+        foreach ($cases as $index => $bad) {
+            $ip = '198.51.100.' . (140 + $index);
+            self::assertSame(422, $this->formRequest($app, 'POST', $path . '/submit', $bad, $ip)->status());
+        }
+        self::assertSame(0, $count());
+        $valid = $payload('198.51.100.149');
+        $sent = $this->formRequest($app, 'POST', $path . '/submit', $valid, '198.51.100.149');
+        self::assertSame(201, $sent->status(), $sent->body());
+        self::assertStringContainsString('no-store', (string) $sent->header('Cache-Control'));
+        self::assertSame(409, $this->formRequest($app, 'POST', $path . '/submit', $valid, '198.51.100.149')->status());
+        self::assertSame(1, $count());
+        $stored = $this->db($app)->table('prime_builder_submissions')->first();
+        self::assertNotNull($stored);
+        self::assertSame('<script>danger()</script>', $stored['sender_name']);
+        self::assertStringContainsString('Thèmes: Alpha', (string) $stored['message']);
+        self::assertStringContainsString('Source: newsletter', (string) $stored['message']);
+        self::assertStringNotContainsString('198.51.100.149', (string) json_encode($stored));
+        // A token issued before editing must be checked against the current schema.
+        $stale = $payload('198.51.100.150');
+        $fields[3]['options'] = ['Gamma'];
+        $document['blocks'][0]['data']['elements'][0]['settings']['form_fields'] = (string) json_encode($fields);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $editorToken)->status());
+        self::assertSame(422, $this->formRequest($app, 'POST', $path . '/submit', $stale, '198.51.100.150')->status());
+        self::assertSame(1, $count());
+
+        $this->appLogin($app);
+        $inbox = $this->send($app, 'GET', '/admin/prime-builder/submissions');
+        self::assertSame(200, $inbox->status(), $inbox->body());
+        self::assertStringContainsString('&lt;script&gt;danger()', $inbox->body());
+        self::assertStringNotContainsString('<script>danger()', $inbox->body());
+        $csv = $this->send($app, 'GET', '/admin/prime-builder/submissions/export?q=newsletter');
+        self::assertSame(200, $csv->status());
+        self::assertStringContainsString('Thèmes: Alpha', $csv->body());
+    }
+
+    public function testLegacyFormWithoutSettingsRemainsSubmittableButCorruptSchemaDoesNotFallBack(): void
+    {
+        $app = $this->activated(null);
+        $this->publishContactForm($app);
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $document = $entry->decodedContent();
+        unset($document['blocks'][0]['data']['elements'][0]['settings']);
+        $statement = $this->db($app)->pdo()->prepare('UPDATE pc_entries SET content = ? WHERE id = 1');
+        $statement->execute([(string) json_encode($document)]);
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $ip = '198.51.100.151';
+        $path = '/api/prime-builder/v1/forms/1';
+        self::assertSame(200, $this->formRequest($app, 'GET', $path . '/start?node=contact', ip: $ip)->status());
+        $body = ['node' => 'contact', 'name' => 'Nom', 'email' => 'sender@example.test', 'message' => 'Message', 'website' => '', 'token' => $tokens->issue(1, 'contact', $ip, time() - 4)];
+        self::assertSame(201, $this->formRequest($app, 'POST', $path . '/submit', $body, $ip)->status());
+        $document['blocks'][0]['data']['elements'][0]['settings'] = ['form_fields' => '{}'];
+        $statement->execute([(string) json_encode($document)]);
+        self::assertSame(404, $this->formRequest($app, 'GET', $path . '/start?node=contact', ip: $ip)->status());
+        self::assertSame(404, $this->formRequest($app, 'POST', $path . '/submit', $body, $ip)->status());
+        self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->count());
+    }
+
     public function testRateLimitHandlesBucketCreatedAfterItsFirstUpdate(): void
     {
         $app = $this->activated(null);
