@@ -3311,6 +3311,8 @@ test('simple contact form sends anonymously and the protected inbox receives it'
   expect(headers.cookie).toBeUndefined();
   expect(headers['x-prime-csrf']).toBeUndefined();
   await expect(form.locator('[data-pb-form-status]')).toHaveText('Votre message a été enregistré.');
+  await expect(form.getByRole('button', { name: 'Envoyer', exact: true })).toBeEnabled();
+  await expect(page).toHaveURL(/\/formulaire-test\?contact=1$/);
 
   await page.goto('/admin/prime-builder/submissions');
   await page.getByLabel('Rechercher dans les envois').fill('camille@example.test');
@@ -3348,6 +3350,8 @@ test('custom fields and steps can be edited, validated and sent anonymously', as
   await page.goto(`/admin/prime-builder/edit/${formId}`);
   await page.getByRole('button', { name: 'Ajouter Formulaire de contact', exact: true }).click();
   await page.getByLabel('Titre', { exact: true }).fill('Demande personnalisée');
+  await page.getByLabel('Message après envoi (facultatif)').fill('Merci <script>texte seulement</script> !');
+  await page.getByLabel('Redirection après envoi (chemin interne facultatif, ex. /merci)').fill('/formulaire-test?envoye=1#merci');
   const editor = page.locator('[data-pb-form-editor]');
   await editor.getByRole('button', { name: 'Personnaliser les champs' }).click();
   const nameRow = editor.locator('[data-pb-form-row="f_name"]');
@@ -3451,8 +3455,11 @@ test('custom fields and steps can be edited, validated and sent anonymously', as
   expect(body.fields.f_name).toBe('Zoé Exemple');
   expect(Object.values(body.fields)).toContain('site public');
   expect(Object.values(body.fields)).toContainEqual({ name: 'preuve.txt', content: Buffer.from('Pièce privée de test.\n').toString('base64') });
-  await expect(form.locator('[data-pb-form-status]')).toHaveText('Votre message a été enregistré.');
+  expect((await response.json()).data).toMatchObject({ message: 'Merci <script>texte seulement</script> !', redirect: '/formulaire-test?envoye=1#merci' });
+  await expect(form.locator('[data-pb-form-status]')).toHaveText('Merci <script>texte seulement</script> ! Redirection en cours dans quelques secondes.');
+  await expect(form.locator('[data-pb-form-status] script')).toHaveCount(0);
   await expect(form.getByText('Étape 1 sur 2')).toBeVisible();
+  await expect(page).toHaveURL(/\/formulaire-test\?envoye=1#merci$/);
   await page.goto('/admin/prime-builder/submissions?q=zoe-custom%40example.test');
   const submission = page.locator('[data-pb-submission-id]').filter({ hasText: 'zoe-custom@example.test' });
   await expect(submission).toContainText('Centres d’intérêt: Nouvelles');
@@ -3464,6 +3471,32 @@ test('custom fields and steps can be edited, validated and sent anonymously', as
   expect(readFileSync(await download.path(), 'utf8')).toBe('Pièce privée de test.\n');
   await submission.getByRole('button', { name: /Supprimer l’envoi/ }).click();
   await expect(submission).toHaveCount(0);
+});
+
+test('a forged external redirect response never moves the visitor off-site', async ({ page }) => {
+  await page.goto('/');
+  const script = await page.request.get('/assets/plugins/prime-builder/js/forms.js');
+  expect(script.ok()).toBe(true);
+  const current = page.url();
+  await page.clock.install();
+  await page.setContent(`<form data-pb-form data-pb-node="contact" action="/api/prime-builder/v1/forms/1/submit"
+    data-pb-sent="Enregistré" data-pb-wait="Envoi" data-pb-error="Erreur" data-pb-redirecting="Redirection">
+    <input name="name" value="Nom"><input name="email" value="test@example.test"><textarea name="message">Bonjour</textarea>
+    <input name="website" value=""><button type="submit">Envoyer</button><p data-pb-form-status role="status"></p></form>`);
+  await page.evaluate(() => {
+    window.fetch = async (url, options = {}) => new Response(JSON.stringify(options.method === 'POST'
+      ? { data: { accepted: true, message: 'Enregistré', redirect: '//example.test/vol' } }
+      : { data: { token: 'token' } }), { status: options.method === 'POST' ? 201 : 200, headers: { 'Content-Type': 'application/json' } });
+  });
+  await page.addScriptTag({ url: '/assets/plugins/prime-builder/js/forms.js' });
+  const form = page.locator('[data-pb-form]');
+  await expect(form.getByRole('button', { name: 'Envoyer' })).toBeEnabled();
+  await page.clock.fastForward(3100);
+  await form.getByRole('button', { name: 'Envoyer' }).click();
+  await expect(form.locator('[data-pb-form-status]')).toHaveText('Enregistré');
+  await expect(form.getByRole('button', { name: 'Envoyer' })).toBeEnabled();
+  await page.clock.fastForward(4000);
+  await expect(page).toHaveURL(current);
 });
 
 test('departure dialog traps and restores focus and closes on Escape', async ({ page }) => {

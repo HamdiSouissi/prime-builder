@@ -4566,6 +4566,60 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('Thèmes: Alpha', $csv->body());
     }
 
+    public function testFormSuccessUsesCurrentPublishedSettingsAndRejectsUnsafeRedirects(): void
+    {
+        $app = $this->activated(null);
+        $editorToken = $this->tokens($app)->issue($this->user($app, 1), 'success editor', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'contact', 'type' => 'form', 'settings' => ['form_success_message' => 'Premier message', 'form_redirect' => '/ancien'], 'styles' => [], 'children' => [],
+        ]];
+        $save = fn (array $value): Response => $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $value], $editorToken);
+        $saved = $save($document);
+        self::assertSame(200, $saved->status(), $saved->body());
+        foreach (['https://example.test/', '//example.test/', '/\\example.test/', '/%2fexample.test/'] as $invalid) {
+            $bad = $document;
+            $bad['blocks'][0]['data']['elements'][0]['settings']['form_redirect'] = $invalid;
+            self::assertSame(422, $save($bad)->status(), $invalid);
+        }
+        $bad = $document;
+        $bad['blocks'][0]['data']['elements'][0]['settings']['form_success_message'] = "Merci\nBcc: x";
+        self::assertSame(422, $save($bad)->status());
+
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $ip = '198.51.100.155';
+        $path = '/api/prime-builder/v1/forms/1';
+        self::assertSame(200, $this->formRequest($app, 'GET', $path . '/start?node=contact', ip: $ip)->status());
+        $body = ['node' => 'contact', 'name' => 'Nom', 'email' => 'sender@example.test', 'message' => 'Message', 'website' => '', 'token' => $tokens->issue(1, 'contact', $ip, time() - 4)];
+        // A stale cached page or an already issued token must not select old actions.
+        $document['blocks'][0]['data']['elements'][0]['settings']['form_success_message'] = 'Merci <script>non exécuté</script> !';
+        $document['blocks'][0]['data']['elements'][0]['settings']['form_redirect'] = '/merci?source=contact#recu';
+        $saved = $save($document);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $override = $body;
+        $override['redirect'] = 'https://example.test';
+        self::assertSame(422, $this->formRequest($app, 'POST', $path . '/submit', $override, $ip)->status());
+        $sent = $this->formRequest($app, 'POST', $path . '/submit', $body, $ip);
+        self::assertSame(201, $sent->status(), $sent->body());
+        self::assertSame(['accepted' => true, 'message' => 'Merci <script>non exécuté</script> !', 'redirect' => '/merci?source=contact#recu'], $this->json($sent)['data']);
+        self::assertStringContainsString('no-store', (string) $sent->header('Cache-Control'));
+        self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->count());
+        $trap = $body;
+        $trap['website'] = 'robot';
+        $fake = $this->formRequest($app, 'POST', $path . '/submit', $trap, '198.51.100.156');
+        self::assertSame(201, $fake->status());
+        self::assertSame($this->json($sent)['data'], $this->json($fake)['data']);
+        self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->count());
+
+        // Corrupt stored actions fail closed, even when the rest of the form is valid.
+        $document['blocks'][0]['data']['elements'][0]['settings']['form_redirect'] = '//example.test';
+        $statement = $this->db($app)->pdo()->prepare('UPDATE pc_entries SET content = ? WHERE id = 1');
+        $statement->execute([(string) json_encode($document)]);
+        self::assertSame(404, $this->formRequest($app, 'GET', $path . '/start?node=contact', ip: $ip)->status());
+        self::assertSame(404, $this->formRequest($app, 'POST', $path . '/submit', $body, $ip)->status());
+    }
+
     public function testPrivateFormFilesAreValidatedDownloadedAndDeletedWithTheirSubmission(): void
     {
         $app = $this->activated(null);

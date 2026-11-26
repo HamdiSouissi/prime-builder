@@ -90,6 +90,14 @@
         }
       }
 
+      function safeRedirect(value) {
+        if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || /[\x00-\x20\x7f\\]/.test(value)) return null;
+        try {
+          const url = new URL(value, window.location.origin);
+          return url.origin === window.location.origin ? url.href : null;
+        } catch { return null; }
+      }
+
       async function encodeFile(file) {
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -155,9 +163,20 @@
             body: JSON.stringify(body),
           });
           if (response.ok) {
+            // Read the current published action from the non-cacheable response,
+            // not a potentially stale copy in the cached page HTML.
+            const json = await response.json().catch(() => null);
+            const message = typeof json?.data?.message === 'string' && json.data.message.length <= 2000 && json.data.message.trim()
+              ? json.data.message : form.dataset.pbSent;
+            const redirect = safeRedirect(json?.data?.redirect);
             form.reset();
             if (steps.length) showStep(0);
-            status.textContent = form.dataset.pbSent;
+            status.textContent = redirect && form.dataset.pbRedirecting ? `${message} ${form.dataset.pbRedirecting}` : message;
+            if (redirect) {
+              token = '';
+              window.setTimeout(() => window.location.assign(redirect), 3000);
+              return;
+            }
           } else {
             status.textContent = response.status === 429 ? form.dataset.pbLimited : form.dataset.pbError;
           }

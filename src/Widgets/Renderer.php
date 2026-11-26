@@ -418,7 +418,7 @@ final class Renderer
             . '<label for="' . self::escape($prefix) . '-message">' . $copy('message') . '</label><textarea id="' . self::escape($prefix) . '-message" name="message" rows="5" maxlength="5000" required></textarea>';
         return '<form class="pb-contact-form" method="post" action="/api/prime-builder/v1/forms/' . $entryId . '/submit" data-pb-form data-pb-node="' . self::escape($id) . '"'
             . ($custom ? ' data-pb-custom="1" data-pb-required-error="' . $copy('choose_required') . '" data-pb-file-error="' . $copy('file_error') . '"' : '')
-            . ' data-pb-error="' . $copy('error') . '" data-pb-wait="' . $copy('wait') . '" data-pb-sent="' . $copy('sent') . '" data-pb-limited="' . $copy('limited') . '">'
+            . ' data-pb-error="' . $copy('error') . '" data-pb-wait="' . $copy('wait') . '" data-pb-sent="' . $copy('sent') . '" data-pb-limited="' . $copy('limited') . '" data-pb-redirecting="' . $copy('redirecting') . '">'
             . ($title !== '' ? '<h3>' . self::escape($title) . '</h3>' : '')
             . $content
             . '<div class="pb-contact-trap" aria-hidden="true"><label for="' . self::escape($prefix) . '-website">' . $copy('trap') . '</label><input id="' . self::escape($prefix) . '-website" name="website" type="text" tabindex="-1" autocomplete="off"></div>'

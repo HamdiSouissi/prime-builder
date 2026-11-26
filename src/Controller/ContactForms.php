@@ -20,6 +20,7 @@ use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Forms\FileInput;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
+use PrimeBuilder\Forms\Success;
 use PrimeBuilder\Forms\Tokens;
 use PrimeBuilder\Widgets\Content;
 
@@ -198,9 +199,14 @@ final class ContactForms
         if ($custom && !is_array($body['fields'] ?? null)) {
             return $this->error($request, 'validation_failed', 422);
         }
+        $success = Success::fromSettings($settings);
+        if ($success === null) {
+            return $this->error($request, 'not_found', 404);
+        }
+        $response = ['accepted' => true, 'message' => $success['message'] !== '' ? $success['message'] : t('plugin::prime-builder.forms.sent'), 'redirect' => $success['redirect']];
         if ($body['website'] !== '') {
             // Do not help automated fillers distinguish the trap; no data is stored.
-            return Response::json(['data' => ['accepted' => true]], 201)->withHeader('Cache-Control', 'no-store, private');
+            return Response::json(['data' => $response], 201)->withHeader('Cache-Control', 'no-store, private');
         }
         if (!$tokens->valid($body['token'], $entryId, $node, $request->ip(), $now)) {
             return $this->error($request, 'validation_failed', 422);
@@ -231,7 +237,7 @@ final class ContactForms
         if (!$created) {
             return $this->error($request, 'conflict', 409);
         }
-        return Response::json(['data' => ['accepted' => true]], 201)->withHeader('Cache-Control', 'no-store, private');
+        return Response::json(['data' => $response], 201)->withHeader('Cache-Control', 'no-store, private');
     }
 
     private function canManage(Request $request): bool
@@ -259,8 +265,9 @@ final class ContactForms
         }
         $layout = Layout::fromDocument($entry->decodedContent());
         $settings = is_array($layout['elements'] ?? null) ? self::visibleForm($layout['elements'], $node) : null;
-        if ($settings !== null && array_key_exists('form_fields', $settings)
-            && (!is_string($settings['form_fields']) || Fields::parse($settings['form_fields']) === null)) {
+        if ($settings !== null && (Success::fromSettings($settings) === null
+            || (array_key_exists('form_fields', $settings)
+                && (!is_string($settings['form_fields']) || Fields::parse($settings['form_fields']) === null)))) {
             return null;
         }
         return $settings;
