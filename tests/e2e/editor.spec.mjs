@@ -5488,6 +5488,27 @@ test('theme navigation renders current public menus with keyboard and no-JavaScr
     await page.goto('/admin/prime-builder/settings');
     originalBreakpoints = { tablet: await page.locator('#pb-tablet').inputValue(), mobile: await page.locator('#pb-mobile').inputValue() };
     await saveBreakpoints(1100, 900);
+    // Make the matchMedia change notification arrive after the viewport resize,
+    // as it can in a real browser under load. In particular, locator.focus()
+    // does not wait for a hidden button to become focusable.
+    await page.addInitScript(() => {
+      const originalMatchMedia = window.matchMedia.bind(window);
+      window.matchMedia = query => {
+        const media = originalMatchMedia(query);
+        if (query !== '(max-width: 900px)') return media;
+        const add = media.addEventListener.bind(media);
+        media.addEventListener = (type, listener, options) => {
+          if (type !== 'change' || typeof listener !== 'function') return add(type, listener, options);
+          return add(type, event => {
+            if (window.__pbDelayNavigationResize && event.matches) {
+              window.__pbDelayedNavigationChanges = (window.__pbDelayedNavigationChanges || 0) + 1;
+              window.setTimeout(() => listener.call(media, event), 600);
+            } else listener.call(media, event);
+          }, options);
+        };
+        return media;
+      };
+    });
     await page.setViewportSize({ width: 850, height: 812 });
     await page.goto('/pb-navigation-adaptative');
     const entryNav = page.getByRole('navigation', { name: 'Menu dans la page' });
@@ -5513,12 +5534,18 @@ test('theme navigation renders current public menus with keyboard and no-JavaScr
     await page.setViewportSize({ width: 901, height: 812 });
     const entryHome = entryNav.getByRole('link', { name: 'Accueil' });
     await expect(entryHome).toBeFocused();
+    await page.evaluate(() => { window.__pbDelayNavigationResize = true; });
     await page.setViewportSize({ width: 850, height: 812 });
     await expect(entryMobile).toHaveAttribute('aria-expanded', 'true');
     await expect(entryHome).toBeVisible();
     await expect(entryHome).toBeFocused();
+    await expect.poll(() => page.evaluate(() => window.__pbDelayedNavigationChanges || 0)).toBeGreaterThan(0);
+    await expect(siteMobile).toBeVisible();
+    await expect(siteMobile).toHaveAttribute('aria-expanded', 'false');
     await siteMobile.focus();
+    await expect(siteMobile).toBeFocused();
     await page.keyboard.press('Enter');
+    await expect(siteMobile).toHaveAttribute('aria-expanded', 'true');
     const home = nav.getByRole('link', { name: 'Accueil' });
     await home.focus();
     await page.setViewportSize({ width: 901, height: 812 });
