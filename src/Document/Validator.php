@@ -7,6 +7,7 @@ namespace PrimeBuilder\Document;
 use Prime\Editor\BlockRegistry;
 use Prime\Security\HtmlSanitizer;
 use PrimeBuilder\Forms\Fields;
+use PrimeBuilder\Forms\NotificationSettings;
 use PrimeBuilder\Forms\Success;
 use PrimeBuilder\Styles\CssClasses;
 use PrimeBuilder\Styles\Values;
@@ -133,6 +134,9 @@ final class Validator
                     continue;
                 }
                 $settings[$key] = $normalized;
+            }
+            if ($type === 'form' && NotificationSettings::fromSettings($settings) === null) {
+                $errors[] = t('plugin::prime-builder.validation.settings');
             }
             if (in_array($type, ['gallery', 'image_carousel', 'media_carousel', 'slideshow', 'portfolio', 'testimonial_carousel'], true)
                 && (is_string($settings['images_dimensions'] ?? null) || is_string($settings['manual_dimensions'] ?? null))) {

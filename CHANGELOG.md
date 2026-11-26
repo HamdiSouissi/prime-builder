@@ -1,5 +1,11 @@
 # Journal des changements
 
+## 0.1.2 — notifications de formulaire
+
+- Notification administrateur et accusé facultatifs par la file du CMS, avec gabarits génériques ; une adresse administrateur est conservée dans les réglages privés, pas dans le document public.
+- Transaction de l’envoi et des tâches, annulation à la suppression ou à la purge et migration des installations précédentes ; le worker, le transport et le planificateur doivent être configurés et surveillés.
+- Une livraison externe suivie d’un crash peut être répétée ; journaux, fournisseurs et sauvegardes peuvent conserver des traces après suppression. Les popups, widgets globaux et balises dynamiques restent à faire ; voir [RETOUR.md](RETOUR.md).
+
 ## 0.1.1 — fichiers de formulaire privés
 
 - Champ fichier borné à quatre pièces et 512 Kio au total, validation de l’extension et du type détecté, stockage privé en base, téléchargement réservé à `prime_builder.forms`, suppression et purge liées à l’envoi. Migration appliquée lors de la mise à niveau.

@@ -11,6 +11,7 @@ use Prime\Http\Request;
 use Prime\Http\Response;
 use Prime\Plugins\PluginContext;
 use PrimeBuilder\Configuration;
+use PrimeBuilder\Forms\NotificationSettings;
 use PrimeBuilder\Forms\Submissions;
 use Throwable;
 
@@ -27,6 +28,7 @@ final class Settings
         'kit_text' => '#1a1d29',
         'kit_font_size' => 16,
         'submission_retention_days' => Submissions::RETENTION_DAYS,
+        'notification_email' => '',
     ];
 
     public function __construct(private readonly PluginContext $plugin)
@@ -51,10 +53,20 @@ final class Settings
         $errors = [];
         foreach (self::DEFAULTS as $name => $default) {
             $raw = $request->body($name);
-            if ($name === 'submission_retention_days' && $raw === null) {
-                // A form opened before the upgrade has no retention field. Do not
-                // overwrite an existing choice when that older form is submitted.
-                $raw = (string) Submissions::retentionDays(Configuration::get($this->plugin->settings(), $name, $default));
+            if (in_array($name, ['submission_retention_days', 'notification_email'], true) && $raw === null) {
+                // Settings pages opened before an upgrade must not reset new choices.
+                $raw = Configuration::get($this->plugin->settings(), $name, $default);
+                if ($name === 'submission_retention_days') {
+                    $raw = (string) Submissions::retentionDays($raw);
+                }
+            }
+            if ($name === 'notification_email') {
+                $address = NotificationSettings::address($raw);
+                if ($address === null) {
+                    $errors[$name] = true;
+                }
+                $values[$name] = $address ?? (is_string($raw) ? $raw : '');
+                continue;
             }
             if (is_bool($default)) {
                 if ($raw !== null && $raw !== '1') {

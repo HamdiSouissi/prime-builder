@@ -4302,6 +4302,312 @@ final class IntegrationTest extends TestCase
         self::assertSame(403, $this->send($app, 'GET', '/api/v1/users', token: $admin['token'])->status());
     }
 
+    public function testFormNotificationsQueuePrivatelyAndDeliverThroughRealTemplates(): void
+    {
+        $app = $this->activated(null);
+        $this->publishNotificationForm($app);
+        $this->registerNotificationJobs($app);
+        $db = $this->db($app);
+        $migration = require $app->basePath('database/migrations/2026_11_15_000024_create_mail_log_table.php');
+        $migration->up($db->schema());
+        $transport = new class () implements \Prime\Mail\MailerInterface {
+            /** @var list<\Prime\Mail\Message> */
+            public array $messages = [];
+            public function send(\Prime\Mail\Message $message): void
+            {
+                $this->messages[] = $message;
+            }
+        };
+        $mailer = new \Prime\Mail\Mailer(
+            new \Prime\Mail\MailConfig(['from_name' => 'Site de test', 'log_enabled' => true]),
+            $transport,
+            new \Prime\Mail\MailLogRepository($db),
+            $app->get(Hooks::class),
+            view: $app->get(\Prime\View\View::class),
+        );
+        $app->container()->instance(\Prime\Mail\Mailer::class, $mailer);
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $payload = static fn (string $ip): array => [
+            'node' => 'contact', 'name' => 'Personne secrète', 'email' => 'sender@example.test',
+            'message' => 'Contenu personnel et confidentiel', 'website' => '',
+            'token' => $tokens->issue(1, 'contact', $ip, time() - 4),
+        ];
+        $send = fn (array $body, string $ip): Response => $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $body, $ip);
+        $missing = $payload('198.51.100.30');
+        self::assertSame(503, $send($missing, '198.51.100.30')->status(), 'No configured admin address must not silently drop its action');
+        self::assertSame(0, $db->table('prime_builder_submissions')->count());
+        $app->get(Settings::class)->set('plugin.prime-builder.notification_email', 'admin-private@example.test');
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringNotContainsString('admin-private@example.test', $entry->contentHtml);
+        $publicEntry = $this->formRequest($app, 'GET', '/api/v1/content/post/1');
+        self::assertSame(200, $publicEntry->status(), $publicEntry->body());
+        self::assertStringNotContainsString('admin-private@example.test', $publicEntry->body());
+        self::assertStringNotContainsString('admin-private@example.test', $this->formRequest($app, 'GET', '/api/v1/settings')->body());
+        $trap = $payload('198.51.100.31');
+        $trap['website'] = 'robot';
+        self::assertSame(201, $send($trap, '198.51.100.31')->status());
+        self::assertSame(0, $db->table('prime_builder_form_notifications')->count());
+        self::assertSame(201, $send($missing, '198.51.100.30')->status());
+        self::assertSame(409, $send($missing, '198.51.100.30')->status());
+        self::assertCount(0, $transport->messages, 'The public request must never deliver synchronously');
+        self::assertSame(1, $db->table('prime_builder_submissions')->count());
+        $notifications = $db->table('prime_builder_form_notifications')->orderBy('id')->get();
+        self::assertCount(2, $notifications);
+        self::assertSame(['admin', 'receipt'], array_column($notifications, 'kind'));
+        self::assertSame(['admin-private@example.test', 'sender@example.test'], array_column($notifications, 'recipient'));
+        $jobs = $db->table('jobs')->where('handler', '=', \PrimeBuilder\Forms\Notifications::JOB_NAME)->orderBy('id')->get();
+        self::assertCount(2, $jobs);
+        foreach ($jobs as $index => $job) {
+            self::assertSame(['notification_id' => (int) $notifications[$index]['id']], json_decode((string) $job['payload'], true));
+            self::assertSame((int) $job['id'], (int) $notifications[$index]['job_id']);
+            self::assertStringNotContainsString('example.test', (string) $job['payload']);
+            self::assertStringNotContainsString('confidentiel', (string) $job['payload']);
+        }
+        $queue = $app->get(\Prime\Jobs\JobQueue::class);
+        self::assertSame('completed', $queue->runNext('test-admin')['status'] ?? null);
+        self::assertSame('completed', $queue->runNext('test-receipt')['status'] ?? null);
+        self::assertSame(0, $db->table('prime_builder_form_notifications')->count());
+        self::assertSame(0, $db->table('jobs')->where('handler', '=', \PrimeBuilder\Forms\Notifications::JOB_NAME)->count());
+        self::assertCount(2, $transport->messages);
+        self::assertSame('admin-private@example.test', $transport->messages[0]->to);
+        self::assertSame('sender@example.test', $transport->messages[1]->to);
+        self::assertStringContainsString('Nouvel envoi de formulaire', $transport->messages[0]->html);
+        self::assertStringContainsString('/admin/prime-builder/submissions', $transport->messages[0]->html);
+        self::assertStringContainsString('Votre formulaire a été reçu', $transport->messages[1]->html);
+        foreach ($transport->messages as $message) {
+            self::assertStringNotContainsString('Personne secrète', $message->html . $message->text);
+            self::assertStringNotContainsString('Contenu personnel et confidentiel', $message->html . $message->text);
+            self::assertStringNotContainsString('sender@example.test', $message->html . $message->text);
+        }
+        $logs = $db->table('mail_log')->orderBy('id')->get();
+        self::assertCount(2, $logs);
+        foreach ($logs as $log) {
+            self::assertNull($log['template']);
+            self::assertStringNotContainsString('confidentiel', (string) $log['metadata_json']);
+            self::assertStringNotContainsString('Personne secrète', (string) $log['metadata_json']);
+        }
+    }
+
+    public function testFormNotificationFailuresArePrivateAndReservedJobsAreCancelled(): void
+    {
+        $app = $this->activated(null);
+        $this->publishNotificationForm($app);
+        $this->registerNotificationJobs($app);
+        $app->get(Settings::class)->set('plugin.prime-builder.notification_email', 'admin@example.test');
+        $db = $this->db($app);
+        $migration = require $app->basePath('database/migrations/2026_11_15_000024_create_mail_log_table.php');
+        $migration->up($db->schema());
+        $transport = new class () implements \Prime\Mail\MailerInterface {
+            public int $attempts = 0;
+            public function send(\Prime\Mail\Message $message): void
+            {
+                $this->attempts++;
+                throw new \RuntimeException('secret recipient sender@example.test and confidential body');
+            }
+        };
+        $app->container()->instance(\Prime\Mail\Mailer::class, new \Prime\Mail\Mailer(
+            new \Prime\Mail\MailConfig(['from_name' => 'Site de test', 'log_enabled' => true]),
+            $transport,
+            new \Prime\Mail\MailLogRepository($db),
+            $app->get(Hooks::class),
+            view: $app->get(\Prime\View\View::class),
+        ));
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $send = function (string $ip, string $name) use ($app, $tokens): Response {
+            return $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', [
+                'node' => 'contact', 'name' => $name, 'email' => 'sender@example.test', 'message' => 'secret body', 'website' => '',
+                'token' => $tokens->issue(1, 'contact', $ip, time() - 4),
+            ], $ip);
+        };
+        self::assertSame(201, $send('198.51.100.41', 'à effacer')->status());
+        $submission = $db->table('prime_builder_submissions')->first();
+        self::assertNotNull($submission);
+        $id = (int) $submission['id'];
+        $pending = $db->table('prime_builder_form_notifications')->where('submission_id', '=', $id)->orderBy('id')->get();
+        self::assertCount(2, $pending);
+        $adminJob = (int) $pending[0]['job_id'];
+        $receiptJob = (int) $pending[1]['job_id'];
+        $db->table('jobs')->where('id', '=', $receiptJob)->update(['available_at' => gmdate('Y-m-d H:i:s', time() + 10000)]);
+        $queue = $app->get(\Prime\Jobs\JobQueue::class);
+        foreach (['released', 'released', 'failed'] as $expected) {
+            $result = $queue->runNext('failing', now: time() + 1000);
+            self::assertSame($expected, $result['status'] ?? null);
+            self::assertSame('Form notification delivery failed.', $result['error'] ?? null);
+        }
+        self::assertSame(3, $transport->attempts);
+        $failed = $db->table('jobs')->find($adminJob);
+        self::assertNotNull($failed);
+        self::assertNotNull($failed['failed_at']);
+        self::assertSame('Form notification delivery failed.', $failed['last_error']);
+        self::assertStringNotContainsString('example.test', (string) $failed['payload']);
+        self::assertSame(0, $db->table('mail_log')->count(), 'Mail log writes during a failed delivery roll back');
+        $reserved = $app->get(\Prime\Jobs\JobRepository::class)->claim('reserved', now: time() + 20000);
+        self::assertNotNull($reserved);
+        self::assertSame($receiptJob, $reserved->id);
+
+        // Deleting through the real CSRF-protected inbox removes both failed and
+        // already claimed jobs. A worker holding the old Job object must no-op.
+        self::assertSame(201, $send('198.51.100.42', 'ancien')->status());
+        self::assertSame(201, $send('198.51.100.43', 'récent')->status());
+        $rows = $db->table('prime_builder_submissions')->orderBy('id')->get();
+        $old = (int) $rows[1]['id'];
+        $recent = (int) $rows[2]['id'];
+        $db->table('prime_builder_submissions')->where('id', '=', $old)->update(['created_at' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)]);
+        $app->get(Settings::class)->set('plugin.prime-builder.submission_retention_days', 7);
+        $oldNotifications = $db->table('prime_builder_form_notifications')->where('submission_id', '=', $old)->orderBy('id')->get();
+        $oldJobId = (int) $oldNotifications[0]['job_id'];
+        $db->table('jobs')->where('id', '=', $oldJobId)->update(['reserved_at' => gmdate('Y-m-d H:i:s')]);
+        $oldJob = $db->table('jobs')->find($oldJobId);
+        self::assertNotNull($oldJob);
+        $oldReserved = \Prime\Jobs\Job::fromRow($oldJob);
+        $db->table('jobs')->where('id', '=', (int) $oldNotifications[1]['job_id'])->update(['failed_at' => gmdate('Y-m-d H:i:s')]);
+        $this->appLogin($app);
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/submissions/' . $id . '/delete', body: ['_csrf_token' => $app->get(Csrf::class)->token()]))->status());
+        self::assertSame(0, $db->table('prime_builder_form_notifications')->where('submission_id', '=', $id)->count());
+        self::assertNull($db->table('jobs')->find($adminJob));
+        self::assertNull($db->table('jobs')->find($receiptJob));
+        $handler = $app->get(\Prime\Jobs\JobHandlerRegistry::class)->resolve(\PrimeBuilder\Forms\Notifications::JOB_NAME);
+        self::assertNotNull($handler);
+        $handler($reserved->payload, $reserved);
+        self::assertSame(3, $transport->attempts);
+        $schedule = $app->get(Hooks::class)->apply('scheduler.register', new \Prime\Scheduler\Schedule());
+        $purge = $schedule->get('prime-builder.purge-submissions')->closure();
+        self::assertNotNull($purge);
+        self::assertGreaterThanOrEqual(1, $purge());
+        self::assertNull($db->table('prime_builder_submissions')->find($old));
+        self::assertNotNull($db->table('prime_builder_submissions')->find($recent));
+        self::assertSame(0, $db->table('prime_builder_form_notifications')->where('submission_id', '=', $old)->count());
+        self::assertSame(2, $db->table('prime_builder_form_notifications')->where('submission_id', '=', $recent)->count());
+        self::assertNull($db->table('jobs')->find($oldJobId));
+        self::assertNull($db->table('jobs')->find((int) $oldNotifications[1]['job_id']));
+        $handler($oldReserved->payload, $oldReserved);
+        self::assertSame(3, $transport->attempts);
+    }
+
+    public function testFormAndJobsRollbackTogetherWhenQueueInsertionFails(): void
+    {
+        $app = $this->activated(null);
+        $this->publishNotificationForm($app);
+        $this->registerNotificationJobs($app);
+        $app->get(Settings::class)->set('plugin.prime-builder.notification_email', 'admin@example.test');
+        $db = $this->db($app);
+        $pdo = $db->pdo();
+        // Fail on the second job, after the first has already been inserted.
+        $trigger = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql'
+            ? "CREATE TRIGGER reject_form_notification BEFORE INSERT ON pc_jobs FOR EACH ROW BEGIN IF NEW.handler = 'prime-builder.form-notification' AND (SELECT COUNT(*) FROM pc_prime_builder_form_notifications) > 1 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected queue failure'; END IF; END"
+            : "CREATE TRIGGER reject_form_notification BEFORE INSERT ON pc_jobs WHEN NEW.handler = 'prime-builder.form-notification' AND (SELECT COUNT(*) FROM pc_prime_builder_form_notifications) > 1 BEGIN SELECT RAISE(ABORT, 'injected queue failure'); END";
+        $pdo->exec($trigger);
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $ip = '198.51.100.50';
+        $body = ['node' => 'contact', 'name' => 'Nom privé', 'email' => 'sender@example.test', 'message' => 'secret', 'website' => '', 'token' => $tokens->issue(1, 'contact', $ip, time() - 4)];
+        $response = $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $body, $ip);
+        self::assertSame(500, $response->status());
+        self::assertStringNotContainsString('sender@example.test', $response->body());
+        self::assertStringNotContainsString('injected queue failure', $response->body());
+        foreach (['prime_builder_submissions', 'prime_builder_form_tokens', 'prime_builder_form_notifications'] as $table) {
+            self::assertSame(0, $db->table($table)->count(), $table);
+        }
+        self::assertSame(0, $db->table('jobs')->where('handler', '=', \PrimeBuilder\Forms\Notifications::JOB_NAME)->count());
+        $pdo->exec('DROP TRIGGER reject_form_notification');
+        self::assertSame(201, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $body, $ip)->status());
+        self::assertSame(1, $db->table('prime_builder_submissions')->count());
+        self::assertSame(2, $db->table('prime_builder_form_notifications')->count());
+        self::assertSame(2, $db->table('jobs')->where('handler', '=', \PrimeBuilder\Forms\Notifications::JOB_NAME)->count());
+    }
+
+    public function testExpiredNotificationNeverSendsEvenIfTheSchedulerHasNotRun(): void
+    {
+        $app = $this->activated(null);
+        $this->publishNotificationForm($app);
+        $this->registerNotificationJobs($app);
+        $app->get(Settings::class)->set('plugin.prime-builder.notification_email', 'admin@example.test');
+        $transport = new class () implements \Prime\Mail\MailerInterface {
+            public int $sent = 0;
+            public function send(\Prime\Mail\Message $message): void
+            {
+                $this->sent++;
+            }
+        };
+        $app->container()->instance(\Prime\Mail\Mailer::class, new \Prime\Mail\Mailer(new \Prime\Mail\MailConfig(), $transport, view: $app->get(\Prime\View\View::class)));
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $ip = '198.51.100.51';
+        $body = ['node' => 'contact', 'name' => 'Nom', 'email' => 'sender@example.test', 'message' => 'Bonjour', 'website' => '', 'token' => $tokens->issue(1, 'contact', $ip, time() - 4)];
+        self::assertSame(201, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/1/submit', $body, $ip)->status());
+        $db = $this->db($app);
+        $db->table('prime_builder_submissions')->where('node_id', '=', 'contact')->update(['created_at' => gmdate('Y-m-d H:i:s', time() - 31 * 86400)]);
+        $queue = $app->get(\Prime\Jobs\JobQueue::class);
+        self::assertSame('completed', $queue->runNext('expired-admin')['status'] ?? null);
+        self::assertSame('completed', $queue->runNext('expired-receipt')['status'] ?? null);
+        self::assertSame(0, $transport->sent);
+        self::assertSame(0, $db->table('prime_builder_form_notifications')->count());
+        self::assertSame(1, $db->table('prime_builder_submissions')->count(), 'The scheduled purge still owns deletion of the submission');
+    }
+
+    public function testBulkNotificationCleanupPagesOverMoreThanOneHundredJobs(): void
+    {
+        $app = $this->activated(null);
+        $this->registerNotificationJobs($app);
+        $db = $this->db($app);
+        $queue = $app->get(\Prime\Jobs\JobQueue::class);
+        $values = ['entry_id' => 1, 'node_id' => 'bulk', 'sender_name' => 'Test', 'sender_email' => 'a@example.test', 'message' => 'message'];
+        $old = $db->table('prime_builder_submissions')->insertGetId($values + ['created_at' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)]);
+        $fresh = $db->table('prime_builder_submissions')->insertGetId($values + ['created_at' => gmdate('Y-m-d H:i:s')]);
+        for ($i = 0; $i < 205; $i++) {
+            $id = $db->table('prime_builder_form_notifications')->insertGetId(['submission_id' => $old, 'kind' => 'admin', 'recipient' => 'admin@example.test', 'job_id' => null]);
+            $job = $queue->dispatch(\PrimeBuilder\Forms\Notifications::JOB_NAME, ['notification_id' => $id]);
+            $db->table('prime_builder_form_notifications')->where('id', '=', $id)->update(['job_id' => $job]);
+        }
+        $freshNotification = $db->table('prime_builder_form_notifications')->insertGetId(['submission_id' => $fresh, 'kind' => 'receipt', 'recipient' => 'a@example.test', 'job_id' => null]);
+        $freshJob = $queue->dispatch(\PrimeBuilder\Forms\Notifications::JOB_NAME, ['notification_id' => $freshNotification]);
+        $db->table('prime_builder_form_notifications')->where('id', '=', $freshNotification)->update(['job_id' => $freshJob]);
+        self::assertSame(206, $db->table('jobs')->where('handler', '=', \PrimeBuilder\Forms\Notifications::JOB_NAME)->count());
+        self::assertSame(1, (new \PrimeBuilder\Forms\Submissions($db))->purge(time(), 7));
+        self::assertSame(1, $db->table('prime_builder_form_notifications')->count());
+        self::assertSame(1, $db->table('jobs')->where('handler', '=', \PrimeBuilder\Forms\Notifications::JOB_NAME)->count());
+        self::assertNotNull($db->table('jobs')->find($freshJob));
+        self::assertNotNull($db->table('prime_builder_submissions')->find($fresh));
+        self::assertNull($db->table('prime_builder_submissions')->find($old));
+    }
+
+    public function testFormNotificationAddressSettingsRequirePermissionAndAreValidatedAtomically(): void
+    {
+        $app = $this->activated('admin');
+        $screen = $this->send($app, 'GET', '/admin/prime-builder/settings');
+        self::assertSame(200, $screen->status());
+        self::assertStringContainsString('name="notification_email"', $screen->body());
+        $fields = [
+            '_csrf_token' => $app->get(Csrf::class)->token(), 'pages' => '1', 'other_types' => '',
+            'breakpoint_tablet' => '1024', 'breakpoint_mobile' => '767', 'kit_primary' => '#c9441f',
+            'kit_text' => '#1a1d29', 'kit_font_size' => '16', 'notification_email' => ' admin@example.test ',
+        ];
+        $request = fn (array $body): Response => $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $body));
+        self::assertSame(419, $request(array_diff_key($fields, ['_csrf_token' => true]))->status());
+        self::assertSame(302, $request($fields)->status());
+        $settings = $app->get(Settings::class);
+        self::assertSame('admin@example.test', $settings->get('plugin.prime-builder.configuration')['notification_email']);
+        foreach (["a@example.test\r\nBcc: victim@example.test", 'one@example.test,two@example.test', 'not-an-address', ['bad']] as $invalid) {
+            $bad = $fields;
+            $bad['notification_email'] = $invalid;
+            $result = $request($bad);
+            self::assertSame(422, $result->status());
+            self::assertStringContainsString('aria-invalid="true"', $result->body());
+            self::assertSame('admin@example.test', $settings->get('plugin.prime-builder.configuration')['notification_email']);
+        }
+        $oldForm = $fields;
+        unset($oldForm['notification_email']);
+        self::assertSame(302, $request($oldForm)->status());
+        self::assertSame('admin@example.test', $settings->get('plugin.prime-builder.configuration')['notification_email']);
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $fields['_csrf_token'] = $app->get(Csrf::class)->token();
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/settings')->status());
+        self::assertSame(403, $request($fields)->status());
+    }
+
     public function testContactFormRendersAndOnlyStartsForVisiblePublishedWidgets(): void
     {
         $app = $this->activated(null);
@@ -4754,7 +5060,9 @@ final class IntegrationTest extends TestCase
         // Recreate the pre-upgrade 0.1.0 schema and migration ledger, then use
         // the CMS's public synchronization API, the same one used by ZIP upgrades.
         $db->schema()->dropIfExists('prime_builder_form_files');
+        $db->schema()->dropIfExists('prime_builder_form_notifications');
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000002_create_prime_builder_form_files')->delete());
+        self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000003_create_prime_builder_form_notifications')->delete());
         $db->table('plugins')->where('slug', '=', 'prime-builder')->update(['version' => '0.1.0']);
         $manager = $app->get(PluginManager::class);
         $before = $manager->get('prime-builder', fresh: true);
@@ -4762,15 +5070,41 @@ final class IntegrationTest extends TestCase
         self::assertTrue($before->needsUpdate);
         self::assertTrue($before->isValid(), implode('; ', $before->errors));
         self::assertFalse($db->schema()->hasTable('prime_builder_form_files'));
+        self::assertFalse($db->schema()->hasTable('prime_builder_form_notifications'));
         $manager->syncUpgradedPlugin('prime-builder', '0.1.0');
         self::assertTrue($db->schema()->hasTable('prime_builder_form_files'));
+        self::assertTrue($db->schema()->hasTable('prime_builder_form_notifications'));
         self::assertSame(1, $db->table('prime_builder_submissions')->count());
         self::assertSame('Historique', $db->table('prime_builder_submissions')->first()['message'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('0.1.1', $after->installedVersion);
+        self::assertSame('0.1.2', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000002_create_prime_builder_form_files')->count());
+        self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000003_create_prime_builder_form_notifications')->count());
+    }
+
+    public function testNotificationMigrationKeepsVersion011SubmissionsAndAttachments(): void
+    {
+        $app = $this->activated(null);
+        $db = $this->db($app);
+        $id = $db->table('prime_builder_submissions')->insertGetId(['entry_id' => 1, 'node_id' => 'legacy', 'sender_name' => 'Nom', 'sender_email' => 'a@example.test', 'message' => 'Historique', 'created_at' => '2025-01-01 00:00:00']);
+        $db->table('prime_builder_form_files')->insert(['submission_id' => $id, 'field_id' => 'f_file', 'field_label' => 'Fichier', 'filename' => 'test.txt', 'mime' => 'text/plain', 'bytes' => 4, 'content_base64' => base64_encode('test')]);
+        $db->schema()->dropIfExists('prime_builder_form_notifications');
+        self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000003_create_prime_builder_form_notifications')->delete());
+        $db->table('plugins')->where('slug', '=', 'prime-builder')->update(['version' => '0.1.1']);
+        $manager = $app->get(PluginManager::class);
+        $before = $manager->get('prime-builder', fresh: true);
+        self::assertNotNull($before);
+        self::assertTrue($before->needsUpdate);
+        $manager->syncUpgradedPlugin('prime-builder', '0.1.1');
+        self::assertTrue($db->schema()->hasTable('prime_builder_form_notifications'));
+        self::assertSame('Historique', $db->table('prime_builder_submissions')->find($id)['message'] ?? null);
+        self::assertSame(base64_encode('test'), $db->table('prime_builder_form_files')->where('submission_id', '=', $id)->first()['content_base64'] ?? null);
+        $after = $manager->get('prime-builder', fresh: true);
+        self::assertNotNull($after);
+        self::assertSame('0.1.2', $after->installedVersion);
+        self::assertFalse($after->needsUpdate);
     }
 
     public function testLegacyFormWithoutSettingsRemainsSubmittableButCorruptSchemaDoesNotFallBack(): void
@@ -5890,6 +6224,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(true, $schema->hasTable('prime_builder_form_tokens'));
         self::assertSame(true, $schema->hasTable('prime_builder_form_limits'));
         self::assertSame(true, $schema->hasTable('prime_builder_form_files'));
+        self::assertSame(true, $schema->hasTable('prime_builder_form_notifications'));
         $manager = $app->get(PluginManager::class);
         $manager->deactivate('prime-builder');
         $entry = $app->get(EntryRepository::class)->find(1);
@@ -5904,6 +6239,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(false, $schema->hasTable('prime_builder_form_tokens'));
         self::assertSame(false, $schema->hasTable('prime_builder_form_limits'));
         self::assertSame(false, $schema->hasTable('prime_builder_form_files'));
+        self::assertSame(false, $schema->hasTable('prime_builder_form_notifications'));
         self::assertSame(false, $settings->has('plugin.prime-builder.kit_primary'));
         $capabilities = $pdo->query("SELECT COUNT(*) FROM pc_role_capabilities WHERE capability LIKE 'prime!_builder.%' ESCAPE '!'");
         if ($capabilities === false) {
@@ -5915,6 +6251,27 @@ final class IntegrationTest extends TestCase
         $saved = $app->get(EntryRepository::class)->find(1);
         self::assertNotNull($saved);
         self::assertStringContainsString('<h2>Bonjour</h2>', $saved->contentHtml);
+    }
+
+    public function testUninstallOfAnOlderInstallationStillCleansSnapshotsWithoutNotificationTable(): void
+    {
+        $app = $this->activated(null);
+        $db = $this->db($app);
+        $settings = $app->get(Settings::class);
+        $settings->set('plugin.prime-builder.kit_primary', '#123456');
+        $kitUrl = '/prime-builder/kit/' . substr(hash('sha256', Kit::compile(['primary' => '#123456'])), 0, 16) . '.css';
+        self::assertSame(200, $this->send($app, 'GET', $kitUrl)->status());
+        $directory = $app->storagePath('prime-builder/styles');
+        self::assertDirectoryExists($directory);
+        $manager = $app->get(PluginManager::class);
+        $manager->deactivate('prime-builder');
+        $db->schema()->dropIfExists('prime_builder_form_notifications');
+        self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000003_create_prime_builder_form_notifications')->delete());
+        $manager->uninstall('prime-builder', deleteFiles: false);
+        self::assertFalse(is_dir($directory));
+        self::assertFalse($db->schema()->hasTable('prime_builder_submissions'));
+        self::assertFalse($db->schema()->hasTable('prime_builder_form_files'));
+        self::assertFalse($settings->has('plugin.prime-builder.kit_primary'));
     }
 
     public function testInvalidTreeAndPrivateCssAreNotExposed(): void
@@ -6910,6 +7267,26 @@ final class IntegrationTest extends TestCase
         $changed = $app->get(EntryRepository::class)->find(1);
         self::assertNotNull($changed);
         self::assertSame('<div>Changé ailleurs</div>', $changed->contentHtml);
+    }
+
+    private function publishNotificationForm(Application $app): void
+    {
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'notification editor', ['*'])['token'];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'contact', 'type' => 'form', 'settings' => ['form_admin_notice' => 'send', 'form_receipt' => 'send'], 'styles' => [], 'children' => [],
+        ]];
+        $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token);
+        self::assertSame(200, $response->status(), $response->body());
+    }
+
+    private function registerNotificationJobs(Application $app): void
+    {
+        // This fixture activates the plugin *after* app.booted. Real CMS requests
+        // register handlers during boot, before the worker or HTTP controller runs.
+        $registry = $app->get(\Prime\Jobs\JobHandlerRegistry::class);
+        $app->get(Hooks::class)->apply('jobs.register_handlers', $registry);
+        self::assertTrue($registry->has(\PrimeBuilder\Forms\Notifications::JOB_NAME));
     }
 
     private function publishContactForm(Application $app): void

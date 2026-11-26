@@ -18,6 +18,8 @@ use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Forms\CsvExport;
 use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Forms\FileInput;
+use PrimeBuilder\Forms\Notifications;
+use PrimeBuilder\Forms\NotificationSettings;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
 use PrimeBuilder\Forms\Success;
@@ -233,7 +235,30 @@ final class ContactForms
             }
             $values = ['name' => $name, 'email' => $email, 'message' => $message];
         }
-        $created = $this->submissions->create($entryId, $node, $values, $tokens->usedHash($body['token']), $now);
+        $notificationSettings = NotificationSettings::fromSettings($settings);
+        if ($notificationSettings === null) {
+            return $this->error($request, 'not_found', 404);
+        }
+        $adminAddress = NotificationSettings::address(Configuration::get($this->plugin->settings(), 'notification_email', ''));
+        if ($notificationSettings['admin'] && ($adminAddress === null || $adminAddress === '')) {
+            // Fail closed: never silently accept a submission while dropping a configured action.
+            return $this->error($request, 'server_error', 503);
+        }
+        $receiptAddress = NotificationSettings::address($values['email']);
+        if ($notificationSettings['receipt'] && $values['email'] !== '' && ($receiptAddress === null || $receiptAddress === '')) {
+            return $this->error($request, 'validation_failed', 422);
+        }
+        $notifications = new Notifications($this->plugin);
+        $created = $this->submissions->create(
+            $entryId,
+            $node,
+            $values,
+            $tokens->usedHash($body['token']),
+            $now,
+            static function (int $submissionId) use ($notifications, $notificationSettings, $adminAddress, $receiptAddress): void {
+                $notifications->enqueue($submissionId, $notificationSettings, $adminAddress ?? '', $receiptAddress ?? '');
+            },
+        );
         if (!$created) {
             return $this->error($request, 'conflict', 409);
         }
@@ -265,7 +290,7 @@ final class ContactForms
         }
         $layout = Layout::fromDocument($entry->decodedContent());
         $settings = is_array($layout['elements'] ?? null) ? self::visibleForm($layout['elements'], $node) : null;
-        if ($settings !== null && (Success::fromSettings($settings) === null
+        if ($settings !== null && (Success::fromSettings($settings) === null || NotificationSettings::fromSettings($settings) === null
             || (array_key_exists('form_fields', $settings)
                 && (!is_string($settings['form_fields']) || Fields::parse($settings['form_fields']) === null)))) {
             return null;

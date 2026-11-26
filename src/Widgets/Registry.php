@@ -204,6 +204,8 @@ final class Registry
                 'form_fields' => ['type' => 'form_fields', 'max' => 20000, 'label' => 'plugin::prime-builder.ui.form_fields'],
                 'form_success_message' => ['type' => 'form_success_message', 'max' => 2000, 'label' => 'plugin::prime-builder.ui.form_success_message'],
                 'form_redirect' => ['type' => 'form_redirect', 'max' => 2048, 'label' => 'plugin::prime-builder.ui.form_redirect'],
+                'form_admin_notice' => ['type' => 'enum', 'values' => ['send', 'none'], 'label' => 'plugin::prime-builder.ui.form_admin_notice', 'option_labels' => ['send' => 'plugin::prime-builder.ui.form_admin_notice_send', 'none' => 'plugin::prime-builder.ui.form_admin_notice_none']],
+                'form_receipt' => ['type' => 'enum', 'values' => ['send', 'none'], 'label' => 'plugin::prime-builder.ui.form_receipt', 'option_labels' => ['send' => 'plugin::prime-builder.ui.form_receipt_send', 'none' => 'plugin::prime-builder.ui.form_receipt_none']],
             ],
             'prime_block' => ['block_type' => ['type' => 'enum', 'values' => PrimeBlock::ALLOWED], 'block_data' => ['type' => 'json_object', 'max' => 20000], 'block_anchor' => ['type' => 'text', 'max' => 100]],
             'html' => [

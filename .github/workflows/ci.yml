@@ -293,6 +293,8 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Playwright
         working-directory: builder/tests/e2e
+        env:
+          E2E_CMS_ROOT: ${{ github.workspace }}/cms
         run: npm test 2>&1 | tee /tmp/prime-builder-e2e.log
       - name: Report Playwright summary
         run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
@@ -370,6 +372,9 @@ jobs:
               echo "::error title=Browser test log $(basename "$part") (base64)::$(base64 -w0 "$part")"
             done
           fi
+      - name: Exercise notification races on the installed CMS
+        working-directory: cms
+        run: php ../builder/tests/e2e/notification-race.php
       - name: Fresh public requests after deactivation and reactivation
         working-directory: cms
         run: |

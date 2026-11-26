@@ -34,8 +34,8 @@ function expectCount(string $name, int $actual, int $expected): void
 $settings = "SELECT COUNT(*) FROM `{$prefix}settings` WHERE `name` LIKE ?";
 $capabilities = "SELECT COUNT(*) FROM `{$prefix}role_capabilities` WHERE `capability` LIKE ? ESCAPE '!'";
 $plugin = "SELECT COUNT(*) FROM `{$prefix}plugins` WHERE `slug` = ?";
-$formTables = 'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?, ?)';
-$formTableNames = [$prefix . 'prime_builder_submissions', $prefix . 'prime_builder_form_tokens', $prefix . 'prime_builder_form_limits', $prefix . 'prime_builder_form_files'];
+$formTables = 'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?, ?, ?)';
+$formTableNames = [$prefix . 'prime_builder_submissions', $prefix . 'prime_builder_form_tokens', $prefix . 'prime_builder_form_limits', $prefix . 'prime_builder_form_files', $prefix . 'prime_builder_form_notifications'];
 $entry = $pdo->prepare("SELECT `content_html` FROM `{$prefix}entries` WHERE `id` = ?");
 $entry->execute([(int) $entryId]);
 $html = $entry->fetchColumn();
@@ -70,19 +70,33 @@ if (($argv[1] ?? '') === 'seed') {
     expectCount('theme model fixture', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}settings` WHERE `name` = ?", [$themeKey]), 1);
     expectCount('plugin capability', countRows($pdo, $roleCapability, $roleParameters), 1);
     expectCount('installed plugin', countRows($pdo, $plugin, ['prime-builder']), 1);
-    expectCount('form tables', countRows($pdo, $formTables, $formTableNames), 4);
+    expectCount('form tables', countRows($pdo, $formTables, $formTableNames), 5);
     $submission = $pdo->prepare("INSERT INTO `{$prefix}prime_builder_submissions` (`entry_id`, `node_id`, `sender_name`, `sender_email`, `message`, `created_at`) VALUES (?, ?, ?, ?, ?, ?)");
     $submission->execute([(int) $entryId, 'fixture', 'Test', 'test@example.test', 'Fixture', gmdate('Y-m-d H:i:s')]);
+    $submissionId = (int) $pdo->lastInsertId();
     $file = $pdo->prepare("INSERT INTO `{$prefix}prime_builder_form_files` (`submission_id`, `field_id`, `field_label`, `filename`, `mime`, `bytes`, `content_base64`) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    $file->execute([(int) $pdo->lastInsertId(), 'f_file', 'File', 'fixture.txt', 'text/plain', 7, base64_encode('Fixture')]);
+    $file->execute([$submissionId, 'f_file', 'File', 'fixture.txt', 'text/plain', 7, base64_encode('Fixture')]);
+    $notification = $pdo->prepare("INSERT INTO `{$prefix}prime_builder_form_notifications` (`submission_id`, `kind`, `recipient`, `job_id`) VALUES (?, ?, ?, NULL)");
+    $job = $pdo->prepare("INSERT INTO `{$prefix}jobs` (`queue`, `handler`, `payload`, `available_at`, `reserved_at`, `failed_at`, `created_at`) VALUES ('default', ?, ?, ?, ?, ?, ?)");
+    $link = $pdo->prepare("UPDATE `{$prefix}prime_builder_form_notifications` SET `job_id` = ? WHERE `id` = ?");
+    foreach (['reserved', 'failed'] as $state) {
+        $notification->execute([$submissionId, $state === 'reserved' ? 'admin' : 'receipt', 'test@example.test']);
+        $notificationId = (int) $pdo->lastInsertId();
+        $job->execute(['prime-builder.form-notification', json_encode(['notification_id' => $notificationId], JSON_THROW_ON_ERROR), $now, $state === 'reserved' ? $now : null, $state === 'failed' ? $now : null, $now]);
+        $link->execute([(int) $pdo->lastInsertId(), $notificationId]);
+    }
+    $job->execute(['other-plugin.fixture', '{}', $now, null, null, $now]);
     expectCount('form fixture', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}prime_builder_submissions`"), 1);
     expectCount('form file fixture', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}prime_builder_form_files`"), 1);
+    expectCount('notification fixtures', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}prime_builder_form_notifications`"), 2);
     echo "Lifecycle fixtures present before uninstall.\n";
 } elseif (($argv[1] ?? '') === 'verify') {
     expectCount('plugin settings', countRows($pdo, $settings, ['plugin.prime-builder.%']), 0);
     expectCount('plugin capabilities', countRows($pdo, $capabilities, ['prime!_builder.%']), 0);
     expectCount('installed plugin', countRows($pdo, $plugin, ['prime-builder']), 0);
     expectCount('form tables', countRows($pdo, $formTables, $formTableNames), 0);
+    expectCount('notification jobs', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}jobs` WHERE `handler` = ?", ['prime-builder.form-notification']), 0);
+    expectCount('unrelated job', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}jobs` WHERE `handler` = ?", ['other-plugin.fixture']), 1);
     echo "Uninstall removed plugin data and preserved content and administrator access.\n";
 } else {
     throw new RuntimeException('Usage: lifecycle-check.php seed|verify');

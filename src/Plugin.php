@@ -25,6 +25,8 @@ use Prime\Http\Kernel;
 use Prime\Http\Request;
 use Prime\Http\Router;
 use Prime\I18n\Translator;
+use Prime\Jobs\Job;
+use Prime\Jobs\JobHandlerRegistry;
 use Prime\Plugins\AbstractPlugin;
 use Prime\Plugins\PluginContext;
 use Prime\Scheduler\Schedule;
@@ -48,6 +50,7 @@ use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\MediaReferences;
 use PrimeBuilder\Document\Validator;
+use PrimeBuilder\Forms\Notifications;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
 use PrimeBuilder\Security\EffectiveApiAuthentication;
@@ -339,6 +342,14 @@ final class Plugin extends AbstractPlugin
         $context->app()->container()->singleton(Templates::class, static fn (): Templates => $templates);
         $context->app()->container()->singleton(ThemeModels::class, static fn (): ThemeModels => $themeModels);
         $context->app()->container()->singleton(ContactForms::class, static fn (): ContactForms => $forms);
+        $context->hooks()->filter('jobs.register_handlers', static function (mixed $registry) use ($context): mixed {
+            if ($registry instanceof JobHandlerRegistry) {
+                $registry->register(Notifications::JOB_NAME, static function (array $payload, Job $job) use ($context): void {
+                    (new Notifications($context))->handle($payload, $job);
+                });
+            }
+            return $registry;
+        });
         $context->hooks()->filter('scheduler.register', static function (mixed $schedule) use ($context): mixed {
             if ($schedule instanceof Schedule) {
                 $schedule->call(
@@ -517,6 +528,14 @@ final class Plugin extends AbstractPlugin
 
     public function uninstall(PluginContext $context): void
     {
+        // An installed but never activated plugin, or an inactive 0.1.0/0.1.1
+        // installation, has no notifications table. In that case no such jobs
+        // were created by this version; the CMS still rolls back older tables.
+        // Otherwise wait for in-flight delivery and cancel reserved jobs before
+        // the CMS drops the tables. Pause public traffic/workers during uninstall.
+        if ($context->db()->schema()->hasTable(Submissions::NOTIFICATION_TABLE)) {
+            (new Submissions($context->db()))->deleteAll();
+        }
         $context->notices()->clearAll();
         (new Snapshots($context->app()->storagePath('prime-builder/styles')))->clear();
     }
