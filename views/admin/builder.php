@@ -11,6 +11,7 @@ declare(strict_types=1);
 /** @var string $previewUrl */
 /** @var string $editUrl */
 /** @var string $cssUrl */
+/** @var string $editorCss */
 /** @var string $jsUrl */
 ?>
 <!doctype html>
@@ -21,6 +22,7 @@ declare(strict_types=1);
     <meta name="csrf-token" content="<?= $this->e(csrf_token()) ?>">
     <title><?= $this->e(t('plugin::prime-builder.ui.editor_title')) ?> — <?= $this->e($entry->title) ?></title>
     <link rel="stylesheet" data-pb-editor-css href="<?= $this->e($cssUrl) ?>">
+    <?php if ($editorCss !== ''): ?><style data-pb-editor-custom-css><?= $this->raw($editorCss) ?></style><?php endif; ?>
     <script type="module" src="<?= $this->e($jsUrl) ?>"></script>
 </head>
 <body>

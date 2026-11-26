@@ -331,8 +331,12 @@ final class Plugin extends AbstractPlugin
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
             if ($menu instanceof AdminMenu) {
                 $menu->add(new MenuItem(id: 'plugin.prime-builder', label: 'plugin::prime-builder.menu', icon: 'layout-dashboard', url: '/admin/prime-builder', position: 60, accent: 'brand', capability: 'prime_builder.edit', group: 'admin.menu.groups.content'));
-                $menu->add(new MenuItem(id: 'plugin.prime-builder-theme', label: 'plugin::prime-builder.theme.menu', icon: 'palette', url: '/admin/prime-builder/theme', position: 61, accent: 'brand', capability: 'prime_builder.theme_builder', group: 'admin.menu.groups.content'));
-                $menu->add(new MenuItem(id: 'plugin.prime-builder-submissions', label: 'plugin::prime-builder.forms.inbox', icon: 'inbox', url: '/admin/prime-builder/submissions', position: 62, accent: 'brand', capability: 'prime_builder.forms', group: 'admin.menu.groups.content'));
+                // Prime's menu keeps the parent visible for a user with a permitted
+                // child, and redirects its link to that child if edit is denied.
+                $menu->addChild('plugin.prime-builder', new MenuItem(id: 'plugin.prime-builder-theme', label: 'plugin::prime-builder.theme.menu', icon: 'palette', url: '/admin/prime-builder/theme', position: 10, accent: 'brand', capability: 'prime_builder.theme_builder'));
+                $menu->addChild('plugin.prime-builder', new MenuItem(id: 'plugin.prime-builder-submissions', label: 'plugin::prime-builder.forms.inbox', icon: 'inbox', url: '/admin/prime-builder/submissions', position: 20, accent: 'brand', capability: 'prime_builder.forms'));
+                $menu->addChild('plugin.prime-builder', new MenuItem(id: 'plugin.prime-builder-kit', label: 'plugin::prime-builder.settings.kit_menu', icon: 'palette', url: '/admin/prime-builder/kit#pb-kit-title', position: 30, accent: 'brand', capability: 'prime_builder.settings'));
+                $menu->addChild('plugin.prime-builder', new MenuItem(id: 'plugin.prime-builder-settings', label: 'plugin::prime-builder.settings.settings_menu', icon: 'layout-dashboard', url: '/admin/prime-builder/settings', position: 40, accent: 'brand', capability: 'prime_builder.settings'));
             }
             return $menu;
         });
@@ -352,6 +356,10 @@ final class Plugin extends AbstractPlugin
         $context->router()->adminGroup(static function (Router $router) use ($settings): void {
             $router->get('/settings', [$settings, 'show'])->name('settings');
             $router->post('/settings', [$settings, 'save'])->name('settings.save');
+            // A distinct path lets the core menu mark Kit and Settings correctly;
+            // both views edit the same validated, atomic configuration bundle.
+            $router->get('/kit', [$settings, 'show'])->name('kit');
+            $router->post('/kit', [$settings, 'save'])->name('kit.save');
         }, capability: 'prime_builder.settings');
         $context->router()->adminGroup(static function (Router $router) use ($theme, $themeModels, $controller): void {
             $router->get('/theme', [$theme, 'show'])->name('theme');

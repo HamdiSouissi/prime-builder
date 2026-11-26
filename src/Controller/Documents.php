@@ -28,6 +28,7 @@ use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\MediaReferences;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
+use PrimeBuilder\Styles\EditorCss;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Theme\GlobalWidgets;
@@ -337,6 +338,7 @@ final class Documents
             'conversionFailed' => $config['conversionFailed'],
             'configJson' => json_encode($config, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) ?: '{}',
             'cssUrl' => $this->plugin->url('css/editor.css'),
+            'editorCss' => EditorCss::compile(Configuration::get($this->plugin->settings(), 'editor_css', '')),
             'jsUrl' => $this->plugin->url('js/editor.js'),
         ]);
         return Response::html($html)->withHeader('Cache-Control', 'no-store, private');

@@ -125,6 +125,66 @@ final class IntegrationTest extends TestCase
         self::assertSame('warning', $checks[2]['status']);
     }
 
+    public function testAdminMenuGroupsActionsAndRespectsIndependentCapabilities(): void
+    {
+        $app = $this->activated('admin');
+        $build = static function () use ($app): \Prime\Admin\Menu\AdminMenu {
+            $menu = $app->get(Hooks::class)->apply('admin.menu', new \Prime\Admin\Menu\AdminMenu());
+            self::assertInstanceOf(\Prime\Admin\Menu\AdminMenu::class, $menu);
+            self::assertSame([], $menu->sanitize());
+            return $menu;
+        };
+        $menu = $build();
+        $nodes = $menu->tree();
+        self::assertCount(1, $nodes);
+        self::assertSame('plugin.prime-builder', $nodes[0]->item->id);
+        self::assertSame(
+            ['plugin.prime-builder-theme', 'plugin.prime-builder-submissions', 'plugin.prime-builder-kit', 'plugin.prime-builder-settings'],
+            array_map(static fn ($node): string => $node->item->id, $nodes[0]->children),
+        );
+        foreach ($nodes[0]->children as $node) {
+            self::assertTrue(\Prime\View\Icon::exists($node->item->icon));
+        }
+        self::assertSame('/admin/prime-builder/theme', $nodes[0]->children[0]->item->url);
+        self::assertSame('/admin/prime-builder/submissions', $nodes[0]->children[1]->item->url);
+        self::assertSame('/admin/prime-builder/kit#pb-kit-title', $nodes[0]->children[2]->item->url);
+        self::assertSame('/admin/prime-builder/settings', $nodes[0]->children[3]->item->url);
+        self::assertSame('plugin.prime-builder-kit', $build()->setActive(Request::create('GET', '/admin/prime-builder/kit'))->activeId());
+        self::assertSame('plugin.prime-builder-settings', $build()->setActive(Request::create('GET', '/admin/prime-builder/settings'))->activeId());
+        $forms = $build()->filterByCapability(static fn (string $cap): bool => $cap === 'prime_builder.forms')->tree();
+        self::assertCount(1, $forms);
+        self::assertSame('/admin/prime-builder/submissions', $forms[0]->item->url);
+        self::assertCount(1, $forms[0]->children);
+        self::assertSame('plugin.prime-builder-submissions', $forms[0]->children[0]->item->id);
+        $settings = $build()->filterByCapability(static fn (string $cap): bool => $cap === 'prime_builder.settings')->tree();
+        self::assertSame('/admin/prime-builder/kit#pb-kit-title', $settings[0]->item->url);
+        self::assertCount(2, $settings[0]->children);
+        self::assertSame([], $build()->filterByCapability(static fn (string $cap): bool => false)->tree());
+    }
+
+    public function testWelcomeNoticeIsScopedDismissibleAndRemovedOnDeactivation(): void
+    {
+        $app = $this->activated('admin');
+        $notices = $app->get(\Prime\Admin\Notices::class);
+        $admin = $this->user($app, 1);
+        $contributor = $this->user($app, 2);
+        $welcome = static fn (array $items): array => array_values(array_filter($items, static fn ($notice): bool => $notice->id === 'plugin.prime-builder.welcome'));
+        $visible = $welcome($notices->forUser($admin));
+        self::assertCount(1, $visible);
+        self::assertSame('prime_builder.edit', $visible[0]->capability);
+        self::assertTrue($visible[0]->dismissible);
+        self::assertSame([], $welcome($notices->forUser($contributor)));
+        $this->db($app)->pdo()->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.edit')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $contributor = $this->user($app, 2);
+        self::assertCount(1, $welcome($notices->forUser($contributor)));
+        self::assertTrue($notices->dismiss('plugin.prime-builder.welcome', $admin->id));
+        self::assertSame([], $welcome($notices->forUser($admin)));
+        self::assertCount(1, $welcome($notices->forUser($contributor)));
+        $app->get(PluginManager::class)->deactivate('prime-builder');
+        self::assertSame([], $welcome($notices->all()));
+    }
+
     public function testApiPersistsRenderedHtmlAndHashedCss(): void
     {
         $app = $this->activated(null);
@@ -4574,6 +4634,72 @@ final class IntegrationTest extends TestCase
         self::assertNull($db->table('prime_builder_submissions')->find($old));
     }
 
+    public function testFontAndEditorCssSettingsAreValidatedAppliedAndPreservedOnUpgrade(): void
+    {
+        $app = $this->activated('admin');
+        $screen = $this->send($app, 'GET', '/admin/prime-builder/settings');
+        self::assertSame(200, $screen->status());
+        self::assertStringContainsString('name="font_loading"', $screen->body());
+        self::assertStringContainsString('name="editor_css"', $screen->body());
+        $fields = [
+            '_csrf_token' => $app->get(Csrf::class)->token(), 'pages' => '1', 'other_types' => '',
+            'breakpoint_tablet' => '1024', 'breakpoint_mobile' => '767', 'kit_primary' => '#c9441f',
+            'kit_text' => '#1a1d29', 'kit_font_size' => '16', 'font_loading' => 'inter_local',
+            'editor_css' => "--pb-brand: #123456;\n--pb-accent: #ABC;",
+        ];
+        $post = static fn (array $body): Response => $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $body));
+        $withoutCsrf = $fields;
+        unset($withoutCsrf['_csrf_token']);
+        self::assertSame(419, $post($withoutCsrf)->status());
+        self::assertSame(302, $post($fields)->status());
+        $settings = $app->get(Settings::class);
+        $bundle = $settings->get('plugin.prime-builder.configuration');
+        self::assertIsArray($bundle);
+        self::assertSame('inter_local', $bundle['font_loading']);
+        self::assertSame("--pb-brand: #123456;\n--pb-accent: #abc;", $bundle['editor_css']);
+        $editor = $this->send($app, 'GET', '/admin/prime-builder/edit/1');
+        self::assertSame(200, $editor->status());
+        self::assertStringContainsString('<style data-pb-editor-custom-css>:root{--pb-brand: #123456;--pb-accent: #abc;}</style>', $editor->body());
+        $kit = Kit::compile(['primary' => '#c9441f', 'text' => '#1a1d29', 'font_size' => 16, 'font_loading' => 'inter_local']);
+        $url = '/prime-builder/kit/' . substr(hash('sha256', $kit), 0, 16) . '.css';
+        $publicCss = $this->send($app, 'GET', $url);
+        self::assertSame(200, $publicCss->status());
+        self::assertSame($kit, $publicCss->body());
+        self::assertStringNotContainsString('--pb-accent:', $publicCss->body());
+        foreach ([
+            ['font_loading' => 'https://example.test/font.woff2'],
+            ['font_loading' => ['inter_local']],
+            ['editor_css' => '--pb-brand: url(https://example.test)'],
+            ['editor_css' => '--pb-brand: #fff; --pb-brand: #000'],
+            ['editor_css' => '</style><script>alert(1)</script>'],
+            ['editor_css' => str_repeat('x', 513)],
+            ['editor_css' => ['--pb-brand: #fff']],
+        ] as $invalid) {
+            $response = $post(array_replace($fields, $invalid));
+            self::assertSame(422, $response->status(), $response->body());
+            self::assertStringContainsString('aria-invalid="true"', $response->body());
+            self::assertStringNotContainsString('</style><script>alert(1)</script>', $response->body());
+            self::assertSame($bundle, $settings->get('plugin.prime-builder.configuration'));
+        }
+        // A settings form opened before these fields were added must not reset them.
+        $oldForm = $fields;
+        unset($oldForm['font_loading'], $oldForm['editor_css']);
+        self::assertSame(302, $post($oldForm)->status());
+        self::assertSame($bundle, $settings->get('plugin.prime-builder.configuration'));
+        // Revalidate corrupt stored values when generating editor and public CSS.
+        $corrupt = $bundle;
+        $corrupt['font_loading'] = 'https://example.test/font.woff2';
+        $corrupt['editor_css'] = '</style><script>alert(1)</script>';
+        $settings->set('plugin.prime-builder.configuration', $corrupt);
+        $editor = $this->send($app, 'GET', '/admin/prime-builder/edit/1');
+        self::assertStringNotContainsString('data-pb-editor-custom-css', $editor->body());
+        self::assertStringNotContainsString('</style><script>alert(1)</script>', $editor->body());
+        self::assertStringNotContainsString('example.test', Kit::compile(['font_loading' => $corrupt['font_loading']]));
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $fields['_csrf_token'] = $app->get(Csrf::class)->token();
+        self::assertSame(403, $post($fields)->status());
+    }
+
     public function testFormNotificationAddressSettingsRequirePermissionAndAreValidatedAtomically(): void
     {
         $app = $this->activated('admin');
@@ -5078,7 +5204,7 @@ final class IntegrationTest extends TestCase
         self::assertSame('Historique', $db->table('prime_builder_submissions')->first()['message'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('0.1.2', $after->installedVersion);
+        self::assertSame('1.0.0', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000002_create_prime_builder_form_files')->count());
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000003_create_prime_builder_form_notifications')->count());
@@ -5103,8 +5229,42 @@ final class IntegrationTest extends TestCase
         self::assertSame(base64_encode('test'), $db->table('prime_builder_form_files')->where('submission_id', '=', $id)->first()['content_base64'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('0.1.2', $after->installedVersion);
+        self::assertSame('1.0.0', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
+    }
+
+    public function testVersion012UpgradeTo100PreservesDataAndRunsNoMigrationTwice(): void
+    {
+        $app = $this->activated(null);
+        $db = $this->db($app);
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'upgrade', ['*'])['token'];
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $this->document()], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $settings = $app->get(Settings::class);
+        $configuration = ['pages' => true, 'kit_primary' => '#123456', 'submission_retention_days' => 45];
+        $settings->set('plugin.prime-builder.configuration', $configuration);
+        $id = $db->table('prime_builder_submissions')->insertGetId(['entry_id' => 1, 'node_id' => 'legacy', 'sender_name' => 'Nom', 'sender_email' => 'a@example.test', 'message' => 'Historique', 'created_at' => '2025-01-01 00:00:00']);
+        $db->table('prime_builder_form_files')->insert(['submission_id' => $id, 'field_id' => 'f_file', 'field_label' => 'Fichier', 'filename' => 'test.txt', 'mime' => 'text/plain', 'bytes' => 4, 'content_base64' => base64_encode('test')]);
+        $migrationCount = $db->table('migrations')->where('source', '=', 'prime-builder')->count();
+        self::assertSame(3, $migrationCount);
+        $db->table('plugins')->where('slug', '=', 'prime-builder')->update(['version' => '0.1.2']);
+        $manager = $app->get(PluginManager::class);
+        $before = $manager->get('prime-builder', fresh: true);
+        self::assertNotNull($before);
+        self::assertTrue($before->needsUpdate);
+        $manager->syncUpgradedPlugin('prime-builder', '0.1.2');
+        $after = $manager->get('prime-builder', fresh: true);
+        self::assertNotNull($after);
+        self::assertTrue($after->isActive());
+        self::assertFalse($after->needsUpdate);
+        self::assertSame('1.0.0', $after->installedVersion);
+        self::assertSame($migrationCount, $db->table('migrations')->where('source', '=', 'prime-builder')->count());
+        self::assertSame($entry->content, $app->get(EntryRepository::class)->find(1)?->content);
+        self::assertSame($entry->contentHtml, $app->get(EntryRepository::class)->find(1)?->contentHtml);
+        self::assertSame($configuration, $settings->get('plugin.prime-builder.configuration'));
+        self::assertSame('Historique', $db->table('prime_builder_submissions')->find($id)['message'] ?? null);
+        self::assertSame(base64_encode('test'), $db->table('prime_builder_form_files')->where('submission_id', '=', $id)->first()['content_base64'] ?? null);
     }
 
     public function testLegacyFormWithoutSettingsRemainsSubmittableButCorruptSchemaDoesNotFallBack(): void
@@ -5863,12 +6023,16 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('APERÇU MEMBRE', $draft->contentHtml);
         $kernel = $app->get(Kernel::class);
         $get = static fn (string $url): Response => $kernel->handle(Request::create('GET', $url, headers: ['Accept' => 'text/html']));
-        foreach (['/admin/content/post/2/preview', '/blog/brouillon-admin?preview=1&entry_id=2', '/blog/article-publie?customizer_preview=1'] as $url) {
+        foreach ([
+            '/admin/content/post/2/preview' => 'Brouillon admin',
+            '/blog/brouillon-admin?preview=1&entry_id=2' => 'Brouillon admin',
+            '/blog/article-publie?customizer_preview=1' => 'Article publié',
+        ] as $url => $title) {
             $preview = $get($url);
             self::assertSame(200, $preview->status(), $preview->body());
             self::assertStringContainsString('no-store', (string) $preview->header('Cache-Control'));
             self::assertStringContainsString('APERÇU STATIQUE', $preview->body());
-            self::assertStringNotContainsString('DYNAMIQUE Brouillon admin / Admin Prime', $preview->body());
+            self::assertStringNotContainsString('DYNAMIQUE ' . $title . ' / Admin Prime', $preview->body());
             self::assertStringNotContainsString('APERÇU MEMBRE', $preview->body());
         }
         // A synthetic context outside an authorized HTTP preview also stays static.
@@ -6448,6 +6612,8 @@ final class IntegrationTest extends TestCase
         ];
         self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/settings')->status());
         self::assertSame(403, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields))->status());
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/kit')->status());
+        self::assertSame(403, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/kit', body: $fields))->status());
 
         // The general CMS settings permission alone must not expose or modify plugin fields.
         $db->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'settings.manage')");
@@ -6470,16 +6636,24 @@ final class IntegrationTest extends TestCase
         $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
         $fields['_csrf_token'] = $app->get(Csrf::class)->token();
         self::assertSame(200, $this->send($app, 'GET', '/admin/prime-builder/settings')->status());
+        $kitScreen = $this->send($app, 'GET', '/admin/prime-builder/kit');
+        self::assertSame(200, $kitScreen->status());
+        self::assertStringContainsString('action="/admin/prime-builder/kit"', $kitScreen->body());
         self::assertSame(403, $this->send($app, 'GET', '/admin/settings/general')->status());
         $withoutCsrf = $fields;
         unset($withoutCsrf['_csrf_token']);
         self::assertSame(419, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $withoutCsrf))->status());
+        self::assertSame(419, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/kit', body: $withoutCsrf))->status());
         $invalid = $fields;
         $invalid['breakpoint_mobile'] = '1500';
         $invalid['kit_primary'] = '</style><script>alert(1)</script>';
         $response = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $invalid));
         self::assertSame(422, $response->status(), $response->body());
         self::assertStringNotContainsString('</style><script>alert(1)</script>', $response->body());
+        self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.configuration'));
+        $invalidKit = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/kit', body: $invalid));
+        self::assertSame(422, $invalidKit->status());
+        self::assertStringContainsString('action="/admin/prime-builder/kit"', $invalidKit->body());
         self::assertSame(false, $app->get(Settings::class)->has('plugin.prime-builder.configuration'));
         $response = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields));
         self::assertSame(302, $response->status(), $response->body());
@@ -6488,9 +6662,14 @@ final class IntegrationTest extends TestCase
         self::assertSame(1100, $bundle['breakpoint_tablet']);
         self::assertSame('#123456', $bundle['kit_primary']);
         self::assertSame('portfolio, product', $bundle['other_types']);
+        $fields['kit_primary'] = '#654321';
+        $kitSave = $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/kit', body: $fields));
+        self::assertSame(302, $kitSave->status());
+        self::assertSame('/admin/prime-builder/kit#pb-kit-title', $kitSave->header('Location'));
+        self::assertSame('#654321', $app->get(Settings::class)->get('plugin.prime-builder.configuration')['kit_primary']);
         self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/edit/3')->status());
         $screen = $this->send($app, 'GET', '/admin/prime-builder/settings');
-        self::assertStringContainsString('value="#123456"', $screen->body());
+        self::assertStringContainsString('value="#654321"', $screen->body());
     }
 
     public function testSettingsBundleIsAtomicAndReadsOlderIndividualKeys(): void

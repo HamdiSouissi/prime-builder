@@ -14,6 +14,7 @@ use PrimeBuilder\Configuration;
 use PrimeBuilder\Dynamic\PublicFields;
 use PrimeBuilder\Forms\NotificationSettings;
 use PrimeBuilder\Forms\Submissions;
+use PrimeBuilder\Styles\EditorCss;
 use Throwable;
 
 /** The dedicated settings page is protected by the plugin's settings capability. */
@@ -28,6 +29,8 @@ final class Settings
         'kit_primary' => '#c9441f',
         'kit_text' => '#1a1d29',
         'kit_font_size' => 16,
+        'font_loading' => 'theme',
+        'editor_css' => '',
         'submission_retention_days' => Submissions::RETENTION_DAYS,
         'notification_email' => '',
         'public_fields' => '',
@@ -55,7 +58,7 @@ final class Settings
         $errors = [];
         foreach (self::DEFAULTS as $name => $default) {
             $raw = $request->body($name);
-            if (in_array($name, ['submission_retention_days', 'notification_email', 'public_fields'], true) && $raw === null) {
+            if (in_array($name, ['submission_retention_days', 'notification_email', 'public_fields', 'font_loading', 'editor_css'], true) && $raw === null) {
                 // Settings pages opened before an upgrade must not reset new choices.
                 $raw = Configuration::get($this->plugin->settings(), $name, $default);
                 if ($name === 'submission_retention_days') {
@@ -96,6 +99,16 @@ final class Settings
             $values['other_types'] = implode(', ', array_unique($names));
         }
 
+        if (!in_array($values['font_loading'], ['theme', 'inter_local'], true)) {
+            $errors['font_loading'] = true;
+        }
+        $editorCss = EditorCss::normalize($values['editor_css']);
+        if ($editorCss === null) {
+            $errors['editor_css'] = true;
+        } else {
+            $values['editor_css'] = $editorCss;
+        }
+
         $publicFields = PublicFields::parse($values['public_fields']);
         if ($publicFields === null) {
             $errors['public_fields'] = true;
@@ -134,7 +147,9 @@ final class Settings
             // Settings are saved; caches may also be purged manually if storage is unavailable.
         }
         $this->plugin->app()->get(AdminContext::class)->flashToast(t('plugin::prime-builder.settings.saved'), 'success');
-        return Response::redirect('/admin/prime-builder/settings');
+        return Response::redirect($request->path() === '/admin/prime-builder/kit'
+            ? '/admin/prime-builder/kit#pb-kit-title'
+            : '/admin/prime-builder/settings');
     }
 
     /**
@@ -153,6 +168,7 @@ final class Settings
             ],
             'values' => $values,
             'errors' => $errors,
+            'formAction' => $request->path() === '/admin/prime-builder/kit' ? '/admin/prime-builder/kit' : '/admin/prime-builder/settings',
         ]);
         if (is_array($data['adminStyles'] ?? null)) {
             $data['adminStyles'][] = $this->plugin->url('css/dashboard.css');

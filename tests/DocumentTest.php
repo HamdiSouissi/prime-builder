@@ -19,6 +19,7 @@ use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
+use PrimeBuilder\Styles\EditorCss;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Scope;
 use PrimeBuilder\Styles\Snapshots;
@@ -70,6 +71,7 @@ require_once dirname(__DIR__) . '/src/Styles/Values.php';
 require_once dirname(__DIR__) . '/src/Styles/CssClasses.php';
 require_once dirname(__DIR__) . '/src/Styles/Scope.php';
 require_once dirname(__DIR__) . '/src/Styles/Compiler.php';
+require_once dirname(__DIR__) . '/src/Styles/EditorCss.php';
 require_once dirname(__DIR__) . '/src/Styles/Kit.php';
 require_once dirname(__DIR__) . '/src/Styles/Snapshots.php';
 
@@ -267,6 +269,26 @@ final class DocumentTest extends TestCase
         $compiled = (new Compiler(900, 500))->compile(['elements' => [$node]]);
         self::assertStringContainsString('@media(max-width:900px)', $compiled);
         self::assertStringContainsString('@media(max-width:500px)', $compiled);
+    }
+
+    public function testEditorPaletteAndFontLoadingOnlyAcceptKnownSafeValues(): void
+    {
+        $palette = " --pb-brand: #ABC;\n--pb-accent: #123456; --pb-border: #789; --pb-muted: #fff; ";
+        self::assertSame("--pb-brand: #abc;\n--pb-accent: #123456;\n--pb-border: #789;\n--pb-muted: #fff;", EditorCss::normalize($palette));
+        self::assertSame(':root{--pb-brand: #abc;--pb-accent: #123456;--pb-border: #789;--pb-muted: #fff;}', EditorCss::compile($palette));
+        self::assertSame('', EditorCss::compile(''));
+        foreach ([null, [], str_repeat('a', 513), '--pb-brand: red', '--pb-brand: #12', '--pb-brand: url(https://example.test)', '--pb-brand: #abc; --pb-brand: #def', '--pb-other: #fff', '--pb-brand: #abc; }</style><script>', '--pb-brand: #abc;;'] as $invalid) {
+            self::assertNull(EditorCss::normalize($invalid));
+            self::assertSame('', EditorCss::compile($invalid));
+        }
+        $inherited = Kit::compile([]);
+        self::assertStringNotContainsString('@font-face', $inherited);
+        self::assertStringNotContainsString('font-family:', $inherited);
+        $font = Kit::compile(['font_loading' => 'inter_local']);
+        self::assertStringContainsString("src:url('/assets/fonts/inter/InterVariable.woff2')", $font);
+        self::assertStringContainsString('font-display:swap', $font);
+        self::assertStringContainsString('font-family:PrimeBuilderInter,system-ui,sans-serif', $font);
+        self::assertSame($inherited, Kit::compile(['font_loading' => 'url(https://example.test/font.woff2)']));
     }
 
     public function testResponsiveContainerStylesAreAllowlistedAndCompiled(): void

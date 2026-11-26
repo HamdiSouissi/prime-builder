@@ -1,9 +1,11 @@
 # Journal des changements
 
-## Non publié — popups
+## 1.0.0 — widgets partagés, contenu dynamique et administration
 
-- Modèles de popup composés dans l’éditeur, conditions, cinq déclencheurs et fréquence par navigateur. Dialogue natif avec Échap et gestion du focus ; les déclencheurs automatiques commencent par une invitation non modale, avec opt-in révocable pour l’onglet.
-- JavaScript et dialogue natif requis ; stockage refusé, formulaire dans un popup, compatibilité des thèmes et tests d’assistance ont les limites décrites dans [README.md](README.md) et [RETOUR.md](RETOUR.md).
+- Widgets globaux édités une fois et référencés sur plusieurs pages, avec purge du cache interne ; balises de site, contenu, champs autorisés et visiteur, et conditions de connexion, rôle, appareil et dates.
+- Popups composés dans l’éditeur, conditions, cinq déclencheurs et fréquence par navigateur. Dialogue natif avec Échap et gestion du focus ; les déclencheurs automatiques commencent par une invitation non modale, avec opt-in révocable pour l’onglet.
+- Menu d’administration regroupé, sélection entre police héritée et Inter locale du CMS, palette CSS filtrée de l’éditeur, documentation et captures. Le kit et les contrôles avancés restent limités.
+- Les aperçus natifs gardent un repli statique ; l’appareil est filtré par CSS et ne protège pas les données, les caches externes ne sont pas purgés. Cette version reste partielle : voir [README.md](README.md) et [RETOUR.md](RETOUR.md) avant utilisation.
 
 ## 0.1.2 — notifications de formulaire
 
