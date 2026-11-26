@@ -3010,8 +3010,10 @@ test('plugin settings save and remain usable on desktop and mobile', async ({ pa
   await expect(page.getByRole('heading', { name: 'Réglages Prime Builder' })).toBeVisible();
   const primary = page.getByLabel('Couleur principale', { exact: true });
   const tablet = page.getByLabel('Point de rupture tablette (px)');
+  const retention = page.getByLabel('Conservation des envois (jours)');
   const originalPrimary = await primary.inputValue();
   const originalTablet = await tablet.inputValue();
+  const originalRetention = await retention.inputValue();
   await expectAccessible(page);
   await page.screenshot({ path: test.info().outputPath('settings-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 375, height: 812 });
@@ -3025,14 +3027,18 @@ test('plugin settings save and remain usable on desktop and mobile', async ({ pa
   }
   await primary.fill('#0a6380');
   await tablet.fill('1200');
+  await retention.fill('45');
   await submit();
   await expect(primary).toHaveValue('#0a6380');
   await expect(tablet).toHaveValue('1200');
+  await expect(retention).toHaveValue('45');
   await primary.fill(originalPrimary);
   await tablet.fill(originalTablet);
+  await retention.fill(originalRetention);
   await submit();
   await expect(primary).toHaveValue(originalPrimary);
   await expect(tablet).toHaveValue(originalTablet);
+  await expect(retention).toHaveValue(originalRetention);
 });
 
 test('existing three-block page is converted without losing its saved HTML', async ({ page }) => {
@@ -3307,10 +3313,23 @@ test('simple contact form sends anonymously and the protected inbox receives it'
   await expect(form.locator('[data-pb-form-status]')).toHaveText('Votre message a été enregistré.');
 
   await page.goto('/admin/prime-builder/submissions');
+  await page.getByLabel('Rechercher dans les envois').fill('camille@example.test');
+  await page.locator('form[role="search"]').getByRole('button', { name: 'Rechercher', exact: true }).click();
+  await expect(page).toHaveURL(/q=camille%40example\.test/);
   const submission = page.locator('[data-pb-submission-id]').filter({ hasText: 'camille@example.test' });
   await expect(submission).toHaveCount(1);
   await expect(submission).toContainText('Bonjour <img src=x onerror=alert(1)> depuis le navigateur.');
   await expect(submission.locator('img, script')).toHaveCount(0);
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('link', { name: 'Exporter les résultats en CSV' }).click();
+  const csv = await downloaded;
+  expect(csv.suggestedFilename()).toBe('prime-builder-submissions.csv');
+  const csvText = readFileSync(await csv.path(), 'utf8');
+  expect(csvText).toContain('camille@example.test');
+  expect(csvText).toContain('Bonjour <img src=x onerror=alert(1)> depuis le navigateur.');
+  const pageDownload = page.waitForEvent('download');
+  await page.getByRole('link', { name: 'Exporter cette page en CSV' }).click();
+  expect(readFileSync(await (await pageDownload).path(), 'utf8')).toContain('camille@example.test');
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await expectAccessible(page);
   await page.screenshot({ path: test.info().outputPath('contact-inbox-mobile.png'), fullPage: true });

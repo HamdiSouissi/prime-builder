@@ -313,6 +313,7 @@ final class Plugin extends AbstractPlugin
         }, capability: 'prime_builder.theme_builder');
         $context->router()->adminGroup(static function (Router $router) use ($forms): void {
             $router->get('/submissions', [$forms, 'index'])->name('submissions');
+            $router->get('/submissions/export', [$forms, 'export'])->name('submissions.export');
             $router->post('/submissions/{id:\d+}/delete', [$forms, 'delete'])->name('submissions.delete');
         }, capability: 'prime_builder.forms');
         $context->router()->frontGroup(static function (Router $router) use ($controller, $theme): void {
@@ -350,7 +351,8 @@ final class Plugin extends AbstractPlugin
                     name: 'prime-builder.purge-submissions',
                     action: static function () use ($context): int {
                         $now = time();
-                        return (new Submissions($context->db()))->purge($now) + RateLimit::purge($context->db(), $now);
+                        $days = Submissions::retentionDays(Configuration::get($context->settings(), 'submission_retention_days', Submissions::RETENTION_DAYS));
+                        return (new Submissions($context->db()))->purge($now, $days) + RateLimit::purge($context->db(), $now);
                     },
                     expression: '15 4 * * *',
                     description: t('plugin::prime-builder.scheduler.purge_submissions'),

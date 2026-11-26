@@ -43,6 +43,11 @@ $checked = static fn (string $name): bool => in_array($values[$name] ?? false, [
                     <input class="pc-input pc-input--narrow" id="pb-mobile" name="breakpoint_mobile" type="number" min="320" max="1600" required value="<?= $this->e((string) ($values['breakpoint_mobile'] ?? '')) ?>" aria-describedby="pb-mobile-help"<?= $invalid('breakpoint_mobile') ?>>
                     <p class="pc-field__help" id="pb-mobile-help"><?= $this->e(t('plugin::prime-builder.settings.breakpoint_mobile_help')) ?></p>
                 </div>
+                <div class="pc-field">
+                    <label class="pc-label" for="pb-submission-retention"><?= $this->e(t('plugin::prime-builder.settings.submission_retention_days')) ?></label>
+                    <input class="pc-input pc-input--narrow" id="pb-submission-retention" name="submission_retention_days" type="number" min="1" max="3650" required value="<?= $this->e((string) ($values['submission_retention_days'] ?? '')) ?>" aria-describedby="pb-submission-retention-help"<?= $invalid('submission_retention_days') ?>>
+                    <p class="pc-field__help" id="pb-submission-retention-help"><?= $this->e(t('plugin::prime-builder.settings.submission_retention_days_help')) ?></p>
+                </div>
             </div>
         </section>
         <section class="pc-card" aria-labelledby="pb-kit-title">

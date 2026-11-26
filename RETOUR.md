@@ -2,9 +2,9 @@
 
 ## État actuel
 
-**A est terminé ; B est clos pour la V1 par décision du demandeur**, qui accepte les lignes encore partielles du catalogue. Les constats et résultats B conservés ci-dessous sont historiques : ils ne constituent pas une demande de rouvrir B. **D — Theme Builder est implémenté et sa CI est verte**, avec les limites précisées ci-dessous. Le travail reste partiel et n’est pas prêt pour la production : les jalons suivants sont E (formulaires), F (popups), C (widgets globaux et dynamique), puis G (finitions), dans cet ordre.
+**A est terminé ; B est clos pour la V1 par décision du demandeur**, qui accepte les lignes encore partielles du catalogue. Les constats et résultats B conservés ci-dessous sont historiques : ils ne constituent pas une demande de rouvrir B. **D — Theme Builder est implémenté et sa CI est verte**, avec les limites précisées ci-dessous. **E — formulaires est commencé mais incomplet** : recherche, export CSV paginé et conservation réglable complètent la boîte du formulaire fixe ; il manque encore le constructeur de champs, les étapes, les fichiers, les e-mails par la file et les actions configurables. Ne pas commencer F, C ou G avant que E soit terminé et vert. Le produit reste partiel et n’est pas prêt pour la production.
 
-Révision D et correction du test poussées : `51e6d8523c6ec221a2604621a96ea468dbe501ad`, [run 45758874543](https://github.com/HamdiSouissi/prime-builder/actions/runs/45758874543), `completed/success` sur huit jobs. Un fichier ne peut pas contenir son propre SHA ni les résultats futurs de sa CI ; pour la tête effective, consulter `git ls-remote origin refs/heads/arena/2d5ecf33-prime-builder` et le run associé.
+Révision D et correction du test poussées : `51e6d8523c6ec221a2604621a96ea468dbe501ad`, [run 45758874543](https://github.com/HamdiSouissi/prime-builder/actions/runs/45758874543), `completed/success` sur huit jobs. Le rapport seul `a486652d58beaba388dc4203184a10dd3f136edd` est également vert sur huit jobs : [run 45760575987](https://github.com/HamdiSouissi/prime-builder/actions/runs/45760575987), Playwright `111 passed (9.9m)` et cycle de vie réussi. Un fichier ne peut pas contenir son propre SHA ni les résultats futurs de sa CI ; pour la tête effective, consulter `git ls-remote origin refs/heads/arena/2d5ecf33-prime-builder` et le run associé.
 
 | Job | Ligne finale observée sur `45758874543` |
 |---|---|
@@ -18,6 +18,16 @@ Révision D et correction du test poussées : `51e6d8523c6ec221a2604621a96ea468d
 | `e2e` | `111 passed (9.9m)` ; désactivation/réactivation et désinstallation `success` |
 
 GitHub signale le forçage d’actions Node 20 vers Node 24.
+
+## Jalon E — premier sous-ensemble : Envois et conservation
+
+Le formulaire fixe reste compatible : les messages précédents restent dans la même table, sans changement de migration. Les personnes ayant `prime_builder.forms` disposent d’une recherche littérale sur les noms, adresses, messages et identifiants de widgets, de pages de 100 résultats, de la suppression protégée par CSRF et de deux exports CSV : résultats filtrés ou page affichée. L’export global refuse les ensembles de plus de 5 000 lignes ou 8 Mio sans fournir de fichier partiel ; l’export page par page reste disponible. Les cellules pouvant devenir des formules sont préfixées d’une apostrophe. Les résultats ne sont pas un instantané transactionnel en cas de modifications simultanées ; les termes de recherche et CSV peuvent contenir des données personnelles. La durée de conservation se règle de 1 à 3 650 jours, 30 par défaut ; l’ancienne page de réglages soumise sans ce champ conserve la valeur existante. La purge dépend toujours du planificateur du CMS et ne supprime pas les sauvegardes. Aucun constructeur, upload, e-mail ni action configurable n’est livré à ce stade.
+
+Sur PHP 8.4.27 et PHPUnit 12.5.42, suites complètes locales : CMS 1.0.2 SQLite `OK (223 tests, 6379 assertions)` et MySQL 5.7 expérimental `OK (223 tests, 6496 assertions)` ; CMS 1.0.1 SQLite `OK (223 tests, 6383 assertions)` et MySQL 5.7 expérimental `OK (223 tests, 6500 assertions)`. Les tests couvrent les droits et leur révocation, CSRF, recherche sur l’historique, jokers SQL littéraux, injection dans le CSV, limites sans troncature, export d’une page, validation du réglage, compatibilité de l’ancien écran et effet réel de la tâche planifiée. MySQL 5.7, non pris en charge par le CMS, et le PHAR PHPUnit local ne remplacent pas la CI/MySQL 8.
+
+Les deux scénarios navigateur ciblés (réglages et envoi anonyme jusqu’à la recherche, aux deux exports et à la suppression) donnent `2 passed (29.2s)` sur CMS 1.0.2 et `2 passed (31.0s)` sur 1.0.1 ; ils exécutent axe sur mobile et bureau. Les captures automatisées 1.0.1 de la boîte et des réglages ont été examinées, sans audit interactif complet. Node indique `58/58`, PHPStan niveau 8 sources et tests `[OK] No errors`, PHP-CS-Fixer avec configuration CMS `Found 0 of 76 files that can be fixed in 8.878 seconds, 79.58 MB memory used`, et `lang:check --strict` est cohérent sur les deux CMS. Un premier test MySQL a exposé une différence de collation pour l’échappement de `!`, corrigée et retestée ; un premier test navigateur avait deux boutons nommés « Rechercher », corrigé par un sélecteur limité au formulaire. Une première configuration PHPStan locale omettait les fixtures CMS ; elle a été corrigée et relancée.
+
+La CI de la révision contenant ce sous-ensemble doit être observée séparément : les seuls runs verts documentés ci-dessus concernent D. **E reste à terminer** avant F, C et G.
 
 ## Jalon D — Theme Builder : vérifications et limites
 

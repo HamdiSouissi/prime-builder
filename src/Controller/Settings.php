@@ -11,6 +11,7 @@ use Prime\Http\Request;
 use Prime\Http\Response;
 use Prime\Plugins\PluginContext;
 use PrimeBuilder\Configuration;
+use PrimeBuilder\Forms\Submissions;
 use Throwable;
 
 /** The dedicated settings page is protected by the plugin's settings capability. */
@@ -25,6 +26,7 @@ final class Settings
         'kit_primary' => '#c9441f',
         'kit_text' => '#1a1d29',
         'kit_font_size' => 16,
+        'submission_retention_days' => Submissions::RETENTION_DAYS,
     ];
 
     public function __construct(private readonly PluginContext $plugin)
@@ -36,7 +38,9 @@ final class Settings
         $values = [];
         foreach (self::DEFAULTS as $name => $default) {
             $value = Configuration::get($this->plugin->settings(), $name, $default);
-            $values[$name] = is_scalar($value) ? $value : $default;
+            $values[$name] = $name === 'submission_retention_days'
+                ? Submissions::retentionDays($value)
+                : (is_scalar($value) ? $value : $default);
         }
         return $this->form($request, $values);
     }
@@ -47,6 +51,11 @@ final class Settings
         $errors = [];
         foreach (self::DEFAULTS as $name => $default) {
             $raw = $request->body($name);
+            if ($name === 'submission_retention_days' && $raw === null) {
+                // A form opened before the upgrade has no retention field. Do not
+                // overwrite an existing choice when that older form is submitted.
+                $raw = (string) Submissions::retentionDays(Configuration::get($this->plugin->settings(), $name, $default));
+            }
             if (is_bool($default)) {
                 if ($raw !== null && $raw !== '1') {
                     $errors[$name] = true;
@@ -73,7 +82,7 @@ final class Settings
             $values['other_types'] = implode(', ', array_unique($names));
         }
 
-        foreach (['breakpoint_tablet' => [600, 2000], 'breakpoint_mobile' => [320, 1600], 'kit_font_size' => [12, 28]] as $name => [$min, $max]) {
+        foreach (['breakpoint_tablet' => [600, 2000], 'breakpoint_mobile' => [320, 1600], 'kit_font_size' => [12, 28], 'submission_retention_days' => [1, Submissions::MAX_RETENTION_DAYS]] as $name => [$min, $max]) {
             $value = $values[$name];
             if (!is_string($value) || preg_match('/^[0-9]{1,4}$/D', $value) !== 1 || (int) $value < $min || (int) $value > $max) {
                 $errors[$name] = true;

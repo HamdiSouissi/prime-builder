@@ -13,7 +13,9 @@ use Prime\Content\EntryRepository;
 use Prime\Http\Request;
 use Prime\Http\Response;
 use Prime\Plugins\PluginContext;
+use PrimeBuilder\Configuration;
 use PrimeBuilder\Document\Layout;
+use PrimeBuilder\Forms\CsvExport;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
 use PrimeBuilder\Forms\Tokens;
@@ -34,6 +36,14 @@ final class ContactForms
         if (!$this->canManage($request)) {
             return Response::text('', 403);
         }
+        $search = self::searchQuery($request);
+        $rawPage = $request->query('page', '1');
+        if ($search === null || !is_string($rawPage) || preg_match('/^[1-9][0-9]{0,5}$/D', $rawPage) !== 1) {
+            return Response::text(t('plugin::prime-builder.forms.search_invalid'), 422)->withHeader('Cache-Control', 'no-store, private');
+        }
+        $page = (int) $rawPage;
+        $results = $this->submissions->search($search, Submissions::PAGE_SIZE + 1, ($page - 1) * Submissions::PAGE_SIZE);
+        $hasNext = count($results) > Submissions::PAGE_SIZE;
         $title = t('plugin::prime-builder.forms.inbox');
         $data = $this->plugin->app()->get(AdminContext::class)->build($request, $title, [
             'pageHeading' => $title,
@@ -41,13 +51,51 @@ final class ContactForms
                 ['label' => t('admin.nav.dashboard'), 'url' => '/admin'],
                 ['label' => $title, 'url' => null],
             ],
-            'submissions' => $this->submissions->latest(),
+            'submissions' => array_slice($results, 0, Submissions::PAGE_SIZE),
+            'search' => $search,
+            'page' => $page,
+            'hasNext' => $hasNext && $page < 999999,
+            'retentionDays' => Submissions::retentionDays(Configuration::get($this->plugin->settings(), 'submission_retention_days', Submissions::RETENTION_DAYS)),
         ]);
         if (is_array($data['adminStyles'] ?? null)) {
             $data['adminStyles'][] = $this->plugin->url('css/dashboard.css');
         }
         return Response::html($this->plugin->views()->render('prime-builder::admin/submissions', $data))
-            ->withHeader('Cache-Control', 'no-store, private');
+            ->withHeader('Cache-Control', 'no-store, private')
+            ->withHeader('Referrer-Policy', 'no-referrer');
+    }
+
+    public function export(Request $request): Response
+    {
+        if (!$this->canManage($request)) {
+            return Response::text('', 403)->withHeader('Cache-Control', 'no-store, private');
+        }
+        $search = self::searchQuery($request);
+        $rawPage = $request->query('page');
+        if ($search === null || ($rawPage !== null && (!is_string($rawPage) || preg_match('/^[1-9][0-9]{0,5}$/D', $rawPage) !== 1))) {
+            return Response::text(t('plugin::prime-builder.forms.search_invalid'), 422)->withHeader('Cache-Control', 'no-store, private');
+        }
+        $csv = CsvExport::render($this->submissions, $search, $rawPage === null ? null : (int) $rawPage);
+        if ($csv === null) {
+            return Response::text(t('plugin::prime-builder.forms.export_too_large'), 413)->withHeader('Cache-Control', 'no-store, private');
+        }
+        return new Response($csv, 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="prime-builder-submissions.csv"',
+            'Cache-Control' => 'no-store, private',
+            'X-Content-Type-Options' => 'nosniff',
+            'Referrer-Policy' => 'no-referrer',
+        ]);
+    }
+
+    private static function searchQuery(Request $request): ?string
+    {
+        $search = $request->query('q', '');
+        if (!is_string($search) || strlen($search) > 640 || !mb_check_encoding($search, 'UTF-8')
+            || mb_strlen($search, 'UTF-8') > 160 || preg_match('/[\x00-\x1f\x7f]/', $search) === 1) {
+            return null;
+        }
+        return trim($search);
     }
 
     public function delete(Request $request, string $id): Response

@@ -4572,6 +4572,156 @@ final class IntegrationTest extends TestCase
         self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/submissions')->status());
     }
 
+    public function testSubmissionSearchAndCsvExportCoverHistoryAndRequirePermission(): void
+    {
+        $app = $this->activated('contributor');
+        $pdo = $this->db($app)->pdo();
+        $insert = $pdo->prepare('INSERT INTO pc_prime_builder_submissions (entry_id, node_id, sender_name, sender_email, message, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+        $insert->execute([1, '-contact', '=HYPERLINK("https://example.test", "go")', '+sender@example.test', " \t@SUM(1,1)\nquoted \"text\"", '2025-01-01 00:00:00']);
+        for ($i = 0; $i < 105; $i++) {
+            $insert->execute([1, 'contact', 'Person ' . $i, 'person' . $i . '@example.test', $i === 2 ? 'literal 100%_! marker' : 'ordinary message', '2025-01-02 00:00:00']);
+        }
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/submissions')->status());
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/submissions/export')->status());
+        $pdo->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.forms')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+
+        $first = $this->send($app, 'GET', '/admin/prime-builder/submissions');
+        self::assertSame(200, $first->status(), $first->body());
+        self::assertSame(100, substr_count($first->body(), 'data-pb-submission-id='));
+        self::assertStringContainsString('Page suivante', $first->body());
+        self::assertStringNotContainsString('HYPERLINK', $first->body());
+        self::assertSame('no-referrer', $first->header('Referrer-Policy'));
+        $second = $this->send($app, 'GET', '/admin/prime-builder/submissions?page=2');
+        self::assertSame(6, substr_count($second->body(), 'data-pb-submission-id='));
+        self::assertStringContainsString('HYPERLINK', $second->body());
+        self::assertStringContainsString('Page précédente', $second->body());
+        foreach (['%25', '_', '%21', 'person2%40example.test', 'marker', 'contact'] as $term) {
+            $found = $this->send($app, 'GET', '/admin/prime-builder/submissions?q=' . $term);
+            self::assertSame(200, $found->status());
+            self::assertGreaterThan(0, substr_count($found->body(), 'data-pb-submission-id='), $term);
+        }
+        self::assertSame(1, substr_count($this->send($app, 'GET', '/admin/prime-builder/submissions?q=%25')->body(), 'data-pb-submission-id='));
+        self::assertSame(1, substr_count($this->send($app, 'GET', '/admin/prime-builder/submissions?q=_')->body(), 'data-pb-submission-id='));
+        $notFound = $this->send($app, 'GET', '/admin/prime-builder/submissions?q=' . rawurlencode("' OR 1=1 --"));
+        self::assertSame(0, substr_count($notFound->body(), 'data-pb-submission-id='));
+        foreach (['?q[]=a', '?q=' . str_repeat('x', 161), '?page=0', '?page=1000000'] as $query) {
+            self::assertSame(422, $this->send($app, 'GET', '/admin/prime-builder/submissions' . $query)->status(), $query);
+        }
+        self::assertSame(422, $this->send($app, 'GET', '/admin/prime-builder/submissions/export?q[]=a')->status());
+        self::assertSame(422, $this->send($app, 'GET', '/admin/prime-builder/submissions/export?page=0')->status());
+        $xss = $this->send($app, 'GET', '/admin/prime-builder/submissions?q=' . rawurlencode('<script>'));
+        self::assertStringContainsString('&lt;script&gt;', $xss->body());
+        self::assertStringNotContainsString('<script>', $xss->body());
+
+        $csv = $this->send($app, 'GET', '/admin/prime-builder/submissions/export');
+        self::assertSame(200, $csv->status(), $csv->body());
+        self::assertSame('text/csv; charset=UTF-8', $csv->header('Content-Type'));
+        self::assertStringContainsString('attachment;', (string) $csv->header('Content-Disposition'));
+        self::assertStringContainsString('no-store', (string) $csv->header('Cache-Control'));
+        self::assertSame('nosniff', $csv->header('X-Content-Type-Options'));
+        self::assertStringStartsWith("\xef\xbb\xbf", $csv->body());
+        $file = fopen('php://memory', 'w+b');
+        self::assertNotFalse($file);
+        fwrite($file, substr($csv->body(), 3));
+        rewind($file);
+        self::assertSame(['id', 'entry_id', 'node_id', 'created_at_utc', 'name', 'email', 'message'], fgetcsv($file, 0, ',', '"', ''));
+        $rows = [];
+        while (($row = fgetcsv($file, 0, ',', '"', '')) !== false) {
+            $rows[] = $row;
+        }
+        fclose($file);
+        self::assertCount(106, $rows);
+        self::assertSame(["'-contact", "'=HYPERLINK(\"https://example.test\", \"go\")", "'+sender@example.test", "' \t@SUM(1,1)\nquoted \"text\""], [$rows[105][2], $rows[105][4], $rows[105][5], $rows[105][6]]);
+        $filtered = $this->send($app, 'GET', '/admin/prime-builder/submissions/export?q=%25');
+        self::assertSame(200, $filtered->status());
+        self::assertStringContainsString('100%_! marker', $filtered->body());
+        self::assertStringNotContainsString('ordinary message', $filtered->body());
+        $pdo->exec("DELETE FROM pc_role_capabilities WHERE role_id = 2 AND capability = 'prime_builder.forms'");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/submissions/export')->status());
+    }
+
+    public function testSubmissionExportRejectsOversizedResultsInsteadOfReturningPartialCsv(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $insert = $pdo->prepare('INSERT INTO pc_prime_builder_submissions (entry_id, node_id, sender_name, sender_email, message, created_at) VALUES (1, ?, ?, ?, ?, ?)');
+        $pdo->beginTransaction();
+        for ($i = 0; $i <= \PrimeBuilder\Forms\Submissions::EXPORT_MAX_ROWS; $i++) {
+            $insert->execute(['contact', $i === 0 ? 'One distinct name' : 'Name', 'a@example.test', 'short', '2025-01-01 00:00:00']);
+        }
+        $pdo->commit();
+        $tooMany = $this->send($app, 'GET', '/admin/prime-builder/submissions/export');
+        self::assertSame(413, $tooMany->status());
+        self::assertStringContainsString('Aucun fichier partiel', $tooMany->body());
+        self::assertSame(200, $this->send($app, 'GET', '/admin/prime-builder/submissions/export?q=distinct')->status());
+        $lastPage = $this->send($app, 'GET', '/admin/prime-builder/submissions/export?page=51');
+        self::assertSame(200, $lastPage->status());
+        self::assertStringContainsString('One distinct name', $lastPage->body());
+        self::assertSame(2, substr_count($lastPage->body(), "\r\n"));
+        $pdo->exec('DELETE FROM pc_prime_builder_submissions');
+        $pdo->beginTransaction();
+        for ($i = 0; $i < 450; $i++) {
+            $insert->execute(['contact', 'Name', 'a@example.test', str_repeat('x', 20000), '2025-01-01 00:00:00']);
+        }
+        $pdo->commit();
+        $tooLarge = $this->send($app, 'GET', '/admin/prime-builder/submissions/export');
+        self::assertSame(413, $tooLarge->status());
+        self::assertStringContainsString('no-store', (string) $tooLarge->header('Cache-Control'));
+        self::assertStringNotContainsString('id,entry_id', $tooLarge->body());
+    }
+
+    public function testSubmissionRetentionIsValidatedAndUsedByTheScheduler(): void
+    {
+        $app = $this->activated('admin');
+        $repository = new \PrimeBuilder\Forms\Submissions($this->db($app));
+        $now = time();
+        $values = ['name' => 'Nom', 'email' => 'a@example.test', 'message' => 'Message'];
+        self::assertTrue($repository->create(1, 'contact', $values, hash('sha256', 'six-days'), $now - 6 * 86400));
+        self::assertTrue($repository->create(1, 'contact', $values, hash('sha256', 'eight-days'), $now - 8 * 86400));
+        $screen = $this->send($app, 'GET', '/admin/prime-builder/settings');
+        self::assertSame(200, $screen->status());
+        self::assertStringContainsString('name="submission_retention_days"', $screen->body());
+        $fields = [
+            '_csrf_token' => $app->get(Csrf::class)->token(), 'pages' => '1', 'other_types' => '',
+            'breakpoint_tablet' => '1024', 'breakpoint_mobile' => '767',
+            'kit_primary' => '#c9441f', 'kit_text' => '#1a1d29', 'kit_font_size' => '16',
+            'submission_retention_days' => '7',
+        ];
+        $kernel = $app->get(Kernel::class);
+        self::assertSame(419, $kernel->handle(Request::create('POST', '/admin/prime-builder/settings', body: array_diff_key($fields, ['_csrf_token' => true])))->status());
+        self::assertSame(302, $kernel->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields))->status());
+        $settings = $app->get(Settings::class);
+        self::assertSame(7, $settings->get('plugin.prime-builder.configuration')['submission_retention_days']);
+        self::assertStringContainsString('plus de 7 jours', $this->send($app, 'GET', '/admin/prime-builder/submissions')->body());
+        foreach (['0', '-1', '3651', '1.5', '', ['7']] as $invalid) {
+            $bad = $fields;
+            $bad['submission_retention_days'] = $invalid;
+            self::assertSame(422, $kernel->handle(Request::create('POST', '/admin/prime-builder/settings', body: $bad))->status());
+            self::assertSame(7, $settings->get('plugin.prime-builder.configuration')['submission_retention_days']);
+        }
+        $oldForm = $fields;
+        unset($oldForm['submission_retention_days']);
+        self::assertSame(302, $kernel->handle(Request::create('POST', '/admin/prime-builder/settings', body: $oldForm))->status());
+        self::assertSame(7, $settings->get('plugin.prime-builder.configuration')['submission_retention_days']);
+        $schedule = $app->get(Hooks::class)->apply('scheduler.register', new \Prime\Scheduler\Schedule());
+        $purge = $schedule->get('prime-builder.purge-submissions')->closure();
+        self::assertNotNull($purge);
+        $purge();
+        self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->count());
+        $remaining = $this->db($app)->table('prime_builder_submissions')->first();
+        self::assertNotNull($remaining);
+        self::assertSame(gmdate('Y-m-d H:i:s', $now - 6 * 86400), $remaining['created_at']);
+        $fields['submission_retention_days'] = '3650';
+        self::assertSame(302, $kernel->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields))->status());
+        self::assertSame(3650, $settings->get('plugin.prime-builder.configuration')['submission_retention_days']);
+        self::assertSame(30, \PrimeBuilder\Forms\Submissions::retentionDays('invalid'));
+        self::assertSame(30, \PrimeBuilder\Forms\Submissions::retentionDays(0));
+    }
+
     public function testThemePartialsUseRealTemplatesAndRequireTheirOwnCapability(): void
     {
         $app = $this->activated('contributor');

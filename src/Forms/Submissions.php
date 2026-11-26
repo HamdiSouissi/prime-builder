@@ -13,6 +13,10 @@ final class Submissions
     public const TABLE = 'prime_builder_submissions';
     public const TOKEN_TABLE = 'prime_builder_form_tokens';
     public const RETENTION_DAYS = 30;
+    public const MAX_RETENTION_DAYS = 3650;
+    public const PAGE_SIZE = 100;
+    public const EXPORT_MAX_ROWS = 5000;
+    public const EXPORT_MAX_BYTES = 8 * 1024 * 1024;
 
     public function __construct(private readonly Connection $db)
     {
@@ -56,7 +60,38 @@ final class Submissions
      */
     public function latest(): array
     {
-        $rows = $this->db->table(self::TABLE)->orderBy('id', 'DESC')->limit(100)->get();
+        return $this->search('', self::PAGE_SIZE);
+    }
+
+    /**
+     * Search all historical messages, not just the first page. The same literal
+     * search is used for the inbox and export, with a keyset cursor for export.
+     *
+     * @return list<array{id: int, entry_id: int, node_id: string, name: string, email: string, message: string, created_at: string}>
+     */
+    public function search(string $search, int $limit, int $offset = 0, ?int $beforeId = null): array
+    {
+        $where = [];
+        $bindings = [];
+        if ($search !== '') {
+            // The HTTP validator rejects controls in search terms. A control
+            // escape avoids MySQL 5.7's unicode-collation bug when the literal
+            // search contains the escape character itself (for example '!').
+            $escape = "\x1f";
+            $pattern = '%' . str_replace([$escape, '%', '_'], [$escape . $escape, $escape . '%', $escape . '_'], $search) . '%';
+            $where[] = '(sender_name LIKE ? ESCAPE ? OR sender_email LIKE ? ESCAPE ? OR message LIKE ? ESCAPE ? OR node_id LIKE ? ESCAPE ?)';
+            $bindings = [$pattern, $escape, $pattern, $escape, $pattern, $escape, $pattern, $escape];
+        }
+        if ($beforeId !== null) {
+            $where[] = 'id < ?';
+            $bindings[] = $beforeId;
+        }
+        $sql = 'SELECT id, entry_id, node_id, sender_name, sender_email, message, created_at FROM `'
+            . $this->db->prefixed(self::TABLE) . '`'
+            . ($where === [] ? '' : ' WHERE ' . implode(' AND ', $where))
+            . ' ORDER BY id DESC LIMIT ' . max(1, min(self::PAGE_SIZE + 1, $limit))
+            . ' OFFSET ' . max(0, $offset);
+        $rows = $this->db->select($sql, $bindings);
         return array_map(static fn (array $row): array => [
             'id' => (int) $row['id'],
             'entry_id' => (int) $row['entry_id'],
@@ -68,15 +103,25 @@ final class Submissions
         ], $rows);
     }
 
+    public static function retentionDays(mixed $value): int
+    {
+        if ((is_int($value) || is_string($value)) && preg_match('/^[0-9]{1,4}$/D', (string) $value) === 1
+            && (int) $value >= 1 && (int) $value <= self::MAX_RETENTION_DAYS) {
+            return (int) $value;
+        }
+        return self::RETENTION_DAYS;
+    }
+
     public function delete(int $id): bool
     {
         return $id > 0 && $this->db->table(self::TABLE)->where('id', '=', $id)->delete() > 0;
     }
 
-    public function purge(int $now): int
+    public function purge(int $now, int $retentionDays = self::RETENTION_DAYS): int
     {
+        $days = self::retentionDays($retentionDays);
         $messages = $this->db->table(self::TABLE)
-            ->where('created_at', '<', gmdate('Y-m-d H:i:s', $now - self::RETENTION_DAYS * 86400))
+            ->where('created_at', '<', gmdate('Y-m-d H:i:s', $now - $days * 86400))
             ->delete();
         $tokens = $this->db->table(self::TOKEN_TABLE)->where('expires_at', '<=', gmdate('Y-m-d H:i:s', $now))->delete();
         return $messages + $tokens;

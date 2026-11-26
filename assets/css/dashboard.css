@@ -1,6 +1,7 @@
 /* The CMS shell's default small avatar color is slightly below AA on its soft background. */
 :root:has([data-pb-dashboard]) .pc-topbar .pc-avatar,:root:has([data-pb-settings]) .pc-topbar .pc-avatar,:root:has([data-pb-theme]) .pc-topbar .pc-avatar,:root:has([data-pb-theme-rules]) .pc-topbar .pc-avatar,:root:has([data-pb-submissions]) .pc-topbar .pc-avatar{color:#a8381a}
 .pb-submission-content dl{display:grid;grid-template-columns:minmax(7rem,auto) minmax(0,1fr);gap:.5rem 1rem}.pb-submission-content dt{font-weight:700}.pb-submission-content dd{margin:0;overflow-wrap:anywhere}.pb-submission-message{white-space:pre-wrap}@media(max-width:600px){.pb-submission-content dl{grid-template-columns:1fr}.pb-submission-content dd{margin-bottom:.5rem}}
+.pb-submissions-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 
 /* Theme Builder: compact, keyboard-operable condition cards and title picker. */
 .pb-theme-model-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; padding-block: .75rem; border-bottom: 1px solid var(--pc-border, #d5d8df); }
