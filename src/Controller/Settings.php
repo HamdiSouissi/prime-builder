@@ -11,6 +11,7 @@ use Prime\Http\Request;
 use Prime\Http\Response;
 use Prime\Plugins\PluginContext;
 use PrimeBuilder\Configuration;
+use PrimeBuilder\Dynamic\PublicFields;
 use PrimeBuilder\Forms\NotificationSettings;
 use PrimeBuilder\Forms\Submissions;
 use Throwable;
@@ -29,6 +30,7 @@ final class Settings
         'kit_font_size' => 16,
         'submission_retention_days' => Submissions::RETENTION_DAYS,
         'notification_email' => '',
+        'public_fields' => '',
     ];
 
     public function __construct(private readonly PluginContext $plugin)
@@ -53,7 +55,7 @@ final class Settings
         $errors = [];
         foreach (self::DEFAULTS as $name => $default) {
             $raw = $request->body($name);
-            if (in_array($name, ['submission_retention_days', 'notification_email'], true) && $raw === null) {
+            if (in_array($name, ['submission_retention_days', 'notification_email', 'public_fields'], true) && $raw === null) {
                 // Settings pages opened before an upgrade must not reset new choices.
                 $raw = Configuration::get($this->plugin->settings(), $name, $default);
                 if ($name === 'submission_retention_days') {
@@ -92,6 +94,13 @@ final class Settings
                 }
             }
             $values['other_types'] = implode(', ', array_unique($names));
+        }
+
+        $publicFields = PublicFields::parse($values['public_fields']);
+        if ($publicFields === null) {
+            $errors['public_fields'] = true;
+        } else {
+            $values['public_fields'] = implode("\n", $publicFields);
         }
 
         foreach (['breakpoint_tablet' => [600, 2000], 'breakpoint_mobile' => [320, 1600], 'kit_font_size' => [12, 28], 'submission_retention_days' => [1, Submissions::MAX_RETENTION_DAYS]] as $name => [$min, $max]) {

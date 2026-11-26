@@ -6,11 +6,15 @@ namespace PrimeBuilder\Widgets;
 
 use Prime\Content\Entry;
 use Prime\Editor\BlockRegistry;
+use Prime\Http\Request;
 use Prime\Log\Logger;
+use Prime\Plugins\PluginContext;
 use Prime\Security\HtmlSanitizer;
 use Prime\Site\PageContext;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\MediaReferences;
+use PrimeBuilder\Dynamic\Context as DynamicContext;
+use PrimeBuilder\Dynamic\Layout as DynamicLayout;
 use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Forms\FileInput;
 use PrimeBuilder\Styles\CssClasses;
@@ -41,6 +45,9 @@ final class Renderer
         private readonly ?MediaReferences $mediaReferences = null,
         private readonly bool $allowThemeHtml = false,
         private readonly array $pageQuery = [],
+        private readonly ?PluginContext $dynamicPlugin = null,
+        private readonly ?Request $request = null,
+        private readonly ?PageContext $dynamicPageContext = null,
     ) {
     }
 
@@ -50,11 +57,16 @@ final class Renderer
      */
     public function render(array $data, ?array $styleLayout = null): string
     {
-        $elements = is_array($data['elements'] ?? null) ? $data['elements'] : [];
+        $definitions = $this->registry->all();
+        $sourceElements = is_array($data['elements'] ?? null) ? $data['elements'] : [];
+        // CSS belongs to the saved tree, never to a visitor-dependent filtered copy.
         $this->styleOwner = Scope::forLayout($styleLayout ?? $data);
+        $dynamic = $this->dynamicContext();
+        $elements = DynamicLayout::prepare($sourceElements, $definitions, $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null);
         // A targeted preview renders only one subtree, but its anchors and any
-        // table of contents must still agree with the complete document.
-        $outlineElements = is_array($styleLayout['elements'] ?? null) ? $styleLayout['elements'] : $elements;
+        // table of contents must still agree with the complete visible document.
+        $outlineSource = is_array($styleLayout['elements'] ?? null) ? $styleLayout['elements'] : $sourceElements;
+        $outlineElements = DynamicLayout::prepare($outlineSource, $definitions, $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null);
         $this->tableOfContents = $this->containsTableOfContents($outlineElements) ? new TableOfContents($outlineElements, $this->sanitizer) : null;
         $this->inferredImageDimensions = [];
         if ($this->mediaReferences !== null) {
@@ -71,7 +83,21 @@ final class Renderer
         $refresh = $this->entry !== null && $this->containsLive($elements)
             ? ' data-pb-live="/api/prime-builder/v1/documents/' . $this->entry->id . '/live"'
             : '';
-        return '<div class="pb-layout"' . $document . $refresh . '>' . $this->renderElements($elements, $this->registry->all()) . '</div>';
+        return '<div class="pb-layout"' . $document . $refresh . '>' . $this->renderElements($elements, $definitions) . '</div>';
+    }
+
+    private function dynamicContext(): ?DynamicContext
+    {
+        if ($this->dynamicPlugin === null || (!$this->live && $this->pageContext === null && $this->dynamicPageContext === null && !$this->trustedPreview)) {
+            return null;
+        }
+        try {
+            return new DynamicContext($this->dynamicPlugin, $this->dynamicPageContext ?? $this->pageContext, $this->entry, $this->request, $this->trustedPreview);
+        } catch (Throwable $exception) {
+            // Failure to resolve a visitor must not expose conditional content.
+            $this->logger?->error('Prime Builder dynamic context failed', ['message' => $exception->getMessage()]);
+            return null;
+        }
     }
 
     /**
@@ -241,7 +267,10 @@ final class Renderer
                         }
                     } elseif ($type === 'theme_zone') {
                         try {
-                            $output[$id] = $this->content->themeZone($settings, true, $this->entry);
+                            $page = $this->pageContext ?? ($this->entry !== null ? new PageContext(type: PageContext::TYPE_ENTRY, entry: $this->entry) : null);
+                            $output[$id] = $page !== null
+                                ? $this->content->themeZoneForPage($settings, $page, $this->request, $this->entry)
+                                : $this->content->themeZone($settings, true, $this->entry);
                         } catch (Throwable $exception) {
                             $this->logger?->error('Prime Builder theme zone failed', ['message' => $exception->getMessage()]);
                             $output[$id] = '';
@@ -253,7 +282,9 @@ final class Renderer
                 }
             }
         };
-        $walk(is_array($data['elements'] ?? null) ? $data['elements'] : []);
+        $dynamic = $this->dynamicContext();
+        $elements = DynamicLayout::prepare(is_array($data['elements'] ?? null) ? $data['elements'] : [], $this->registry->all(), $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null);
+        $walk($elements);
         return $output;
     }
 
@@ -277,7 +308,7 @@ final class Renderer
             }
             try {
                 $content = $this->renderWidget($type, $settings, $definitions[$type], $id);
-                if (($definitions[$type]['container'] ?? false) === true) {
+                if (($definitions[$type]['container'] ?? false) === true || $type === 'global_widget') {
                     $content .= $this->renderElements($children, $definitions);
                 }
                 $hidden = ($element['hidden'] ?? false) === true ? ' hidden' : '';
@@ -384,7 +415,7 @@ final class Renderer
                 : ($this->content?->shareButtons($settings, $this->entry) ?? ShareButtons::render($settings, '')),
             'table_of_contents' => ($this->tableOfContents ?? new TableOfContents([], $this->sanitizer))->render($settings),
             'theme_zone' => $this->pageContext !== null
-                ? ($this->content?->themeZoneInPage($settings, $this->pageContext) ?? '')
+                ? ($this->content?->themeZoneInPage($settings, $this->pageContext, $this->request) ?? '')
                 : ($this->content?->themeZone($settings, $this->live, $this->entry) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>'),
             'form' => $this->renderForm($settings, $id),
             'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry, is_string($settings['block_anchor'] ?? null) ? $settings['block_anchor'] : null),

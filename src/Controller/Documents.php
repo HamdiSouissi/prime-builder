@@ -30,6 +30,7 @@ use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
+use PrimeBuilder\Theme\GlobalWidgets;
 use PrimeBuilder\Theme\Models;
 use PrimeBuilder\Theme\Partials;
 use PrimeBuilder\Widgets\Assets;
@@ -208,6 +209,17 @@ final class Documents
                         // A faulty third-party registry must not prevent opening the editor.
                     }
                 }
+                if ($name === 'global_widget' && $fieldName === 'global_id') {
+                    $field['type'] = 'enum';
+                    $field['values'] = [];
+                    $field['option_labels'] = [];
+                    foreach ((new Models($this->plugin->settings(), $this->plugin->app()->get(\Prime\Settings\Settings::class)))->all() as $model) {
+                        if ($model['kind'] === 'global' && $model['enabled'] === true) {
+                            $field['values'][] = $model['id'];
+                            $field['option_labels'][$model['id']] = $model['name'];
+                        }
+                    }
+                }
                 if ($name === 'navigation' && $fieldName === 'menu_id') {
                     // The CMS owns menus. A removed menu remains a valid saved reference
                     // but only currently available menu IDs are offered in the inspector.
@@ -248,7 +260,8 @@ final class Documents
                 'container' => ($definition['container'] ?? false) === true,
                 // The contact widget's endpoints currently require a persisted entry.
                 'hidden' => ($definition['hidden'] ?? false) === true || ($name === 'html' && !$user->can('prime_builder.unfiltered_html'))
-                    || ($themeModel !== null && $name === 'form'),
+                    || ($themeModel !== null && $name === 'form')
+                    || (($themeModel['kind'] ?? null) === 'global' && !in_array($name, GlobalWidgets::ALLOWED, true)),
                 'readOnly' => ($definition['read_only'] ?? false) === true || ($name === 'html' && !$user->can('prime_builder.unfiltered_html')),
             ];
         }
@@ -256,8 +269,25 @@ final class Documents
         foreach (['conversion_failed', 'original_read_only', 'original_group_warning', 'html_read_only', 'markup', 'unsaved_short', 'confirm_title', 'notice_title', 'cancel', 'continue', 'color_picker_text', 'color_picker_background', 'color_picker_border', 'color_reference_text', 'color_reference_background', 'color_reference_border', 'color_custom', 'kit_primary', 'kit_text', 'unit', 'rename_element', 'rename_save', 'rename_cancel', 'collapse_tree', 'expand_tree', 'context_menu', 'element_toolbar', 'copy', 'paste', 'paste_style', 'reset_style', 'copied', 'pasted', 'widgets', 'search', 'navigator', 'content', 'style', 'advanced', 'add', 'remove', 'duplicate', 'move_up', 'move_down', 'empty', 'select', 'save', 'saving', 'saved', 'save_error', 'unsaved', 'back', 'desktop', 'tablet', 'mobile', 'undo', 'redo', 'preview', 'publish', 'draft', 'text', 'url', 'alt', 'width', 'height', 'level', 'layout', 'direction', 'columns', 'author', 'value', 'anchor', 'widget_classes', 'widget_classes_help', 'widget_classes_error', 'padding', 'padding_sides', 'padding_top', 'padding_right', 'padding_bottom', 'padding_left', 'margin', 'margin_sides', 'margin_sides_help', 'margin_top', 'margin_right', 'margin_bottom', 'margin_left', 'gap', 'font_size', 'border_style', 'border_width', 'border_color', 'border_none', 'border_solid', 'border_dashed', 'border_dotted', 'border_double', 'border_help', 'box_shadow', 'shadow_none', 'shadow_soft', 'shadow_medium', 'shadow_strong', 'shadow_help', 'radius', 'min_height', 'color', 'background', 'align', 'left', 'center', 'right', 'flex', 'grid', 'column', 'row', 'structure', 'base', 'confirm_replace', 'replace', 'select_container', 'responsive_help', 'visibility', 'visibility_warning', 'position', 'static', 'relative', 'absolute', 'fixed', 'sticky', 'offset_top', 'offset_right', 'offset_bottom', 'offset_left', 'z_index', 'auto', 'numeric_value', 'position_mode', 'position_warning', 'value_inherited', 'value_all_sides', 'value_defined', 'value_default', 'history', 'history_initial', 'history_change', 'history_current', 'history_help', 'drop', 'drop_before', 'drop_after', 'drop_inside', 'drop_invalid', 'revisions', 'document_status', 'edit_element', 'invalid', 'connection_error', 'autosave_found', 'restore', 'discard', 'library', 'library_intro', 'insert', 'import', 'export', 'section_template', 'page_template', 'save_template', 'template_saved', 'template_error', 'template_delete', 'template_delete_confirm', 'template_deleted', 'confirm_template', 'invalid_import', 'imported', 'import_help', 'favorites', 'favorite_add', 'favorite_remove', 'move_to', 'root', 'commands', 'command_search', 'command_empty', 'close', 'scheduled', 'schedule_date', 'schedule_invalid', 'pro', 'form_fields', 'form_fields_help', 'form_fields_customize', 'form_fields_legacy', 'form_fields_invalid', 'form_fields_reset', 'form_field', 'form_field_name', 'form_field_email', 'form_field_message', 'form_field_label', 'form_field_type', 'form_field_step', 'form_field_options', 'form_field_value', 'form_field_required', 'form_field_up', 'form_field_down', 'form_field_remove', 'form_field_add', 'form_field_default', 'form_option_default', 'form_type_text', 'form_type_email', 'form_type_phone', 'form_type_number', 'form_type_textarea', 'form_type_select', 'form_type_checkbox', 'form_type_radio', 'form_type_date', 'form_type_acceptance', 'form_type_hidden', 'form_type_file', 'form_file_help', 'items', 'list_type', 'unordered', 'ordered', 'title', 'image_url', 'button_text', 'icon', 'star', 'check', 'heart', 'spark', 'prefix', 'suffix', 'label', 'title_1', 'text_1', 'title_2', 'text_2', 'title_3', 'text_3', 'choose_media', 'choose_images', 'media_row_label', 'media_row_number', 'media_row_empty', 'media_row_overflow', 'media_row_choose', 'media_row_help', 'media_row_help_portrait', 'media_row_updated', 'media_row_error', 'media_row_changed', 'media_list_added', 'media_list_error', 'media_carousel_add_error', 'media_grid', 'media_error', 'accessible_label', 'job_title', 'initial', 'closed', 'open', 'facebook', 'instagram', 'linkedin', 'youtube', 'mastodon', 'images', 'video_title', 'captions', 'caption_language', 'transcript', 'fr', 'en', 'default_option', 'layout_mode', 'flow', 'grid_columns', 'wrap', 'nowrap', 'justify', 'items_align', 'start', 'end', 'space-between', 'stretch', 'limit', 'show_excerpt', 'show', 'hide', 'source', 'excerpt', 'published', 'block_type', 'block_data', 'block_anchor', 'paragraph', 'heading', 'list', 'quote', 'separator', 'code', 'table', 'callout'] as $key) {
             $ui[$key] = t('plugin::prime-builder.ui.' . $key);
         }
-        foreach (['rich_visual', 'rich_source', 'rich_toolbar', 'rich_bold', 'rich_italic', 'rich_unordered', 'rich_ordered', 'rich_block', 'rich_paragraph', 'rich_h2', 'rich_h3', 'rich_h4', 'rich_quote', 'rich_pre', 'rich_link', 'rich_link_url', 'rich_link_apply', 'rich_link_remove', 'rich_link_invalid', 'rich_link_select', 'rich_help', 'rich_unsupported', 'rich_limit'] as $key) {
+        foreach (['rich_visual', 'rich_source', 'rich_toolbar', 'rich_bold', 'rich_italic', 'rich_unordered', 'rich_ordered', 'rich_block', 'rich_paragraph', 'rich_h2', 'rich_h3', 'rich_h4', 'rich_quote', 'rich_pre', 'rich_link', 'rich_link_url', 'rich_link_apply', 'rich_link_remove', 'rich_link_invalid', 'rich_link_select', 'rich_help', 'rich_unsupported', 'rich_limit', 'dynamic_title', 'dynamic_choose', 'dynamic_insert', 'dynamic_help', 'conditions_title', 'conditions_help', 'conditions_auth', 'conditions_role', 'conditions_device', 'conditions_start', 'conditions_end', 'conditions_any', 'conditions_guest', 'conditions_authenticated', 'conditions_invalid'] as $key) {
             $ui[$key] = t('plugin::prime-builder.ui.' . $key);
+        }
+        $tags = [];
+        foreach (\PrimeBuilder\Dynamic\Tags::NAMES as $name) {
+            $tags[] = ['value' => '{{' . $name . '}}', 'label' => t('plugin::prime-builder.ui.dynamic_tag_' . str_replace('.', '_', $name))];
+        }
+        $publicFields = \PrimeBuilder\Dynamic\PublicFields::parse(Configuration::get($this->plugin->settings(), 'public_fields', '')) ?? [];
+        foreach ($publicFields as $field) {
+            [, $name] = explode('.', $field, 2);
+            $tags[] = ['value' => '{{entry.field.' . $name . '}}', 'label' => t('plugin::prime-builder.ui.dynamic_custom') . ' ' . $field];
+        }
+        $roles = [];
+        try {
+            foreach ($this->plugin->app()->get(\Prime\Auth\RoleRepository::class)->all() as $role) {
+                $roles[] = ['value' => $role->slug, 'label' => $role->label()];
+            }
+        } catch (\Throwable) {
+            // The editor still works when a third-party role provider fails.
         }
         $document = $entry->decodedContent();
         $originals = OriginalContent::fromAppKey($this->plugin->app()->config()->get('app.key'));
@@ -289,6 +319,8 @@ final class Documents
             'publishedAt' => $entry->publishedAt,
             'canPublish' => $themeModel === null && $type !== null && $service->canPublish($user, $type),
             'widgets' => $definitions,
+            'dynamicTags' => $tags,
+            'roles' => $roles,
             'widgetDefaults' => $this->widgetDefaults(),
             'canTemplates' => $user->can('prime_builder.edit') && $user->can('prime_builder.templates'),
             'canHtml' => $user->can('prime_builder.unfiltered_html'),
@@ -420,17 +452,20 @@ final class Documents
                 return ApiError::response('forbidden', 403, $request);
             }
         }
-        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals, $htmlContent, true, mediaReferences: $this->plugin->app()->get(MediaReferences::class));
+        $renderer = new Renderer(new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class)), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $this->plugin->logger(), $this->plugin->app()->get(Content::class), $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals, $htmlContent, true, mediaReferences: $this->plugin->app()->get(MediaReferences::class), dynamicPlugin: $this->plugin, request: $request);
+        $expanded = $this->plugin->app()->get(GlobalWidgets::class)->expand($result['data']);
         if (array_key_exists('target', $body)) {
             $target = $body['target'];
-            $elements = is_array($result['data']['elements'] ?? null) ? $result['data']['elements'] : [];
-            $element = is_string($target) ? $this->previewElement($elements, $target) : null;
+            $elements = is_array($expanded['elements'] ?? null) ? $expanded['elements'] : [];
+            // Targets must belong to the editable document, not generated children.
+            $original = is_array($result['data']['elements'] ?? null) ? $result['data']['elements'] : [];
+            $element = is_string($target) && $this->previewElement($original, $target) !== null ? $this->previewElement($elements, $target) : null;
             if ($element === null) {
                 return ApiError::response('validation_failed', 422, $request);
             }
-            return Response::json(['data' => ['target' => $target, 'html' => $renderer->render(['version' => 1, 'elements' => [$element]], $result['data'])]]);
+            return Response::json(['data' => ['target' => $target, 'html' => $renderer->render(['version' => 1, 'elements' => [$element]], $expanded), 'preview' => $expanded]]);
         }
-        return Response::json(['data' => ['html' => $renderer->render($result['data']), 'layout' => $result['data']]]);
+        return Response::json(['data' => ['html' => $renderer->render($expanded), 'layout' => $result['data'], 'preview' => $expanded]]);
     }
 
     /** Import uses the same entry-bound validation as preview, with an additional capability. */
@@ -498,7 +533,7 @@ final class Documents
         if ($result['errors'] !== []) {
             return ApiError::response('not_found', 404, $request);
         }
-        $renderer = new Renderer($registry, $sanitizer, $this->plugin->logger(), $content, $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals);
+        $renderer = new Renderer($registry, $sanitizer, $this->plugin->logger(), $content, $entry, true, $this->plugin->app()->get(BlockRegistry::class), $originals, trustedPreview: !$public, dynamicPlugin: $this->plugin, request: $request);
         $query = $request->query();
         return Response::json(['data' => ['widgets' => $renderer->liveWidgets($result['data'], is_array($query) ? $query : [])]])
             ->withHeader('Cache-Control', 'no-store, private')
@@ -550,6 +585,7 @@ final class Documents
             if ($data === null) {
                 return Response::text('', 404);
             }
+            $data = $this->plugin->app()->get(GlobalWidgets::class)->expand($data);
             $css = (new Compiler((int) Configuration::get($this->plugin->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($this->plugin->settings(), 'breakpoint_mobile', 767)))->compile($data);
             if (!hash_equals(substr(hash('sha256', $css), 0, 16), $matches[2])) {
                 return Response::text('', 404);

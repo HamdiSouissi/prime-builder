@@ -5704,6 +5704,341 @@ final class IntegrationTest extends TestCase
         self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/theme-models/' . $id, ['content' => $document, 'source_hash' => \PrimeBuilder\Theme\Models::sourceHash([])], $unauthorized)->status());
     }
 
+    public function testDynamicTagsAndConditionsNeverPersistOrLeakThroughThePageCache(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $pdo->exec('CREATE TABLE pc_menus (id ' . $idColumn . ', name VARCHAR(150) NOT NULL, slug VARCHAR(120) NOT NULL UNIQUE, location VARCHAR(80) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)');
+        $pdo->exec('CREATE TABLE pc_menu_items (id ' . $idColumn . ", menu_id INTEGER NOT NULL, parent_id INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0, type VARCHAR(20) NOT NULL DEFAULT 'url', target_id INTEGER NULL, url VARCHAR(500) NULL, label VARCHAR(255) NOT NULL DEFAULT '', target VARCHAR(16) NOT NULL DEFAULT '_self', css_class VARCHAR(255) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $settings = $app->get(Settings::class);
+        $settings->set('site.name', 'Atelier & <Site>');
+        $settings->set('site.tagline', 'Le slogan public');
+        $settings->set('plugin.prime-builder.public_fields', "post.subtitle\npost.bad_url\npost.photo\npost.relation\npost.multiple");
+        $fields = $app->get(\Prime\Content\Fields\FieldRegistry::class);
+        $fields->registerGroup(new \Prime\Content\Fields\FieldGroup('test.public', 'Test', ['post'], [
+            new \Prime\Content\Fields\Field('subtitle', 'text', 'Sous-titre'),
+            new \Prime\Content\Fields\Field('secret', 'text', 'Secret'),
+            new \Prime\Content\Fields\Field('bad_url', 'url', 'Adresse'),
+            new \Prime\Content\Fields\Field('photo', 'media', 'Photo'),
+            new \Prime\Content\Fields\Field('relation', 'entry', 'Relation'),
+            new \Prime\Content\Fields\Field('multiple', 'text', 'Multiple', multiple: true),
+        ]));
+        $media = $app->get(\Prime\Media\MediaRepository::class)->create([
+            'disk_path' => 'tests/dynamic.png', 'filename' => 'dynamic.png', 'original_name' => 'dynamic.png',
+            'extension' => 'png', 'mime_type' => 'image/png', 'kind' => 'image', 'width' => 640, 'height' => 480,
+        ]);
+        $entries = $app->get(EntryRepository::class);
+        $entries->setMeta(1, [
+            '_featured_media_id' => $media->id, 'photo' => $media->id, 'subtitle' => '<script>attaque</script> & texte',
+            'secret' => 'METADONNEE PRIVEE', 'bad_url' => 'javascript:alert(1)', 'relation' => 2, 'multiple' => 'MULTIPLE PRIVÉ',
+        ]);
+        $taxonomies = $app->get(TaxonomyRegistry::class);
+        $taxonomies->register(new Taxonomy('interne', ['singular' => 'Interne'], contentTypes: ['post'], public: false));
+        $termRepository = $app->get(\Prime\Content\TermRepository::class);
+        $publicTerm = $termRepository->create('category', 'Public & libre');
+        $privateTerm = $termRepository->create('interne', 'TERME PRIVÉ');
+        $entries->syncTerms(1, [$publicTerm->id, $privateTerm->id]);
+        $entry = $entries->find(1);
+        self::assertNotNull($entry);
+        $url = $app->get(UrlGenerator::class)->entryUrl($entry);
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $request = Request::create('GET', $url);
+        self::assertTrue($cache->isCacheableRequest($request));
+        $cache->store($request, Response::html('ANCIENNE PAGE EN CACHE'));
+        self::assertNotNull($cache->lookup($request));
+        $node = static fn (string $id, string $type, array $settings = [], array $conditions = []): array => [
+            'id' => $id, 'type' => $type, 'settings' => $settings, 'styles' => [], 'children' => [], 'conditions' => $conditions,
+        ];
+        $elements = [
+            $node('identity', 'heading', ['text' => 'SITE {{site.title}} — {{site.tagline}}']),
+            $node('entry', 'heading', ['text' => 'CONTENU {{entry.title}} — {{entry.excerpt}} — {{entry.date}} — {{entry.author}} — {{today}}']),
+            $node('terms', 'heading', ['text' => 'TERMES {{entry.terms}}']),
+            $node('name', 'heading', ['text' => 'VISITEUR {{user.name}}']),
+            $node('field', 'text', ['text' => '<p>PUBLIC {{entry.field.subtitle}} / {{entry.field.secret}} / {{entry.field.relation}} / {{entry.field.multiple}}</p>']),
+            $node('image', 'image', ['url' => '{{entry.featured_image}}', 'alt' => '{{entry.title}}']),
+            $node('photo', 'image', ['url' => '{{entry.field.photo}}', 'alt' => 'Photo']),
+            $node('link', 'button', ['text' => 'Lien interne', 'url' => '{{entry.url}}']),
+            $node('badlink', 'button', ['text' => 'Lien dangereux', 'url' => '{{entry.field.bad_url}}']),
+            $node('guest', 'heading', ['text' => 'SEULEMENT VISITEUR'], ['auth' => 'guest']),
+            $node('member', 'heading', ['text' => 'SEULEMENT MEMBRE'], ['auth' => 'authenticated']),
+            $node('role', 'heading', ['text' => 'SEULEMENT ADMIN'], ['role' => 'administrator']),
+            $node('past', 'heading', ['text' => 'PERIODE ACTIVE'], ['start' => '2000-01-01T00:00', 'end' => '2999-01-01T00:00']),
+            $node('future', 'heading', ['text' => 'PERIODE FUTURE'], ['start' => '2999-01-01T00:00']),
+            $node('mobile', 'heading', ['text' => 'APPAREIL MOBILE'], ['device' => 'mobile']),
+        ];
+        $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => $elements]]]];
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'dynamic', ['*'])['token'];
+        $preview = $this->send($app, 'POST', '/api/prime-builder/v1/documents/1/render', ['data' => $document['blocks'][0]['data']], $token);
+        self::assertSame(200, $preview->status(), $preview->body());
+        self::assertStringContainsString('VISITEUR Admin Prime', $this->json($preview)['data']['html']);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $token)->status());
+        $stored = $entries->find(1);
+        self::assertNotNull($stored);
+        foreach (['{{', 'Admin Prime', 'METADONNEE PRIVEE', 'SEULEMENT MEMBRE', 'SEULEMENT VISITEUR', 'PERIODE ACTIVE', 'APPAREIL MOBILE', 'Atelier &amp;'] as $absent) {
+            self::assertStringNotContainsString($absent, $stored->contentHtml);
+            self::assertStringNotContainsString($absent, $stored->contentText);
+        }
+        self::assertFalse($cache->isCacheableRequest($request));
+        self::assertNull($cache->lookup($request), 'A cache entry from before the dynamic edit is not served');
+        $auth = $app->get(\Prime\Auth\Auth::class);
+        $getPage = static fn (): Response => $app->get(Kernel::class)->handle(Request::create('GET', $url, headers: ['Accept' => 'text/html']));
+        $auth->logout();
+        $guest = $getPage();
+        self::assertSame(200, $guest->status(), $guest->body());
+        self::assertStringContainsString('no-store', (string) $guest->header('Cache-Control'));
+        $html = $guest->body();
+        self::assertSame(1, substr_count(strtolower($html), '<!doctype'));
+        self::assertStringContainsString('SITE Atelier &amp; &lt;Site&gt; — Le slogan public', $html);
+        self::assertStringContainsString('CONTENU Article publié — Résumé', $html);
+        self::assertStringContainsString('Admin Prime', $html, 'An active author name can be public');
+        self::assertStringContainsString('TERMES Public &amp; libre', $html);
+        self::assertStringContainsString('&lt;script&gt;attaque&lt;/script&gt; &amp; texte', $html);
+        self::assertStringNotContainsString('<script>attaque</script>', $html);
+        self::assertStringContainsString('src="/uploads/tests/dynamic.png"', $html);
+        self::assertStringContainsString('href="' . $url . '"', $html);
+        self::assertStringNotContainsString('javascript:alert', $html);
+        self::assertStringContainsString('SEULEMENT VISITEUR', $html);
+        self::assertStringNotContainsString('SEULEMENT MEMBRE', $html);
+        self::assertStringNotContainsString('SEULEMENT ADMIN', $html);
+        self::assertStringContainsString('PERIODE ACTIVE', $html);
+        self::assertStringNotContainsString('PERIODE FUTURE', $html);
+        foreach (['METADONNEE PRIVEE', 'TERME PRIVÉ', 'MULTIPLE PRIVÉ', 'admin@prime.test', '{{user.name}}'] as $secret) {
+            self::assertStringNotContainsString($secret, $html);
+        }
+        $auth->login($this->user($app, 2));
+        $contributor = $getPage();
+        self::assertStringContainsString('VISITEUR Contributeur', $contributor->body());
+        self::assertStringContainsString('SEULEMENT MEMBRE', $contributor->body());
+        self::assertStringNotContainsString('SEULEMENT VISITEUR', $contributor->body());
+        self::assertStringNotContainsString('SEULEMENT ADMIN', $contributor->body());
+        self::assertStringContainsString('no-store', (string) $contributor->header('Cache-Control'));
+        $auth->login($this->user($app, 1));
+        $admin = $getPage();
+        self::assertStringContainsString('VISITEUR Admin Prime', $admin->body());
+        self::assertStringContainsString('SEULEMENT ADMIN', $admin->body());
+        $auth->logout();
+        self::assertStringNotContainsString('Admin Prime</h2>', $getPage()->body(), 'The previous visitor name is never shared');
+        $settings->set('plugin.prime-builder.public_fields', '');
+        self::assertStringNotContainsString('attaque', $getPage()->body(), 'Removing the allowlist revokes the field immediately');
+        $app->get(PluginManager::class)->deactivate('prime-builder');
+        $fallbackPage = $app->get(\Prime\Site\SiteRenderer::class)->render(new PageContext(type: PageContext::TYPE_ENTRY, entry: $stored));
+        self::assertStringNotContainsString('SEULEMENT MEMBRE', $fallbackPage);
+        self::assertStringNotContainsString('METADONNEE PRIVEE', $fallbackPage);
+        self::assertStringNotContainsString('{{', $fallbackPage);
+        self::assertStringContainsString('SITE ', $fallbackPage);
+    }
+
+    public function testDynamicFallbackInCorePreviewsAndPreviewPermissions(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $pdo->exec('CREATE TABLE pc_menus (id ' . $idColumn . ', name VARCHAR(150) NOT NULL, slug VARCHAR(120) NOT NULL UNIQUE, location VARCHAR(80) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)');
+        $pdo->exec('CREATE TABLE pc_menu_items (id ' . $idColumn . ", menu_id INTEGER NOT NULL, parent_id INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0, type VARCHAR(20) NOT NULL DEFAULT 'url', target_id INTEGER NULL, url VARCHAR(500) NULL, label VARCHAR(255) NOT NULL DEFAULT '', target VARCHAR(16) NOT NULL DEFAULT '_self', css_class VARCHAR(255) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
+        $pdo->exec('CREATE TABLE pc_media_usage (entry_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $elements = [
+            ['id' => 'static', 'type' => 'heading', 'settings' => ['text' => 'APERÇU STATIQUE'], 'styles' => [], 'children' => []],
+            ['id' => 'dynamic', 'type' => 'heading', 'settings' => ['text' => 'DYNAMIQUE {{entry.title}} / {{user.name}}'], 'styles' => [], 'children' => []],
+            ['id' => 'member', 'type' => 'heading', 'settings' => ['text' => 'APERÇU MEMBRE'], 'styles' => [], 'children' => [], 'conditions' => ['auth' => 'authenticated']],
+        ];
+        $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => $elements]]]];
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'dynamic preview', ['*'])['token'];
+        foreach ([1, 2, 3] as $id) {
+            $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/' . $id, ['content' => $document], $token);
+            self::assertSame(200, $response->status(), $response->body());
+        }
+        $entries = $app->get(EntryRepository::class);
+        $draft = $entries->find(2);
+        self::assertNotNull($draft);
+        self::assertStringNotContainsString('Admin Prime', $draft->contentHtml);
+        self::assertStringNotContainsString('APERÇU MEMBRE', $draft->contentHtml);
+        $kernel = $app->get(Kernel::class);
+        $get = static fn (string $url): Response => $kernel->handle(Request::create('GET', $url, headers: ['Accept' => 'text/html']));
+        foreach (['/admin/content/post/2/preview', '/blog/brouillon-admin?preview=1&entry_id=2', '/blog/article-publie?customizer_preview=1'] as $url) {
+            $preview = $get($url);
+            self::assertSame(200, $preview->status(), $preview->body());
+            self::assertStringContainsString('no-store', (string) $preview->header('Cache-Control'));
+            self::assertStringContainsString('APERÇU STATIQUE', $preview->body());
+            self::assertStringNotContainsString('DYNAMIQUE Brouillon admin / Admin Prime', $preview->body());
+            self::assertStringNotContainsString('APERÇU MEMBRE', $preview->body());
+        }
+        // A synthetic context outside an authorized HTTP preview also stays static.
+        $synthetic = new PageContext(type: PageContext::TYPE_ENTRY, entry: $draft, isPreview: true);
+        $rendered = $app->get(\Prime\Site\SiteRenderer::class)->render($synthetic);
+        self::assertStringNotContainsString('APERÇU MEMBRE', $rendered);
+        $auth = $app->get(\Prime\Auth\Auth::class);
+        $auth->login($this->user($app, 2));
+        self::assertSame(403, $get('/admin/content/post/2/preview')->status());
+        $other = $get('/blog/brouillon-admin?preview=1&entry_id=2');
+        self::assertSame(404, $other->status());
+        self::assertStringNotContainsString('APERÇU STATIQUE', $other->body());
+        $own = $get('/admin/content/post/3/preview');
+        self::assertSame(200, $own->status(), $own->body());
+        self::assertStringNotContainsString('APERÇU MEMBRE', $own->body());
+        $auth->logout();
+        self::assertNotSame(200, $get('/admin/content/post/2/preview')->status());
+        self::assertSame(404, $get('/blog/brouillon-admin?preview=1&entry_id=2')->status());
+    }
+
+    public function testGlobalWidgetsUpdateEveryReferenceAndPurgeCachedPages(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $pdo->exec('CREATE TABLE pc_menus (id ' . $idColumn . ', name VARCHAR(150) NOT NULL, slug VARCHAR(120) NOT NULL UNIQUE, location VARCHAR(80) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)');
+        $pdo->exec('CREATE TABLE pc_menu_items (id ' . $idColumn . ", menu_id INTEGER NOT NULL, parent_id INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0, type VARCHAR(20) NOT NULL DEFAULT 'url', target_id INTEGER NULL, url VARCHAR(500) NULL, label VARCHAR(255) NOT NULL DEFAULT '', target VARCHAR(16) NOT NULL DEFAULT '_self', css_class VARCHAR(255) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
+        $kernel = $app->get(Kernel::class);
+        $csrf = $app->get(Csrf::class)->token();
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'globals', ['*'])['token'];
+        $post = static fn (string $url, array $fields): Response => $kernel->handle(Request::create('POST', $url, body: ['_csrf_token' => $csrf] + $fields));
+        $created = $post('/admin/prime-builder/theme/create', ['name' => 'Bloc partagé', 'kind' => 'global', 'source' => '']);
+        self::assertSame(302, $created->status(), $created->body());
+        self::assertSame(1, preg_match('~/([a-f0-9]{32})$~D', (string) $created->header('Location'), $matches));
+        $id = $matches[1] ?? '';
+        $editor = $this->send($app, 'GET', '/admin/prime-builder/theme/' . $id . '/edit');
+        self::assertSame(200, $editor->status());
+        self::assertSame(1, preg_match('/<textarea hidden data-pb-config>(.*?)<\/textarea>/s', $editor->body(), $configMatch));
+        $config = json_decode(html_entity_decode($configMatch[1] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8'), true);
+        self::assertTrue($config['widgets']['global_widget']['hidden']);
+        self::assertTrue($config['widgets']['html']['hidden']);
+        self::assertFalse($config['widgets']['heading']['hidden']);
+        $node = static fn (string $type, string $nodeId, array $settings = [], array $children = [], array $styles = []): array => [
+            'id' => $nodeId, 'type' => $type, 'settings' => $settings, 'styles' => $styles, 'children' => $children,
+        ];
+        $definition = [$node('container', 'group', ['layout' => 'flex', 'direction' => 'column'], [
+            $node('heading', 'heading', ['text' => 'Valeur initiale', 'level' => 2], [], ['desktop' => ['color' => '#123456']]),
+            $node('tabs', 'tabs', ['title_1' => 'Un', 'title_2' => 'Deux']),
+        ])];
+        $document = static fn (array $elements): array => ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => $elements]]]];
+        $modelUrl = '/api/prime-builder/v1/theme-models/' . $id;
+        $firstHash = \PrimeBuilder\Theme\Models::sourceHash([]);
+        $forbidden = [$node('global_widget', 'loop', ['global_id' => $id])];
+        self::assertSame(422, $this->send($app, 'PATCH', $modelUrl, ['content' => $document($forbidden), 'source_hash' => $firstHash], $token)->status());
+        $forbidden = [$node('form', 'form')];
+        self::assertSame(422, $this->send($app, 'PATCH', $modelUrl, ['content' => $document($forbidden), 'source_hash' => $firstHash], $token)->status());
+        $tooMany = [$node('heading', 'one'), $node('heading', 'two')];
+        self::assertSame(422, $this->send($app, 'PATCH', $modelUrl, ['content' => $document($tooMany), 'source_hash' => $firstHash], $token)->status());
+        $save = $this->send($app, 'PATCH', $modelUrl, ['content' => $document($definition), 'source_hash' => $firstHash], $token);
+        self::assertSame(200, $save->status(), $save->body());
+        $modelHash = $this->json($save)['data']['source_hash'];
+        $metadata = ['name' => 'Bloc partagé', 'priority' => '0', 'enabled' => '1', 'include_type' => ['all'], 'include_value' => ['']];
+        self::assertSame(302, $post('/admin/prime-builder/theme/' . $id, $metadata)->status());
+        $references = [$node('global_widget', 'first', ['global_id' => $id]), $node('global_widget', 'second', ['global_id' => $id])];
+        $secondId = $this->insertGridEntry($pdo, 'post', 'published', 'Autre page', 'autre-page', 1);
+        foreach ([1, $secondId] as $entryId) {
+            $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/' . $entryId, ['content' => $document($references)], $token);
+            self::assertSame(200, $response->status(), $response->body());
+        }
+        $invalid = [$node('global_widget', 'bad', ['global_id' => '../malicious'])];
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document($invalid)], $token)->status());
+        $invalid = [];
+        for ($i = 0; $i < 21; $i++) {
+            $invalid[] = $node('global_widget', 'ref_' . $i, ['global_id' => $id]);
+        }
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document($invalid)], $token)->status());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        $other = $app->get(EntryRepository::class)->find($secondId);
+        self::assertNotNull($entry);
+        self::assertNotNull($other);
+        self::assertStringContainsString('Valeur initiale', $entry->contentHtml);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, path: '/blog/article-publie', entry: $entry, contentType: $app->get(ContentTypeRegistry::class)->get('post'));
+        $otherPage = new PageContext(type: PageContext::TYPE_ENTRY, path: '/blog/autre-page', entry: $other, contentType: $app->get(ContentTypeRegistry::class)->get('post'));
+        $site = $app->get(\Prime\Site\SiteRenderer::class);
+        $before = $site->render($page);
+        self::assertSame(1, substr_count(strtolower($before), '<!doctype'));
+        self::assertSame(2, substr_count($before, '<h2>Valeur initiale</h2>'));
+        self::assertSame(2, preg_match_all('/data-pb-id="(pbt_g[a-f0-9]+_[a-f0-9]+)"[^>]*><h2>Valeur initiale<\/h2>/', $before, $generated));
+        self::assertNotSame($generated[1][0], $generated[1][1]);
+        $assets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $assets, $page);
+        self::assertStringContainsString('/assets/plugins/prime-builder/js/tabs.js', $assets->renderScripts());
+        self::assertSame(1, preg_match('~/prime-builder/css/1-([a-f0-9]{16})\.css~', $assets->renderStyles(), $cssMatch));
+        $oldCssUrl = '/prime-builder/css/1-' . ($cssMatch[1] ?? '') . '.css';
+        $oldCss = $this->send($app, 'GET', $oldCssUrl);
+        self::assertSame(200, $oldCss->status());
+        self::assertStringContainsString('#123456', $oldCss->body());
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $cachedRequest = Request::create('GET', '/global-cache-fixture');
+        self::assertTrue($cache->isCacheableRequest($cachedRequest));
+        $cache->store($cachedRequest, Response::html('avant modification'));
+        self::assertNotNull($cache->lookup($cachedRequest));
+        $definition[0]['children'][0]['settings']['text'] = 'Valeur mise à jour';
+        $definition[0]['children'][0]['styles']['desktop']['color'] = '#654321';
+        $save = $this->send($app, 'PATCH', $modelUrl, ['content' => $document($definition), 'source_hash' => $modelHash], $token);
+        self::assertSame(200, $save->status(), $save->body());
+        self::assertNull($cache->lookup($cachedRequest), 'Editing a global definition purges the core page cache');
+        self::assertStringContainsString('Valeur initiale', $entry->contentHtml, 'The saved fallback is not rewritten');
+        foreach ([$page, $otherPage] as $current) {
+            $updated = $site->render($current);
+            self::assertSame(2, substr_count($updated, '<h2>Valeur mise à jour</h2>'));
+            self::assertStringNotContainsString('<h2>Valeur initiale</h2>', $updated);
+        }
+        self::assertSame($oldCss->body(), $this->send($app, 'GET', $oldCssUrl)->body(), 'Previously advertised CSS stays immutable');
+        $changedAssets = new ThemeAssetRegistry();
+        $app->get(Hooks::class)->emit('site.assets', $changedAssets, $page);
+        self::assertSame(1, preg_match('~/prime-builder/css/1-([a-f0-9]{16})\.css~', $changedAssets->renderStyles(), $newCssMatch));
+        $oldHash = $cssMatch[1] ?? '';
+        $newHash = $newCssMatch[1] ?? '';
+        self::assertNotSame($oldHash, $newHash);
+        $newCss = $this->send($app, 'GET', '/prime-builder/css/1-' . $newHash . '.css');
+        self::assertStringContainsString('#654321', $newCss->body());
+        // A shared definition is resolved per page and visitor, not once when saved.
+        $modelHash = $this->json($save)['data']['source_hash'];
+        $definition[0]['children'][0]['settings']['text'] = 'Bonjour {{entry.title}} / {{user.name}}';
+        $definition[0]['children'][0]['conditions'] = ['auth' => 'authenticated'];
+        $dynamicSave = $this->send($app, 'PATCH', $modelUrl, ['content' => $document($definition), 'source_hash' => $modelHash], $token);
+        self::assertSame(200, $dynamicSave->status(), $dynamicSave->body());
+        self::assertSame(2, substr_count($site->render($page), 'Bonjour Article publié / Admin Prime'));
+        self::assertSame(2, substr_count($site->render($otherPage), 'Bonjour Autre page / Admin Prime'));
+        self::assertStringNotContainsString('Admin Prime', $entry->contentHtml, 'The fallback is not personalized');
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $zone = $zones->save('sidebar', $document($references), true);
+        self::assertStringNotContainsString('Admin Prime', $zone['content_html'], 'Saving a zone must not persist the editor name');
+        self::assertStringNotContainsString('Bonjour', $zone['content_html'], 'Conditional content is not a static fallback');
+        $content = $app->get(\PrimeBuilder\Widgets\Content::class);
+        self::assertSame(2, substr_count($content->themeZoneInPage(['zone' => 'sidebar'], $page), 'Bonjour Article publié / Admin Prime'));
+        self::assertSame(2, substr_count($content->themeZoneInPage(['zone' => 'sidebar'], $otherPage), 'Bonjour Autre page / Admin Prime'));
+        // A page containing only the zone widget has no dynamic tags of its own.
+        // It must still render the zone server-side and on later live refreshes.
+        $zonePageId = $this->insertGridEntry($pdo, 'post', 'published', 'Page de zone', 'page-de-zone', 1);
+        $zoneReference = [$node('theme_zone', 'zone_copy', ['zone' => 'sidebar'])];
+        $updatedZonePage = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/' . $zonePageId, ['content' => $document($zoneReference)], $token);
+        self::assertSame(200, $updatedZonePage->status(), $updatedZonePage->body());
+        $zoneEntry = $app->get(EntryRepository::class)->find($zonePageId);
+        self::assertNotNull($zoneEntry);
+        self::assertStringNotContainsString('Admin Prime', $zoneEntry->contentHtml);
+        $zonePage = new PageContext(type: PageContext::TYPE_ENTRY, path: '/blog/page-de-zone', entry: $zoneEntry, contentType: $app->get(ContentTypeRegistry::class)->get('post'));
+        self::assertSame(2, substr_count($site->render($zonePage), 'Bonjour Page de zone / Admin Prime'));
+        $zoneLive = $this->send($app, 'GET', '/api/prime-builder/v1/documents/' . $zonePageId . '/live');
+        self::assertSame(200, $zoneLive->status(), $zoneLive->body());
+        self::assertSame(2, substr_count($this->json($zoneLive)['data']['widgets']['zone_copy'], 'Bonjour Page de zone / Admin Prime'));
+        // Prime CMS has no runtime zone hook: a native zone remains a safe static
+        // fallback rather than risking persistence of visitor-specific output.
+        self::assertStringNotContainsString('Bonjour', $zones->renderLive('sidebar', $app->get(\Prime\Site\Zone\DynamicBlockRegistry::class)));
+        self::assertFalse($cache->isCacheableRequest($cachedRequest));
+        $auth = $app->get(\Prime\Auth\Auth::class);
+        $auth->logout();
+        self::assertStringNotContainsString('Bonjour Article', $site->render($page));
+        self::assertStringNotContainsString('Bonjour Page de zone', $site->render($zonePage));
+        $guestZoneLive = $this->send($app, 'GET', '/api/prime-builder/v1/documents/' . $zonePageId . '/live');
+        self::assertSame(200, $guestZoneLive->status(), $guestZoneLive->body());
+        self::assertStringNotContainsString('Bonjour', $this->json($guestZoneLive)['data']['widgets']['zone_copy']);
+        $auth->login($this->user($app, 1));
+        $csrf = $app->get(Csrf::class)->token();
+        $post = static fn (string $url, array $fields): Response => $kernel->handle(Request::create('POST', $url, body: ['_csrf_token' => $csrf] + $fields));
+        $metadata['enabled'] = null;
+        self::assertSame(302, $post('/admin/prime-builder/theme/' . $id, $metadata)->status());
+        self::assertStringNotContainsString('Bonjour Article publié / Admin Prime', $site->render($page), 'Disabling the updated definition removes its current content');
+        $app->get(PluginManager::class)->deactivate('prime-builder');
+        self::assertStringContainsString('Valeur initiale', $site->render($page), 'The saved HTML remains readable after deactivation');
+    }
+
     public function testThemeModelsAreEditableConditionalAndRestoreTheTheme(): void
     {
         $app = $this->activated('admin');
@@ -5905,6 +6240,8 @@ final class IntegrationTest extends TestCase
             ['id' => 'zone-a', 'type' => 'theme_zone', 'settings' => ['zone' => 'sidebar'], 'styles' => [], 'children' => []],
             ['id' => 'zone-b', 'type' => 'theme_zone', 'settings' => ['zone' => 'sidebar'], 'styles' => [], 'children' => []],
             ['id' => 'html', 'type' => 'html', 'settings' => ['markup' => '<strong>HTML autorisé</strong><script>bad()</script>'], 'styles' => [], 'children' => []],
+            ['id' => 'visitor', 'type' => 'heading', 'settings' => ['text' => 'PLUGIN {{entry.title}} / {{user.name}}'], 'styles' => [], 'children' => []],
+            ['id' => 'signed', 'type' => 'heading', 'settings' => ['text' => 'EN-TÊTE MEMBRE'], 'styles' => [], 'children' => [], 'conditions' => ['auth' => 'authenticated']],
         ];
         $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => $elements]]]];
         $updated = $this->send($app, 'PATCH', '/api/prime-builder/v1/theme-models/' . $id, ['content' => $document, 'source_hash' => \PrimeBuilder\Theme\Models::sourceHash([])], $token);
@@ -5962,6 +6299,17 @@ final class IntegrationTest extends TestCase
         self::assertSame(200, $first->status(), $first->body());
         self::assertStringContainsString('Article publié', $first->body());
         self::assertStringNotContainsString('Deuxième public', $first->body());
+        self::assertStringContainsString('PLUGIN  / Admin Prime', $first->body(), 'A plugin page has a visitor but no current entry');
+        self::assertStringContainsString('EN-TÊTE MEMBRE', $first->body());
+        self::assertStringContainsString('no-store', (string) $first->header('Cache-Control'));
+        $auth = $app->get(\Prime\Auth\Auth::class);
+        $auth->logout();
+        $guest = $kernel->handle(Request::create('GET', '/theme-plugin-page'));
+        self::assertSame(200, $guest->status(), $guest->body());
+        self::assertStringContainsString('PLUGIN  / ', $guest->body());
+        self::assertStringNotContainsString('Admin Prime', $guest->body());
+        self::assertStringNotContainsString('EN-TÊTE MEMBRE', $guest->body());
+        self::assertStringContainsString('no-store', (string) $guest->header('Cache-Control'));
         $assets = new ThemeAssetRegistry();
         $hooks->emit('site.assets', $assets, $page);
         self::assertStringContainsString('/assets/plugins/prime-builder/css/widgets/posts.css', $assets->renderStyles());

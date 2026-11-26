@@ -57,6 +57,11 @@ require_once dirname(__DIR__) . '/src/Widgets/Portfolio.php';
 require_once dirname(__DIR__) . '/src/Widgets/Slideshow.php';
 require_once dirname(__DIR__) . '/src/Widgets/TermIds.php';
 require_once dirname(__DIR__) . '/src/Widgets/Testimonials.php';
+require_once dirname(__DIR__) . '/src/Forms/NotificationSettings.php';
+require_once dirname(__DIR__) . '/src/Dynamic/Conditions.php';
+require_once dirname(__DIR__) . '/src/Dynamic/Layout.php';
+require_once dirname(__DIR__) . '/src/Dynamic/Tags.php';
+require_once dirname(__DIR__) . '/src/Theme/GlobalWidgets.php';
 require_once dirname(__DIR__) . '/src/Document/HtmlContent.php';
 require_once dirname(__DIR__) . '/src/Document/Validator.php';
 require_once dirname(__DIR__) . '/src/Document/Layout.php';
@@ -85,6 +90,57 @@ final class DocumentTest extends TestCase
     private function legacyGuard(array $layout): string
     {
         return ':where([data-pb-owner="' . Scope::forLayout($layout) . '"],:not([data-pb-owner])):not(:where(.pb-theme_zone .pb-element:not([data-pb-owner])))';
+    }
+
+    public function testDynamicFieldsAndConditionsValidateAndNeverPersistPersonalOrConditionalHtml(): void
+    {
+        $heading = $this->element('heading', 'personal');
+        $heading['settings'] = ['text' => 'Bonjour {{user.name}}', 'level' => 2];
+        $private = $this->element('heading', 'private');
+        $private['settings'] = ['text' => 'Réservé aux membres'];
+        $private['conditions'] = ['auth' => 'authenticated', 'role' => 'editor'];
+        $mobile = $this->element('heading', 'mobile');
+        $mobile['settings'] = ['text' => 'Seulement sur mobile'];
+        $mobile['conditions'] = ['device' => 'mobile'];
+        $button = $this->element('button', 'button');
+        $button['settings'] = ['text' => 'Lire', 'url' => '{{entry.url}}'];
+        $image = $this->element('image', 'image');
+        $image['settings'] = ['url' => '{{entry.featured_image}}', 'alt' => '{{entry.title}}'];
+        $layout = ['version' => 1, 'elements' => [$heading, $private, $mobile, $button, $image]];
+        $result = $this->validator()->validate($layout);
+        self::assertSame([], $result['errors']);
+        self::assertSame($private['conditions'], $result['data']['elements'][1]['conditions']);
+        $static = (new Renderer(new Registry(), new HtmlSanitizer()))->render($result['data']);
+        self::assertStringContainsString('Bonjour ', $static);
+        self::assertStringNotContainsString('{{', $static);
+        self::assertStringNotContainsString('Réservé aux membres', $static);
+        self::assertStringNotContainsString('Seulement sur mobile', $static);
+        self::assertStringNotContainsString('<img ', $static);
+        self::assertStringNotContainsString('<a ', $static);
+        $css = (new Compiler(1024, 767))->compile($result['data'], legacy: false);
+        self::assertStringContainsString('@media not all and (max-width:1024px)', $css);
+        self::assertStringContainsString('@media(max-width:1024px){@media not all and (max-width:767px)', $css);
+        self::assertSame(2, substr_count($css, 'data-pb-id="mobile"'));
+        $withoutDevice = $result['data'];
+        unset($withoutDevice['elements'][2]['conditions']);
+        self::assertNotSame(Scope::forLayout($withoutDevice), Scope::forLayout($result['data']));
+        $withoutDevice['elements'][1]['conditions'] = ['auth' => 'guest'];
+        $otherAuth = $withoutDevice;
+        $otherAuth['elements'][1]['conditions'] = ['auth' => 'authenticated'];
+        self::assertSame(Scope::forLayout($withoutDevice), Scope::forLayout($otherAuth));
+        foreach ([
+            ['auth' => 'guest', 'role' => 'editor'], ['start' => '2026-02-30T00:00'], ['device' => 'desktop;display:block'], ['unexpected' => ''],
+        ] as $invalid) {
+            $copy = $heading;
+            $copy['conditions'] = $invalid;
+            self::assertNotSame([], $this->validator()->validate(['version' => 1, 'elements' => [$copy]])['errors']);
+            self::assertStringNotContainsString('Bonjour', (new Renderer(new Registry(), new HtmlSanitizer()))->render(['version' => 1, 'elements' => [$copy]]));
+        }
+        foreach (['javascript:{{entry.url}}', '{{user.email}}', '{{entry.url}}?extra=1'] as $url) {
+            $copy = $button;
+            $copy['settings']['url'] = $url;
+            self::assertNotSame([], $this->validator()->validate(['version' => 1, 'elements' => [$copy]])['errors']);
+        }
     }
 
     public function testWidgetClassesAreBoundedNormalizedAndSafeEvenForDirectRendering(): void
@@ -729,7 +785,7 @@ final class DocumentTest extends TestCase
             'map' => 'map', 'image_carousel' => 'image_carousel', 'testimonial_carousel' => 'image_carousel', 'media_carousel' => 'image_carousel', 'slideshow' => 'image_carousel', 'gallery' => 'gallery', 'video' => 'video', 'form' => 'forms',
         ];
         $definitions = (new Registry())->all();
-        $builtIns = explode(' ', 'container heading text image button separator spacer quote alert progress anchor list accordion card icon_box icon icon_list image_box testimonial testimonial_carousel media_carousel slideshow portfolio review flip_box animated_heading code call_to_action price_table price_list countdown search_form navigation breadcrumbs site_title site_logo entry_title entry_excerpt entry_content entry_featured_image entry_info entry_navigation entry_author archive_title archive_list share_buttons table_of_contents toggle social theme_zone map star_rating counter gallery image_carousel video audio posts current_content form prime_block html original_content original_group tabs');
+        $builtIns = explode(' ', 'container heading global_widget text image button separator spacer quote alert progress anchor list accordion card icon_box icon icon_list image_box testimonial testimonial_carousel media_carousel slideshow portfolio review flip_box animated_heading code call_to_action price_table price_list countdown search_form navigation breadcrumbs site_title site_logo entry_title entry_excerpt entry_content entry_featured_image entry_info entry_navigation entry_author archive_title archive_list share_buttons table_of_contents toggle social theme_zone map star_rating counter gallery image_carousel video audio posts current_content form prime_block html original_content original_group tabs');
         self::assertEqualsCanonicalizing($builtIns, array_keys($definitions));
         foreach (array_keys($styled + $scriptGroups) as $type) {
             self::assertArrayHasKey($type, $definitions);

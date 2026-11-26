@@ -7,6 +7,7 @@ namespace PrimeBuilder\Popup;
 use Prime\Plugins\PluginContext;
 use Prime\Settings\Settings;
 use Prime\Site\PageContext;
+use PrimeBuilder\Theme\GlobalWidgets;
 use PrimeBuilder\Theme\Models;
 use PrimeBuilder\Theme\Partials;
 use PrimeBuilder\Widgets\Renderer;
@@ -17,7 +18,7 @@ final class Popups
     private readonly Models $models;
     private readonly Partials $partials;
 
-    public function __construct(PluginContext $plugin)
+    public function __construct(private readonly PluginContext $plugin)
     {
         $this->models = new Models($plugin->settings(), $plugin->app()->get(Settings::class));
         $this->partials = new Partials($plugin);
@@ -47,7 +48,7 @@ final class Popups
             }
             $layout = $this->partials->normalize($elements, contextual: true);
             if ($layout !== null) {
-                $result[] = ['model' => $model, 'layout' => Partials::namespaceLayout($layout, Partials::modelSlot($model))];
+                $result[] = ['model' => $model, 'layout' => $this->plugin->app()->get(GlobalWidgets::class)->expand(Partials::namespaceLayout($layout, Partials::modelSlot($model)))];
             }
         }
         return $result;

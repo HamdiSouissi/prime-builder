@@ -40,9 +40,13 @@ $renderRule = function (string $group, string $type, string $value): void {
         <section class="pc-card">
             <div class="pc-card__body pc-stack pc-stack--md">
                 <p><strong><?= $this->e(t('plugin::prime-builder.theme.kind_' . $model['kind'])) ?></strong></p>
-                <p><?= $this->e(t('plugin::prime-builder.' . ($model['kind'] === 'popup' ? 'popup.conditions_help' : 'theme.conditions_help'))) ?></p>
+                <p><?= $this->e(t('plugin::prime-builder.' . ($model['kind'] === 'global' ? 'theme.global_help' : ($model['kind'] === 'popup' ? 'popup.conditions_help' : 'theme.conditions_help')))) ?></p>
                 <div class="pc-field"><label class="pc-label" for="pb-name"><?= $this->e(t('plugin::prime-builder.theme.name')) ?></label><input class="pc-input" id="pb-name" name="name" maxlength="100" required value="<?= $this->e((string) $model['name']) ?>"></div>
-                <div class="pc-field"><label class="pc-label" for="pb-priority"><?= $this->e(t('plugin::prime-builder.theme.priority')) ?></label><input class="pc-input" id="pb-priority" name="priority" type="number" min="-1000" max="1000" required value="<?= $this->e((string) $model['priority']) ?>" aria-describedby="pb-priority-help"><p class="pc-field__help" id="pb-priority-help"><?= $this->e(t('plugin::prime-builder.' . ($model['kind'] === 'popup' ? 'popup.priority_help' : 'theme.priority_help'))) ?></p></div>
+                <?php if ($model['kind'] === 'global'): ?>
+                    <input type="hidden" name="priority" value="0"><input type="hidden" name="include_type[]" value="all"><input type="hidden" name="include_value[]" value="">
+                <?php else: ?>
+                    <div class="pc-field"><label class="pc-label" for="pb-priority"><?= $this->e(t('plugin::prime-builder.theme.priority')) ?></label><input class="pc-input" id="pb-priority" name="priority" type="number" min="-1000" max="1000" required value="<?= $this->e((string) $model['priority']) ?>" aria-describedby="pb-priority-help"><p class="pc-field__help" id="pb-priority-help"><?= $this->e(t('plugin::prime-builder.' . ($model['kind'] === 'popup' ? 'popup.priority_help' : 'theme.priority_help'))) ?></p></div>
+                <?php endif; ?>
                 <label><input type="checkbox" name="enabled" value="1"<?= $model['enabled'] ? ' checked' : '' ?>> <?= $this->e(t('plugin::prime-builder.theme.enabled')) ?></label>
                 <?php if ($model['kind'] === 'popup' && is_array($model['popup'] ?? null)): $popup = $model['popup']; ?>
                     <fieldset class="pb-theme-rules pc-stack pc-stack--md">
@@ -57,7 +61,7 @@ $renderRule = function (string $group, string $type, string $value): void {
                         <p><?= $this->e(t('plugin::prime-builder.popup.link_help')) ?> <code>#pb-popup-<?= $this->e((string) $model['id']) ?></code></p>
                     </fieldset>
                 <?php endif; ?>
-                <?php foreach (['include', 'exclude'] as $group): ?>
+                <?php if ($model['kind'] !== 'global'): foreach (['include', 'exclude'] as $group): ?>
                     <fieldset class="pb-theme-rules" data-pb-rule-group="<?= $this->e($group) ?>">
                         <legend><?= $this->e(t('plugin::prime-builder.theme.' . $group . '_rules')) ?></legend>
                         <div class="pc-stack pc-stack--md" data-pb-rule-list>
@@ -67,7 +71,7 @@ $renderRule = function (string $group, string $type, string $value): void {
                         </div>
                         <button class="pc-btn pc-btn--secondary" type="button" data-pb-add-rule><?= $this->e(t('plugin::prime-builder.theme.add_' . $group)) ?></button>
                     </fieldset>
-                <?php endforeach; ?>
+                <?php endforeach; endif; ?>
             </div>
             <div class="pc-card__footer pb-theme-actions"><button class="pc-btn pc-btn--primary" type="submit"><?= $this->e(t('plugin::prime-builder.ui.save')) ?></button><a class="pc-btn pc-btn--secondary" href="/admin/prime-builder/theme/<?= $this->e((string) $model['id']) ?>/edit"><?= $this->e(t('plugin::prime-builder.theme.edit_layout')) ?></a></div>
         </section>

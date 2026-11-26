@@ -1,4 +1,4 @@
-import { History, add, appendMediaCarouselSelection, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, firstInvalidWidgetClasses, freshIds, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, normalizeWidgetClasses, remove, reorder, replaceImageSource, replaceStructuredImage, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from './model.js';
+import { History, add, appendMediaCarouselSelection, appendMediaSelection, changedElement, containsWidget, createElement, duplicate, find, firstInvalidDisplayConditions, firstInvalidWidgetClasses, freshIds, id, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, normalizeWidgetClasses, remove, reorder, replaceImageSource, replaceStructuredImage, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, validDisplayConditions, withElementDefaults } from './model.js';
 import { makeRichField } from './rich-text.js';
 import { firstInvalidFormFields, makeFormFieldsControl } from './form-fields.js';
 
@@ -564,6 +564,34 @@ function makeField(name, schema, current, onChange, allowVisualRich = true) {
   });
   wrapper.append(input); return wrapper;
 }
+function makeDynamicPicker(name, schema, field) {
+  const wrapper = document.createElement('div'); wrapper.className = 'pb-dynamic-picker';
+  const label = document.createElement('label'); label.className = 'pb-field';
+  label.append(text('span', `${ui.dynamic_title} : ${schema.label || ui[name] || name}`));
+  const select = document.createElement('select'); select.dataset.pbDynamicFor = name;
+  const placeholder = text('option', ui.dynamic_choose); placeholder.value = ''; select.append(placeholder);
+  for (const tag of config.dynamicTags || []) {
+    const option = text('option', tag.label); option.value = tag.value; select.append(option);
+  }
+  label.append(select);
+  const insert = text('button', ui.dynamic_insert); insert.type = 'button'; insert.dataset.pbDynamicInsert = name;
+  insert.addEventListener('click', () => {
+    const value = select.value;
+    if (!value) { select.focus(); return; }
+    if (typeof field.insertDynamicTag === 'function') {
+      field.insertDynamicTag(value);
+    } else {
+      const control = field.querySelector('input, textarea');
+      if (!control) return;
+      if (schema.type === 'href' || schema.type === 'url') control.value = value;
+      else control.setRangeText(value, control.selectionStart, control.selectionEnd, 'end');
+      control.dispatchEvent(new Event('input', { bubbles: true }));
+      control.focus();
+    }
+  });
+  wrapper.append(label, insert, text('small', ui.dynamic_help, 'pb-inherit-hint'));
+  return wrapper;
+}
 function renderParentOptions(selectedElement) {
   parentSelect.replaceChildren();
   const rootOption = text('option', ui.root); rootOption.value = ''; parentSelect.append(rootOption);
@@ -780,6 +808,50 @@ function makeWidgetClassesControl(element) {
   label.append(input); wrapper.append(label, help, error); refresh();
   return wrapper;
 }
+function makeConditionsControl(element) {
+  const group = document.createElement('fieldset'); group.className = 'pb-conditions';
+  group.append(text('legend', ui.conditions_title));
+  const help = text('p', ui.conditions_help, 'pb-intro'); help.id = id(); group.append(help);
+  const error = text('p', '', 'pb-condition-error'); error.id = id(); error.setAttribute('role', 'status');
+  const initial = element.conditions && typeof element.conditions === 'object' && !Array.isArray(element.conditions) ? element.conditions : {};
+  const controls = {};
+  const definitions = [
+    ['auth', ui.conditions_auth, [['', ui.conditions_any], ['guest', ui.conditions_guest], ['authenticated', ui.conditions_authenticated]]],
+    ['role', ui.conditions_role, [['', ui.conditions_any], ...(config.roles || []).map(role => [role.value, role.label])]],
+    ['device', ui.conditions_device, [['', ui.conditions_any], ['desktop', ui.desktop], ['tablet', ui.tablet], ['mobile', ui.mobile]]],
+    ['start', ui.conditions_start, null], ['end', ui.conditions_end, null],
+  ];
+  for (const [name, title, options] of definitions) {
+    const label = document.createElement('label'); label.className = 'pb-field'; label.append(text('span', title));
+    const control = document.createElement(options ? 'select' : 'input');
+    control.dataset.pbCondition = name; control.setAttribute('aria-describedby', `${help.id} ${error.id}`);
+    if (options) {
+      for (const [value, optionLabel] of options) { const option = text('option', optionLabel); option.value = value; control.append(option); }
+      if (initial[name] && !options.some(([value]) => value === initial[name])) {
+        const stale = text('option', initial[name]); stale.value = initial[name]; control.append(stale);
+      }
+    } else { control.type = 'datetime-local'; control.step = '60'; control.min = '0001-01-01T00:00'; control.max = '9999-12-31T23:59'; }
+    control.value = initial[name] || ''; controls[name] = control; label.append(control); group.append(label);
+  }
+  const refresh = () => {
+    const current = find(history.present, element.id);
+    const valid = current && validDisplayConditions(current.conditions);
+    error.textContent = valid ? '' : ui.conditions_invalid;
+    for (const control of Object.values(controls)) control.setAttribute('aria-invalid', String(!valid));
+  };
+  for (const [name, control] of Object.entries(controls)) {
+    control.addEventListener(control.tagName === 'SELECT' ? 'change' : 'input', () => {
+      const current = find(history.present, element.id); if (!current) return;
+      const rules = current.conditions && typeof current.conditions === 'object' && !Array.isArray(current.conditions) ? { ...current.conditions } : {};
+      if (control.value === '') delete rules[name]; else rules[name] = control.value;
+      if (name === 'auth' && control.value === 'guest' && rules.role) { delete rules.role; controls.role.value = ''; }
+      if (name === 'role' && control.value && rules.auth === 'guest') { rules.auth = 'authenticated'; controls.auth.value = 'authenticated'; }
+      commit(update(history.present, element.id, { conditions: rules }), false, `${ui.advanced} : ${ui.conditions_title}`);
+      refresh();
+    });
+  }
+  group.append(error); refresh(); return group;
+}
 function renderSettings() {
   const element = find(history.present, selected);
   if (!element) { panel = 'widgets'; renderPanel(); return; }
@@ -796,7 +868,7 @@ function renderSettings() {
   }
   if (tab === 'content') {
     for (const [name, schema] of Object.entries(definition?.fields || {})) {
-      fields.append(makeField(name, schema, element.settings[name], value => {
+      const field = makeField(name, schema, element.settings[name], value => {
         const current = find(history.present, selected); if (!current) return;
         let settings;
         if (isImageSource(current.type, name)) {
@@ -814,7 +886,9 @@ function renderSettings() {
           if (value === undefined) delete settings[name]; else settings[name] = value;
         }
         commit(update(history.present, selected, { settings }), false, `${ui.content} : ${schema.label || ui[name] || name}`);
-      }, element.type !== 'html'));
+      }, element.type !== 'html');
+      fields.append(field);
+      if (['text', 'multiline', 'rich', 'href', 'url'].includes(schema.type)) fields.append(makeDynamicPicker(name, schema, field));
       if ((['image', 'video', 'audio'].includes(element.type) && name === 'url') || (['card', 'image_box', 'testimonial', 'review', 'call_to_action'].includes(element.type) && name === 'image_url')) {
         const choose = text('button', ui.choose_media, 'pb-media-button'); choose.type = 'button'; choose.dataset.pbMedia = '';
         choose.addEventListener('click', () => openMedia(element.id, name, ['video', 'audio'].includes(element.type) ? element.type : 'image', false, choose)); fields.append(choose);
@@ -829,7 +903,7 @@ function renderSettings() {
     }
     if (!fields.children.length) fields.append(text('p', ui.empty, 'pb-empty'));
   } else {
-    if (tab === 'advanced') fields.append(makeWidgetClassesControl(element));
+    if (tab === 'advanced') fields.append(makeWidgetClassesControl(element), makeConditionsControl(element));
     fields.append(text('p', ui.responsive_help, 'pb-intro'));
     const schemas = tab === 'style'
       ? { color: { type: 'color' }, background: { type: 'color' }, font_size: { type: 'length' }, align: { type: 'enum', values: ['left', 'center', 'right'] },
@@ -931,7 +1005,7 @@ function previewEventNode(doc, target) {
   let node = target.closest('[data-pb-id]');
   // Clicking inside a copied layout selects the containing zone widget instead
   // of a similarly named element in the entry or an unrelated theme partial.
-  while (node && node.closest('.pb-layout') !== canvas) {
+  while (node && (node.closest('.pb-layout') !== canvas || !find(history.present, node.dataset.pbId))) {
     node = node.parentElement?.closest('[data-pb-id]') || null;
   }
   return node && canvas.contains(node) ? node : null;
@@ -1063,7 +1137,7 @@ function cssColor(value) {
   if (value === 'kit:text') return 'var(--pb-kit-text)';
   return typeof value === 'string' && /^#[a-f\d]{3}([a-f\d]{3})?$/i.test(value) ? value : null;
 }
-function applyVisualStyles(doc) {
+function applyVisualStyles(doc, elements = history.present) {
   const canvas = previewCanvas(doc);
   if (!canvas) return;
   const spacingSides = {
@@ -1076,7 +1150,7 @@ function applyVisualStyles(doc) {
     for (const element of elements) {
       const node = previewNode(doc, element.id);
       if (node) {
-        node.draggable = true;
+        node.draggable = Boolean(find(history.present, element.id));
         // Recompute display before applying responsive visibility; the previous
         // preview may have hidden this same node at another device width.
         node.style.removeProperty('display');
@@ -1123,15 +1197,16 @@ function applyVisualStyles(doc) {
             if (value !== null) node.style[property] = value;
           }
         }
-        if (responsiveVisibility(element.styles, device) === 'hide') node.style.setProperty('display', 'none', 'important');
+        const conditionDevice = element.conditions?.device;
+        if (responsiveVisibility(element.styles, device) === 'hide' || (['desktop', 'tablet', 'mobile'].includes(conditionDevice) && conditionDevice !== device)) node.style.setProperty('display', 'none', 'important');
         if (element.id === selected) { node.style.outline = '2px solid #ed6647'; node.style.outlineOffset = '2px'; }
       }
       walk(element.children || []);
     }
   }
-  walk(history.present);
+  walk(elements);
 }
-function syncPreviewWidgetStyles(doc) {
+function syncPreviewWidgetStyles(doc, elements = history.present) {
   const wanted = new Set();
   const collect = nodes => {
     for (const node of nodes) {
@@ -1140,7 +1215,7 @@ function syncPreviewWidgetStyles(doc) {
       collect(node.children || []);
     }
   };
-  collect(history.present);
+  collect(elements);
   doc.querySelectorAll('link[data-pb-widget-style]').forEach(link => {
     if (!wanted.has(link.dataset.pbWidgetStyle)) link.remove();
     else wanted.delete(link.dataset.pbWidgetStyle);
@@ -1160,7 +1235,7 @@ async function renderPreview(sequence) {
   if (foreign || !frame.contentDocument) return;
   // A table of contents depends on headings throughout the document. Reconcile
   // the whole preview whenever one is present, even for a single-node edit.
-  const target = !previewNeedsFull && previewTargets.size === 1 && !containsWidget(history.present, 'table_of_contents') ? [...previewTargets][0] : null;
+  const target = !previewNeedsFull && previewTargets.size === 1 && !containsWidget(history.present, 'table_of_contents') && !containsWidget(history.present, 'global_widget') ? [...previewTargets][0] : null;
   try {
     const response = await fetch(`${apiBase}/render`, {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
@@ -1171,6 +1246,7 @@ async function renderPreview(sequence) {
     if (sequence !== requestNumber) return;
     const doc = frame.contentDocument;
     if (!doc?.head) return;
+    const previewElements = Array.isArray(result.data.preview?.elements) ? result.data.preview.elements : history.present;
     if (target !== null) {
       const selector = `[data-pb-id="${CSS.escape(target)}"]`;
       const current = previewNode(doc, target);
@@ -1193,7 +1269,7 @@ async function renderPreview(sequence) {
           synchronizeOwner(element.children || []);
         }
       };
-      synchronizeOwner(history.present);
+      synchronizeOwner(previewElements);
     } else {
       const current = previewCanvas(doc);
       const location = current ? { current } : initialPreviewLocation(doc);
@@ -1220,8 +1296,8 @@ async function renderPreview(sequence) {
     // match the saved sheet while unedited copies retain their saved appearance.
     previewNeedsFull = false;
     previewTargets.clear();
-    syncPreviewWidgetStyles(doc);
-    applyVisualStyles(doc);
+    syncPreviewWidgetStyles(doc, previewElements);
+    applyVisualStyles(doc, previewElements);
     positionToolbar();
   } catch { if (sequence === requestNumber) $('[data-pb-save-state]').textContent = ui.connection_error; }
 }
@@ -1288,6 +1364,13 @@ async function save() {
     selected = invalid.id; tab = 'advanced'; panel = 'settings'; renderPanel();
     $('[data-pb-save-state]').textContent = ui.widget_classes_error;
     $('[data-pb-classes]')?.focus();
+    return;
+  }
+  const invalidConditions = firstInvalidDisplayConditions(history.present);
+  if (invalidConditions) {
+    selected = invalidConditions.id; tab = 'advanced'; panel = 'settings'; renderPanel();
+    $('[data-pb-save-state]').textContent = ui.conditions_invalid;
+    $('[data-pb-condition]')?.focus();
     return;
   }
   const invalidForm = firstInvalidFormFields(history.present);

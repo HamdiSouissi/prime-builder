@@ -80,13 +80,15 @@ final class Compiler
                 $modes['desktop'] .= $selector . '{display:' . $layout . ';' . ($layout === 'grid' ? 'grid-template-columns:repeat(' . $columns . ',minmax(0,1fr));' : 'flex-direction:' . $direction . ';') . '}';
             }
             $styles = is_array($element['styles'] ?? null) ? $element['styles'] : [];
+            $conditions = is_array($element['conditions'] ?? null) ? $element['conditions'] : [];
+            $device = in_array($conditions['device'] ?? null, ['desktop', 'tablet', 'mobile'], true) ? $conditions['device'] : null;
             $visibility = 'show';
             foreach ($modes as $mode => $_) {
                 $values = is_array($styles[$mode] ?? null) ? $styles[$mode] : [];
                 if (in_array($values['visibility'] ?? null, ['show', 'hide'], true)) {
                     $visibility = $values['visibility'];
                 }
-                if ($visibility === 'hide') {
+                if ($visibility === 'hide' || ($device !== null && $device !== $mode)) {
                     $hidden[$mode] .= $selector . '{display:none!important}';
                 }
                 $declarations = '';

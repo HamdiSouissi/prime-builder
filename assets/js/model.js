@@ -241,6 +241,31 @@ export function responsiveVisibility(styles, device) {
   }
   return value;
 }
+// Mirrors the server's UTC, conjunctive condition grammar; server validation remains authoritative.
+export function validDisplayConditions(conditions) {
+  if (conditions === undefined) return true;
+  if (!conditions || typeof conditions !== 'object' || Array.isArray(conditions)) return false;
+  const keys = ['auth', 'role', 'device', 'start', 'end'];
+  if (Object.keys(conditions).some(key => !keys.includes(key) || typeof conditions[key] !== 'string')) return false;
+  if (conditions.auth && !['any', 'guest', 'authenticated'].includes(conditions.auth)) return false;
+  if (conditions.device && !['any', 'desktop', 'tablet', 'mobile'].includes(conditions.device)) return false;
+  if (conditions.role && (!/^[a-z][a-z0-9_-]{0,79}$/.test(conditions.role) || conditions.auth === 'guest')) return false;
+  const validDate = value => {
+    if (!value) return true;
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value) || value.startsWith('0000')) return false;
+    const date = new Date(`${value}:00Z`);
+    return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 16) === value;
+  };
+  return validDate(conditions.start) && validDate(conditions.end) && (!conditions.start || !conditions.end || conditions.start < conditions.end);
+}
+export function firstInvalidDisplayConditions(elements) {
+  for (const element of elements || []) {
+    if (!validDisplayConditions(element.conditions)) return element;
+    const child = firstInvalidDisplayConditions(element.children);
+    if (child) return child;
+  }
+  return null;
+}
 export function containsWidget(elements, type) {
   return Array.isArray(elements) && elements.some(element => element?.type === type || containsWidget(element?.children, type));
 }

@@ -25,6 +25,7 @@ final class Registry
         $fields = [
             'container' => ['layout' => ['type' => 'enum', 'values' => ['flex', 'grid']], 'direction' => ['type' => 'enum', 'values' => ['column', 'row']], 'columns' => ['type' => 'integer', 'min' => 1, 'max' => 6]],
             'heading' => ['text' => $text, 'level' => ['type' => 'integer', 'min' => 1, 'max' => 6]],
+            'global_widget' => ['global_id' => ['type' => 'global_id', 'max' => 32, 'label' => 'plugin::prime-builder.ui.global_select']],
             'text' => ['text' => ['type' => 'rich', 'max' => 20000]],
             'image' => ['url' => $url, 'alt' => $text, 'width' => ['type' => 'integer', 'min' => 1, 'max' => 10000], 'height' => ['type' => 'integer', 'min' => 1, 'max' => 10000]],
             'button' => ['text' => $text, 'url' => ['type' => 'href', 'max' => 2048]],

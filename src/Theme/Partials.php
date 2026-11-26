@@ -98,7 +98,7 @@ final class Partials
             return null;
         }
         $layout = $this->normalize($item['elements']);
-        return $layout === null ? null : self::namespaceLayout($layout, $slot);
+        return $layout === null ? null : $this->plugin->app()->get(GlobalWidgets::class)->expand(self::namespaceLayout($layout, $slot));
     }
 
     /** The best valid model wins; a damaged model cannot hide a valid fallback.
@@ -114,7 +114,7 @@ final class Partials
             }
             $layout = $this->normalize($elements, contextual: true);
             if ($layout !== null) {
-                return self::namespaceLayout($layout, $kind);
+                return $this->plugin->app()->get(GlobalWidgets::class)->expand(self::namespaceLayout($layout, $kind));
             }
         }
         return null;
@@ -149,8 +149,8 @@ final class Partials
                 continue;
             }
             $layout = $this->normalize($elements, contextual: true);
-            if ($layout !== null) {
-                $layouts[] = self::namespaceLayout($layout, self::modelSlot($model));
+            if ($layout !== null && $kind !== 'global') {
+                $layouts[] = $this->plugin->app()->get(GlobalWidgets::class)->expand(self::namespaceLayout($layout, self::modelSlot($model)));
             }
         }
         return $layouts;

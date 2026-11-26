@@ -13,7 +13,7 @@ use PrimeBuilder\Popup\Options as PopupOptions;
 /** Independently stored theme models; library snapshots and old partials remain untouched. */
 final class Models
 {
-    public const KINDS = ['header', 'footer', 'single', 'archive', 'search', 'not_found', 'popup'];
+    public const KINDS = ['header', 'footer', 'single', 'archive', 'search', 'not_found', 'popup', 'global'];
     public const MAX_MODELS = 50;
     private const PREFIX = 'theme_model.';
     /** @var list<array<string, mixed>>|null */
@@ -132,7 +132,7 @@ final class Models
     public function hasEnabled(): bool
     {
         foreach ($this->all() as $model) {
-            if ($model['enabled'] === true) {
+            if ($model['enabled'] === true && $model['kind'] !== 'global') {
                 return true;
             }
         }

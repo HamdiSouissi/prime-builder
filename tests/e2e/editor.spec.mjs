@@ -1914,7 +1914,7 @@ test('built-in default widgets save and remain accessible together', async ({ pa
     return { status: result.status, count: elements.length };
   }, id);
   expect(status).toBe(200);
-  expect(count).toBe(63);
+  expect(count).toBe(64);
   await page.goto('/test-prime-builder');
   await expect(page.locator('.pb-element')).toHaveCount(count);
   await expectAccessible(page);

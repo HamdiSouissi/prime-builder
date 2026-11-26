@@ -50,6 +50,8 @@ use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\MediaReferences;
 use PrimeBuilder\Document\Validator;
+use PrimeBuilder\Dynamic\CacheGuard;
+use PrimeBuilder\Dynamic\RenderScope;
 use PrimeBuilder\Forms\Notifications;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
@@ -59,6 +61,8 @@ use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Styles\ZoneLayouts;
+use PrimeBuilder\Theme\GlobalWidgets;
+use PrimeBuilder\Theme\LiveEntry;
 use PrimeBuilder\Theme\PageRequest;
 use PrimeBuilder\Theme\Partials;
 use PrimeBuilder\Widgets\Assets;
@@ -116,10 +120,16 @@ final class Plugin extends AbstractPlugin
             $context->app()->get(UrlGenerator::class)->absolute('/'),
         );
         $context->app()->container()->singleton(MediaReferences::class, static fn (): MediaReferences => $mediaReferences);
+        $globals = new GlobalWidgets($context);
+        $context->app()->container()->singleton(GlobalWidgets::class, static fn (): GlobalWidgets => $globals);
         $partials = new Partials($context);
         $popups = new Popups($context);
         $zoneLayouts = new ZoneLayouts($context->app()->get(ThemeManager::class), $context->app()->get(ZoneRepository::class));
         $identity = new SiteIdentity($context->app());
+        $context->app()->container()->singleton(SiteIdentity::class, static fn (): SiteIdentity => $identity);
+        $pageRequest = new PageRequest();
+        $context->app()->container()->singleton(PageRequest::class, static fn (): PageRequest => $pageRequest);
+        $dynamicScope = new RenderScope();
         $content = new Content(
             $context->app()->get(EntryQuery::class),
             $context->app()->get(ContentTypeRegistry::class),
@@ -138,6 +148,7 @@ final class Plugin extends AbstractPlugin
             $context->app()->get(Hooks::class),
             $context->app()->get(\Prime\Content\TermRepository::class),
             $context->settings(),
+            $dynamicScope,
         );
         $context->app()->container()->singleton(Content::class, static fn (): Content => $content);
         foreach (['settings.updated', 'theme.activated'] as $event) {
@@ -168,7 +179,17 @@ final class Plugin extends AbstractPlugin
             icon: 'layout-dashboard',
             category: 'plugins',
             validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer, $blocks, $originals, html: $htmlContent, requireSealedHtml: true, mediaReferences: $mediaReferences))->validate($data),
-            renderer: static fn (array $data, HtmlSanitizer $sanitizer, array $renderContext): string => (new Renderer($registry, $sanitizer, $context->logger(), $content, ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null, false, $blocks, $originals, $htmlContent, mediaReferences: $mediaReferences))->render($data),
+            renderer: static function (array $data, HtmlSanitizer $sanitizer, array $renderContext) use ($registry, $context, $content, $blocks, $originals, $htmlContent, $mediaReferences, $globals, $dynamicScope, $pageRequest): string {
+                $entry = ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null;
+                // The CMS invokes this same callback while saving entries and zones.
+                // Runtime context is only supplied by our explicit zone-render scope.
+                $page = $entry === null ? $dynamicScope->page() : null;
+                // Only the dynamic resolver receives the scoped page. The zone's
+                // other widgets retain their established fallback/share behavior,
+                // and nested zone widgets cannot recursively render themselves.
+                $renderer = new Renderer($registry, $sanitizer, $context->logger(), $content, $entry, false, $blocks, $originals, $htmlContent, mediaReferences: $mediaReferences, dynamicPlugin: $page !== null ? $context : null, request: $page !== null ? ($dynamicScope->request() ?? $pageRequest->request($page)) : null, dynamicPageContext: $page);
+                return $renderer->render($globals->expand($data));
+            },
             // Text extraction has no entry context; it never emits HTML and still sanitizes markup.
             textExtractor: static fn (array $data): string => Str::plainText((new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, true))->render($data)),
             keywords: ['builder', 'layout'],
@@ -211,7 +232,6 @@ final class Plugin extends AbstractPlugin
         // A public plugin page and entry preview can render without emitting
         // site.context. Scope the request to the route, including nested calls,
         // rather than retaining one request's pagination for the next.
-        $pageRequest = new PageRequest();
         $context->app()->get(Kernel::class)->addRouteMiddleware($pageRequest);
         $context->hooks()->on('site.context', $pageRequest->resolved(...));
         $context->hooks()->filter('site.partial', static function (mixed $previous, mixed $name, mixed $page) use ($context, $partials, $registry, $content, $blocks, $originals, $htmlContent, $mediaReferences, $pageRequest): mixed {
@@ -231,7 +251,7 @@ final class Plugin extends AbstractPlugin
             }
             // Only capability-protected, revalidated theme layouts can reach
             // this public path. HTML is filtered without enabling preview trust.
-            $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page));
+            $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page), dynamicPlugin: $context, request: $pageRequest->request($page));
             return '<' . $name . ' class="pb-theme-' . $name . '">' . $renderer->render($layout) . '</' . $name . '>';
         });
         // Prime 1.0.1/1.0.2 expose candidates and plugin paths, but not a
@@ -250,6 +270,23 @@ final class Plugin extends AbstractPlugin
             }
             return $paths;
         });
+        // Core EntryView normally returns immutable stored HTML. For a canonical
+        // Builder entry with shared references, render a fresh immutable context
+        // through the original theme hierarchy. The stored HTML remains a fallback.
+        $liveEntry = new LiveEntry($context, $globals);
+        $context->app()->container()->singleton(LiveEntry::class, static fn (): LiveEntry => $liveEntry);
+        $context->hooks()->filter('site.template_candidates', static function (mixed $candidates, mixed $page) use ($liveEntry): mixed {
+            if (is_array($candidates) && $page instanceof PageContext && $liveEntry->needsRefresh($page)) {
+                array_unshift($candidates, 'prime-builder-runtime/entry.php');
+            }
+            return $candidates;
+        });
+        $context->hooks()->filter('site.template_paths', static function (mixed $paths, mixed $page) use ($context, $liveEntry): mixed {
+            if (is_array($paths) && $page instanceof PageContext && $liveEntry->needsRefresh($page)) {
+                $paths[] = $context->path('views/site');
+            }
+            return $paths;
+        });
         $context->hooks()->filter('prime_builder.theme_content', static function (mixed $previous, mixed $page) use ($context, $partials, $registry, $content, $blocks, $originals, $htmlContent, $mediaReferences, $pageRequest): mixed {
             if (!$page instanceof PageContext) {
                 return $previous;
@@ -258,27 +295,38 @@ final class Plugin extends AbstractPlugin
             if ($layout === null) {
                 return $previous;
             }
-            $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page));
+            $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page), dynamicPlugin: $context, request: $pageRequest->request($page));
             return '<div class="pb-theme-content">' . $renderer->render($layout) . '</div>';
         });
         // Contextual snapshots depend on routes, terms, profiles, media and other
         // entries. Core has no complete invalidation events for all dependencies.
         // Zone saves also have no page-purge event, so bypass before cache lookup
         // whenever a declared zone has been saved, including after it is cleared.
-        $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable) use ($partials, $zoneLayouts): mixed {
+        $cacheGuard = new CacheGuard($context, $partials, $zoneLayouts);
+        $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable) use ($partials, $cacheGuard): mixed {
             if ($cacheable !== true) {
                 return $cacheable;
             }
             try {
-                return !$zoneLayouts->hasSavedDeclaredZone() && !$partials->hasEnabledModels() && !$partials->usesAnyWidget([
+                return !$cacheGuard->sensitive() && !$partials->usesAnyWidget([
                     'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image',
                     'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'navigation', 'share_buttons',
                 ]);
             } catch (\Throwable) {
-                // The hook engine isolates exceptions; never let a failed zone
-                // read silently authorize a stale cached response.
+                // The hook engine isolates exceptions; never authorize a stale cached response.
                 return false;
             }
+        });
+        // The core page cache is already bypassed before lookup. Also tell reverse
+        // proxies and browsers not to share or retain visitor/time-dependent HTML.
+        $context->hooks()->filter('http.response', static function (mixed $response, mixed $request) use ($cacheGuard): mixed {
+            if (!$response instanceof \Prime\Http\Response || !$request instanceof Request
+                || !in_array($request->method(), ['GET', 'HEAD'], true)
+                || !str_contains(strtolower((string) $response->header('Content-Type')), 'text/html')
+                || str_contains(strtolower((string) $response->header('Cache-Control')), 'no-store')) {
+                return $response;
+            }
+            return $cacheGuard->sensitive() ? $response->withHeader('Cache-Control', 'private, no-store') : $response;
         });
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
             if ($menu instanceof AdminMenu) {
@@ -379,7 +427,7 @@ final class Plugin extends AbstractPlugin
         // then include only the exact map origin if a map occurs in the entry,
         // partials, or a zone declared by the active theme.
         $hasMap = false;
-        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, &$hasMap): void {
+        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, $globals, &$hasMap): void {
             if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
                 return;
             }
@@ -397,6 +445,7 @@ final class Plugin extends AbstractPlugin
             if ($data === null) {
                 return;
             }
+            $data = $globals->expand($data);
             $css = (new Compiler((int) Configuration::get($context->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767)))->compile($data);
             $file = $page->entry->id . '-' . substr(hash('sha256', $css), 0, 16) . '.css';
             $type = $context->app()->get(ContentTypeRegistry::class)->get($page->entry->type);
@@ -441,7 +490,7 @@ final class Plugin extends AbstractPlugin
         // A theme can render a declared zone without an entry or a Builder
         // widget. Its styles and widget assets must therefore be available at
         // the head, including for copies inserted after the initial page render.
-        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, $zoneLayouts, $registry, &$hasMap): void {
+        $context->hooks()->on('site.assets', static function (mixed $assets, mixed $page = null) use ($context, $zoneLayouts, $globals, $registry, &$hasMap): void {
             if (!$assets instanceof ThemeAssetRegistry || !$page instanceof PageContext) {
                 return;
             }
@@ -453,6 +502,7 @@ final class Plugin extends AbstractPlugin
             $snapshots = new Snapshots($context->app()->storagePath('prime-builder/styles'));
             $types = [];
             foreach ($zoneLayouts->all() as $layout) {
+                $layout = $globals->expand($layout);
                 $types += Assets::collectTypes(is_array($layout['elements'] ?? null) ? $layout['elements'] : []);
                 $css = $compiler->compile($layout, legacy: false);
                 if ($css === '') {
@@ -523,7 +573,7 @@ final class Plugin extends AbstractPlugin
             if ($matches === []) {
                 return $previous;
             }
-            $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page));
+            $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page), dynamicPlugin: $context, request: $pageRequest->request($page));
             $html = '';
             foreach ($matches as $match) {
                 $html .= $popups->render($match, $renderer);
@@ -547,10 +597,11 @@ final class Plugin extends AbstractPlugin
             }
             return $directives;
         });
-        $context->hooks()->on('settings.updated', static function (mixed $name) use ($context, $partials, $popups, $theme, $themeModels): void {
+        $context->hooks()->on('settings.updated', static function (mixed $name) use ($context, $partials, $popups, $globals, $theme, $themeModels): void {
             if (is_string($name) && str_starts_with($name, 'plugin.prime-builder.')) {
                 $partials->invalidate();
                 $popups->invalidate();
+                $globals->invalidate();
                 $theme->invalidate();
                 $themeModels->invalidate();
                 $context->app()->get(\Prime\Cache\CacheManager::class)->clearPages();

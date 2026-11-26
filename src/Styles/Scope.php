@@ -37,11 +37,17 @@ final class Scope
                 $settings['direction'] ?? null,
                 $settings['columns'] ?? null,
             ] : [];
-            $description[] = [
+            $item = [
                 $element['id'], $type, $container,
                 is_array($element['styles'] ?? null) ? $element['styles'] : [],
                 self::describe(is_array($element['children'] ?? null) ? $element['children'] : []),
             ];
+            $device = is_array($element['conditions'] ?? null) ? ($element['conditions']['device'] ?? null) : null;
+            if (in_array($device, ['desktop', 'tablet', 'mobile'], true)) {
+                // Keep all pre-existing layout fingerprints unchanged.
+                $item[] = ['device' => $device];
+            }
+            $description[] = $item;
         }
         return $description;
     }

@@ -2,6 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { History, add, changedElement, containsWidget, createElement, duplicate, find, inheritedStyle, insertAfter, insertRelative, moveInto, moveRelative, remove, reorder, responsiveVisibility, setResponsiveStyle, spacingStyleSource, update, withElementDefaults } from '../../assets/js/model.js';
 
+test('display conditions reject malformed or contradictory rules throughout the tree', async () => {
+  const { validDisplayConditions, firstInvalidDisplayConditions } = await import('../../assets/js/model.js');
+  for (const value of [undefined, {}, { auth: 'guest' }, { role: 'administrator', auth: 'authenticated' }, { device: 'mobile' }, { start: '2024-02-29T12:30', end: '2024-03-01T00:00' }]) {
+    assert.equal(validDisplayConditions(value), true, JSON.stringify(value));
+  }
+  for (const value of [null, [], { extra: '' }, { auth: 1 }, { auth: 'guest', role: 'administrator' }, { device: 'watch' }, { role: '_private' },
+    { start: '2025-02-29T12:30' }, { start: '0000-01-01T00:00' }, { end: '2026-13-01T00:00' },
+    { start: '2026-01-01T12:00', end: '2026-01-01T12:00' }, { start: '2026-01-02T00:00', end: '2026-01-01T00:00' }]) {
+    assert.equal(validDisplayConditions(value), false, JSON.stringify(value));
+  }
+  const nested = [{ id: 'parent', children: [{ id: 'bad', conditions: { auth: 'guest', role: 'editor' }, children: [] }] }];
+  assert.equal(firstInvalidDisplayConditions(nested)?.id, 'bad');
+  assert.equal(firstInvalidDisplayConditions([{ id: 'ok', conditions: { auth: 'guest' }, children: [] }]), null);
+});
+
 test('custom widget classes normalize bounded safe tokens without changing copies', async () => {
   const { normalizeWidgetClasses } = await import('../../assets/js/model.js');
   assert.equal(typeof normalizeWidgetClasses, 'function');

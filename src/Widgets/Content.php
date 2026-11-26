@@ -12,6 +12,7 @@ use Prime\Content\EntryRepository;
 use Prime\Content\TaxonomyRegistry;
 use Prime\Content\TermRepository;
 use Prime\Hooks\Hooks;
+use Prime\Http\Request;
 use Prime\Plugins\PluginSettings;
 use Prime\Security\HtmlSanitizer;
 use Prime\Site\Menu\MenuRenderer;
@@ -27,6 +28,7 @@ use Prime\Site\Zone\DynamicBlockRegistry;
 use Prime\Site\Zone\ZoneRepository;
 use Prime\Themes\ThemeManager;
 use PrimeBuilder\Configuration;
+use PrimeBuilder\Dynamic\RenderScope;
 use PrimeBuilder\Styles\Compiler;
 
 /** Read-only, public content provider. Identical bounded queries are shared per request. */
@@ -67,6 +69,7 @@ final class Content
         private readonly ?Hooks $hooks = null,
         private readonly ?TermRepository $terms = null,
         private readonly ?PluginSettings $pluginSettings = null,
+        private readonly ?RenderScope $dynamicScope = null,
     ) {
     }
 
@@ -825,10 +828,23 @@ final class Content
         return $entry !== null ? $this->current($settings, $entry, true) : '';
     }
 
-    /** @param array<string, mixed> $settings */
-    public function themeZoneInPage(array $settings, PageContext $page): string
+    /**
+     * A Builder-controlled live zone has an explicit page and request, unlike a zone save.
+     *
+     * @param array<string, mixed> $settings
+     */
+    public function themeZoneForPage(array $settings, PageContext $page, ?Request $request = null, ?Entry $authorizedEntry = null): string
     {
-        $html = $this->themeZone($settings, true, $this->publicPageEntry($page));
+        // The live API has already checked access to its entry, including drafts.
+        // Other callers derive an entry only from the public page context.
+        $render = fn (): string => $this->themeZone($settings, true, $authorizedEntry ?? $this->publicPageEntry($page));
+        return $this->dynamicScope !== null ? $this->dynamicScope->within($page, $render, $request) : $render();
+    }
+
+    /** @param array<string, mixed> $settings */
+    public function themeZoneInPage(array $settings, PageContext $page, ?Request $request = null): string
+    {
+        $html = $this->themeZoneForPage($settings, $page, $request);
         if ($html === '') {
             return '';
         }

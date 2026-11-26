@@ -6,11 +6,14 @@ namespace PrimeBuilder\Document;
 
 use Prime\Editor\BlockRegistry;
 use Prime\Security\HtmlSanitizer;
+use PrimeBuilder\Dynamic\Conditions;
+use PrimeBuilder\Dynamic\Tags;
 use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Forms\NotificationSettings;
 use PrimeBuilder\Forms\Success;
 use PrimeBuilder\Styles\CssClasses;
 use PrimeBuilder\Styles\Values;
+use PrimeBuilder\Theme\GlobalWidgets;
 use PrimeBuilder\Widgets\Countdown;
 use PrimeBuilder\Widgets\Map;
 use PrimeBuilder\Widgets\MediaCarousel;
@@ -64,6 +67,9 @@ final class Validator
             ? $this->elements($data['elements'], 0, $count, $seen, $errors, $definitions, $mediaIds)
             : [];
         $layout = ['version' => 1, 'elements' => $elements];
+        if (GlobalWidgets::countReferences($elements) > GlobalWidgets::MAX_REFERENCES) {
+            $errors[] = t('plugin::prime-builder.validation.count');
+        }
         if ($errors === [] && $this->mediaReferences !== null) {
             foreach ($this->mediaReferences->ids($elements, $definitions, $this->sanitizer) as $mediaId) {
                 $mediaIds[$mediaId] = $mediaId;
@@ -250,6 +256,14 @@ final class Validator
                     $element['hidden'] = $item['hidden'];
                 }
             }
+            if (array_key_exists('conditions', $item)) {
+                $conditions = Conditions::normalize($item['conditions']);
+                if ($conditions === null) {
+                    $errors[] = t('plugin::prime-builder.validation.settings');
+                } elseif ($conditions !== []) {
+                    $element['conditions'] = $conditions;
+                }
+            }
             $result[] = $element;
         }
 
@@ -294,10 +308,11 @@ final class Validator
             'testimonial_items' => ($rows = Testimonials::parse($value, $this->sanitizer)) === null ? null : Testimonials::serialize($rows),
             'term_ids' => ($ids = TermIds::parse($value)) === null ? null : implode(',', $ids),
             'rich' => $this->sanitizer->sanitizeBasic($value),
-            'href' => $value === '' ? '' : $this->sanitizer->sanitizeHref($value),
-            'url' => $value === '' ? '' : $this->sanitizer->sanitizeResourceUrl($value),
+            'href' => $value === '' ? '' : (str_contains($value, '{{') ? (Tags::urlToken($value) ? $value : null) : $this->sanitizer->sanitizeHref($value)),
+            'url' => $value === '' ? '' : (str_contains($value, '{{') ? (Tags::urlToken($value) ? $value : null) : $this->sanitizer->sanitizeResourceUrl($value)),
             'slug' => $value === '' || preg_match('/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/', $value) === 1 ? $value : null,
             'zone_slug' => $value === '' || preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/D', $value) === 1 ? $value : null,
+            'global_id' => $value === '' || preg_match('/^[a-f0-9]{32}$/D', $value) === 1 ? $value : null,
             // A stale/deleted menu is valid document data; rendering falls back safely.
             'menu_id' => $value === '' || preg_match('/^[1-9][0-9]{0,8}$/D', $value) === 1 ? $value : null,
             'signature' => preg_match('/^[a-f0-9]{64}$/D', $value) === 1 ? $value : null,

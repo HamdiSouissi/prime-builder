@@ -178,6 +178,7 @@ final class ThemeBuilder
             $zones = new ZoneLayouts($this->plugin->app()->get(ThemeManager::class), $this->plugin->app()->get(ZoneRepository::class));
             $compiler = new Compiler((int) Configuration::get($this->plugin->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($this->plugin->settings(), 'breakpoint_mobile', 767));
             foreach ($zones->all() as $layout) {
+                $layout = $this->plugin->app()->get(\PrimeBuilder\Theme\GlobalWidgets::class)->expand($layout);
                 $candidate = $compiler->compile($layout, legacy: false);
                 if (hash_equals(substr(hash('sha256', $candidate), 0, 16) . '.css', $file)) {
                     $css = $candidate;

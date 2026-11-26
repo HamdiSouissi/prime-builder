@@ -272,6 +272,17 @@ export function makeRichField({ name, label, schema, current, onChange, ui, id }
       caption.htmlFor = source.id; source.hidden = false; toggle.textContent = ui.rich_visual; toggle.setAttribute('aria-expanded', 'false');
     }
   });
+  // The adjacent dynamic-tag picker can insert at the retained caret in either
+  // mode without switching modes or interpreting the tag as HTML.
+  wrapper.insertDynamicTag = tag => {
+    if (!visual.hidden) {
+      if (restore()) execute('insertText', tag);
+    } else {
+      source.setRangeText(tag, source.selectionStart, source.selectionEnd, 'end');
+      source.dispatchEvent(new Event('input', { bubbles: true }));
+      source.focus();
+    }
+  };
   checkLength(source.value);
   wrapper.append(caption, source, toggle, tools, visual, help, notice, error);
   return wrapper;

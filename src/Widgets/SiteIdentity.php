@@ -40,6 +40,16 @@ final class SiteIdentity
         $this->logo = null;
     }
 
+    public function rawName(): string
+    {
+        return $this->site()->rawName();
+    }
+
+    public function rawTagline(): string
+    {
+        return $this->site()->rawTagline();
+    }
+
     /** @param array<string, mixed> $settings */
     public function title(array $settings): string
     {

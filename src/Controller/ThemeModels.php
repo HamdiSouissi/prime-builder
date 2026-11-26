@@ -28,6 +28,7 @@ use PrimeBuilder\Document\SavedTemplates;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Popup\Options as PopupOptions;
 use PrimeBuilder\Theme\Conditions;
+use PrimeBuilder\Theme\GlobalWidgets;
 use PrimeBuilder\Theme\Models;
 use PrimeBuilder\Theme\Partials;
 use PrimeBuilder\Widgets\Content;
@@ -82,6 +83,9 @@ final class ThemeModels
                 return Response::text(t('plugin::prime-builder.theme.needs_html'), 403);
             }
             $elements = $layout['elements'];
+        }
+        if ($kind === 'global' && !GlobalWidgets::allowed(['elements' => $elements])) {
+            return Response::text(t('plugin::prime-builder.theme.invalid'), 422);
         }
         $model = $this->models->create($name, $kind, $elements);
         if ($model === null) {
@@ -245,7 +249,7 @@ final class ThemeModels
             return ApiError::response('conflict', 409, $request);
         }
         $layout = $this->validatedLayout($body['content']['blocks'][0]['data'] ?? null);
-        if ($layout === null) {
+        if ($layout === null || ($model['kind'] === 'global' && !GlobalWidgets::allowed($layout))) {
             return ApiError::response('validation_failed', 422, $request);
         }
         if (HtmlContent::contains($layout) && !$user->can('prime_builder.unfiltered_html')) {
@@ -268,7 +272,8 @@ final class ThemeModels
         if ($user === null) {
             return ApiError::response('forbidden', 403, $request);
         }
-        if ($this->models->find($id) === null) {
+        $model = $this->models->find($id);
+        if ($model === null) {
             return ApiError::response('not_found', 404, $request);
         }
         $body = $request->attribute('api.body');
@@ -276,7 +281,7 @@ final class ThemeModels
             return ApiError::response('validation_failed', 422, $request);
         }
         $layout = $this->validatedLayout($body['data'] ?? null);
-        if ($layout === null) {
+        if ($layout === null || ($model['kind'] === 'global' && !GlobalWidgets::allowed($layout))) {
             return ApiError::response('validation_failed', 422, $request);
         }
         if (HtmlContent::contains($layout) && !$user->can('prime_builder.unfiltered_html')) {
@@ -294,16 +299,19 @@ final class ThemeModels
             HtmlContent::fromAppKey($this->plugin->app()->config()->get('app.key')),
             true,
             mediaReferences: $this->plugin->app()->get(MediaReferences::class),
+            dynamicPlugin: $this->plugin,
+            request: $request,
         );
+        $expanded = $this->plugin->app()->get(GlobalWidgets::class)->expand($layout);
         if (array_key_exists('target', $body)) {
             $target = $body['target'];
-            $element = is_string($target) ? $this->findElement($layout['elements'], $target) : null;
+            $element = is_string($target) && $this->findElement($layout['elements'], $target) !== null ? $this->findElement($expanded['elements'], $target) : null;
             if ($element === null) {
                 return ApiError::response('validation_failed', 422, $request);
             }
-            return Response::json(['data' => ['target' => $target, 'html' => $renderer->render(['version' => 1, 'elements' => [$element]], $layout)]]);
+            return Response::json(['data' => ['target' => $target, 'html' => $renderer->render(['version' => 1, 'elements' => [$element]], $expanded), 'preview' => $expanded]]);
         }
-        return Response::json(['data' => ['html' => $renderer->render($layout), 'layout' => $layout]]);
+        return Response::json(['data' => ['html' => $renderer->render($expanded), 'layout' => $layout, 'preview' => $expanded]]);
     }
 
     public function import(Request $request, string $id): Response
