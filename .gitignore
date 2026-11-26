@@ -2,6 +2,7 @@
 /tests/e2e/node_modules/
 /.arena/
 /.phpunit.cache/
+/.php-cs-fixer.cache
 /.phpstan-cache/
 /tests/e2e/test-results/
 /tests/e2e/playwright-report/

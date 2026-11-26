@@ -34,8 +34,8 @@ function expectCount(string $name, int $actual, int $expected): void
 $settings = "SELECT COUNT(*) FROM `{$prefix}settings` WHERE `name` LIKE ?";
 $capabilities = "SELECT COUNT(*) FROM `{$prefix}role_capabilities` WHERE `capability` LIKE ? ESCAPE '!'";
 $plugin = "SELECT COUNT(*) FROM `{$prefix}plugins` WHERE `slug` = ?";
-$formTables = 'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?)';
-$formTableNames = [$prefix . 'prime_builder_submissions', $prefix . 'prime_builder_form_tokens', $prefix . 'prime_builder_form_limits'];
+$formTables = 'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?, ?)';
+$formTableNames = [$prefix . 'prime_builder_submissions', $prefix . 'prime_builder_form_tokens', $prefix . 'prime_builder_form_limits', $prefix . 'prime_builder_form_files'];
 $entry = $pdo->prepare("SELECT `content_html` FROM `{$prefix}entries` WHERE `id` = ?");
 $entry->execute([(int) $entryId]);
 $html = $entry->fetchColumn();
@@ -70,10 +70,13 @@ if (($argv[1] ?? '') === 'seed') {
     expectCount('theme model fixture', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}settings` WHERE `name` = ?", [$themeKey]), 1);
     expectCount('plugin capability', countRows($pdo, $roleCapability, $roleParameters), 1);
     expectCount('installed plugin', countRows($pdo, $plugin, ['prime-builder']), 1);
-    expectCount('form tables', countRows($pdo, $formTables, $formTableNames), 3);
+    expectCount('form tables', countRows($pdo, $formTables, $formTableNames), 4);
     $submission = $pdo->prepare("INSERT INTO `{$prefix}prime_builder_submissions` (`entry_id`, `node_id`, `sender_name`, `sender_email`, `message`, `created_at`) VALUES (?, ?, ?, ?, ?, ?)");
     $submission->execute([(int) $entryId, 'fixture', 'Test', 'test@example.test', 'Fixture', gmdate('Y-m-d H:i:s')]);
+    $file = $pdo->prepare("INSERT INTO `{$prefix}prime_builder_form_files` (`submission_id`, `field_id`, `field_label`, `filename`, `mime`, `bytes`, `content_base64`) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $file->execute([(int) $pdo->lastInsertId(), 'f_file', 'File', 'fixture.txt', 'text/plain', 7, base64_encode('Fixture')]);
     expectCount('form fixture', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}prime_builder_submissions`"), 1);
+    expectCount('form file fixture', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}prime_builder_form_files`"), 1);
     echo "Lifecycle fixtures present before uninstall.\n";
 } elseif (($argv[1] ?? '') === 'verify') {
     expectCount('plugin settings', countRows($pdo, $settings, ['plugin.prime-builder.%']), 0);

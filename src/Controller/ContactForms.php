@@ -17,6 +17,7 @@ use PrimeBuilder\Configuration;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Forms\CsvExport;
 use PrimeBuilder\Forms\Fields;
+use PrimeBuilder\Forms\FileInput;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
 use PrimeBuilder\Forms\Tokens;
@@ -45,6 +46,7 @@ final class ContactForms
         $page = (int) $rawPage;
         $results = $this->submissions->search($search, Submissions::PAGE_SIZE + 1, ($page - 1) * Submissions::PAGE_SIZE);
         $hasNext = count($results) > Submissions::PAGE_SIZE;
+        $results = array_slice($results, 0, Submissions::PAGE_SIZE);
         $title = t('plugin::prime-builder.forms.inbox');
         $data = $this->plugin->app()->get(AdminContext::class)->build($request, $title, [
             'pageHeading' => $title,
@@ -52,7 +54,8 @@ final class ContactForms
                 ['label' => t('admin.nav.dashboard'), 'url' => '/admin'],
                 ['label' => $title, 'url' => null],
             ],
-            'submissions' => array_slice($results, 0, Submissions::PAGE_SIZE),
+            'submissions' => $results,
+            'files' => $this->submissions->fileMetadata(array_column($results, 'id')),
             'search' => $search,
             'page' => $page,
             'hasNext' => $hasNext && $page < 999999,
@@ -112,6 +115,33 @@ final class ContactForms
         return Response::redirect('/admin/prime-builder/submissions')->withHeader('Cache-Control', 'no-store, private');
     }
 
+    public function download(Request $request, string $id, string $file): Response
+    {
+        if (!$this->canManage($request)) {
+            return Response::text('', 403)->withHeader('Cache-Control', 'no-store, private');
+        }
+        $submissionId = self::positiveId($id);
+        $fileId = self::positiveId($file);
+        $stored = $submissionId !== null && $fileId !== null ? $this->submissions->file($submissionId, $fileId) : null;
+        $checked = $stored !== null ? FileInput::validate(['name' => $stored['filename'] ?? null, 'content' => $stored['content_base64'] ?? null]) : null;
+        if ($checked === null || $checked['bytes'] !== (int) ($stored['bytes'] ?? 0) || $checked['mime'] !== ($stored['mime'] ?? null)) {
+            return Response::text('', 404)->withHeader('Cache-Control', 'no-store, private');
+        }
+        $contents = base64_decode($checked['content_base64'], true);
+        if (!is_string($contents)) {
+            return Response::text('', 404)->withHeader('Cache-Control', 'no-store, private');
+        }
+        return new Response($contents, 200, [
+            'Content-Type' => 'application/octet-stream',
+            'Content-Disposition' => 'attachment; filename="attachment"; filename*=UTF-8\'\'' . rawurlencode($checked['filename']),
+            'Content-Length' => (string) $checked['bytes'],
+            'Cache-Control' => 'no-store, private',
+            'X-Content-Type-Options' => 'nosniff',
+            'Content-Security-Policy' => "default-src 'none'; sandbox",
+            'Referrer-Policy' => 'no-referrer',
+        ]);
+    }
+
     public function start(Request $request, string $id): Response
     {
         $node = $request->query('node');
@@ -148,10 +178,12 @@ final class ContactForms
         if (!(new RateLimit($this->plugin->db(), $tokens))->allow('submit', $request->ip(), 5, 300, $now)) {
             return $this->error($request, 'rate_limited', 429)->withHeader('Retry-After', (string) (300 - $now % 300));
         }
-        if (!is_array($body) || strlen($request->rawBody()) > 24000) {
+        $custom = array_key_exists('form_fields', $settings);
+        $fields = $custom ? Fields::parse((string) $settings['form_fields']) : null;
+        $hasFile = $fields !== null && in_array('file', array_column($fields, 'type'), true);
+        if (!is_array($body) || strlen($request->rawBody()) > ($hasFile ? FileInput::MAX_BODY_BYTES : 24000)) {
             return $this->error($request, 'validation_failed', 422);
         }
-        $custom = array_key_exists('form_fields', $settings);
         $allowed = $custom ? ['node', 'fields', 'website', 'token'] : ['node', 'name', 'email', 'message', 'website', 'token'];
         foreach (array_keys($body) as $key) {
             if (!is_string($key) || !in_array($key, $allowed, true)) {
@@ -176,7 +208,6 @@ final class ContactForms
         if ($custom) {
             // Never accept the definition supplied by the visitor. Use the current,
             // visible, published widget again, including after a start token was issued.
-            $fields = Fields::parse((string) $settings['form_fields']);
             $values = $fields !== null ? Fields::submitted($fields, $body['fields']) : null;
             if ($values === null) {
                 return $this->error($request, 'validation_failed', 422);

@@ -65,7 +65,7 @@ final class FormFieldsTest extends TestCase
         $bad[0]['id'] = 'f_bad-name';
         $cases[] = $bad;
         $bad = $this->definition();
-        $bad[0]['type'] = 'file';
+        $bad[0]['type'] = 'unsupported';
         $cases[] = $bad;
         $bad = $this->definition();
         $bad[0]['label'] = "A\nB";

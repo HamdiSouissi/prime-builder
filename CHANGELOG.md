@@ -1,5 +1,10 @@
 # Journal des changements
 
+## 0.1.1 — fichiers de formulaire privés
+
+- Champ fichier borné à quatre pièces et 512 Kio au total, validation de l’extension et du type détecté, stockage privé en base, téléchargement réservé à `prime_builder.forms`, suppression et purge liées à l’envoi. Migration appliquée lors de la mise à niveau.
+- Les notifications par e-mail, les autres actions configurables, les popups, les widgets globaux, les balises dynamiques et plusieurs commandes avancées restent incomplets. Voir [RETOUR.md](RETOUR.md).
+
 ## 0.1.0 — prototype partiel
 
 - Intégration à l’éditeur alternatif et au bloc Prime v1 ; validation bornée, rendu HTML sauvegardé, permissions par contenu, API d’enregistrement et aperçu dans le thème actif.
@@ -10,4 +15,4 @@
 - Prérequis Prime CMS 1.0.1 ; 1.0.2 ou ultérieur corrigé recommandé pour la révocation des droits et les chargements concurrents. Un adaptateur HTTP limité protège les jetons sous 1.0.1 tant que le plugin reste actif.
 - Theme Builder avec modèles d’en-tête, pied, contenu, archive, recherche et 404, éditeur et conditions ; anciennes copies conservées. Formulaires de contact avec champs personnalisés et étapes (hors fichiers), stockage des soumissions, recherche et export CSV protégés, conservation réglable et purge planifiée. Les anciens formulaires fixes restent utilisables.
 
-**Non inclus ou incomplets :** fichiers et actions des formulaires, popups, widgets globaux, tags dynamiques et visibilité conditionnelle généralisés, ainsi que plusieurs widgets et commandes avancées. Voir [RETOUR.md](RETOUR.md) avant toute utilisation.
+**Non inclus ou incomplets dans 0.1.0 :** fichiers et actions des formulaires, popups, widgets globaux, tags dynamiques et visibilité conditionnelle généralisés, ainsi que plusieurs widgets et commandes avancées. Voir [RETOUR.md](RETOUR.md) avant toute utilisation.

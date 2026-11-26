@@ -1,5 +1,5 @@
 // Editor-only controls. Published definitions are independently validated by Forms\Fields.
-export const fieldTypes = Object.freeze(['text', 'email', 'phone', 'number', 'textarea', 'select', 'checkbox', 'radio', 'date', 'acceptance', 'hidden']);
+export const fieldTypes = Object.freeze(['text', 'email', 'phone', 'number', 'textarea', 'select', 'checkbox', 'radio', 'date', 'acceptance', 'hidden', 'file']);
 const choiceTypes = ['select', 'checkbox', 'radio'];
 const encoder = new TextEncoder();
 const lines = value => [...value].length;
@@ -22,7 +22,7 @@ function editableFields(value) {
 export function validFormFields(value) {
   if (typeof value !== 'string' || encoder.encode(value).length > 20000) return false;
   const fields = editableFields(value);
-  if (!fields) return false;
+  if (!fields || fields.filter(field => field.type === 'file').length > 4) return false;
   const visible = new Set();
   let maxStep = 0;
   for (const field of fields) {
@@ -106,6 +106,7 @@ export function makeFormFieldsControl({ current, onChange, ui, id }) {
         emit(); render(`${field.id}:type`);
       });
       labelControl(ui.form_field_type, type);
+      if (field.type === 'file') row.append(el('p', ui.form_file_help, 'pb-intro'));
       const step = document.createElement('select'); step.dataset.pbFieldStep = '';
       for (let number = 1; number <= 5; number++) { const option = el('option', String(number)); option.value = String(number); step.append(option); }
       step.value = String(field.step); step.addEventListener('change', () => { field.step = Number(step.value); emit(); });

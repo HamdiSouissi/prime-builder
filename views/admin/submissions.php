@@ -6,6 +6,7 @@ declare(strict_types=1);
 /** @var string $pageHeading */
 /** @var list<array{label: string, url: ?string}> $breadcrumbs */
 /** @var list<array{id: int, entry_id: int, node_id: string, name: string, email: string, message: string, created_at: string}> $submissions */
+/** @var array<int, list<array{id: int, field_label: string, filename: string, bytes: int}>> $files */
 /** @var string $search */
 /** @var int $page */
 /** @var bool $hasNext */
@@ -50,6 +51,14 @@ $exportPageUrl = '/admin/prime-builder/submissions/export?' . http_build_query([
                         <dt><?= $this->e(t('plugin::prime-builder.forms.email')) ?></dt><dd><?= $this->e($submission['email']) ?></dd>
                         <dt><?= $this->e(t('plugin::prime-builder.forms.message')) ?></dt><dd class="pb-submission-message"><?= $this->e($submission['message']) ?></dd>
                     </dl>
+                    <?php if (($files[$submission['id']] ?? []) !== []): ?>
+                        <h3><?= $this->e(t('plugin::prime-builder.forms.files')) ?></h3>
+                        <ul>
+                            <?php foreach ($files[$submission['id']] as $file): ?>
+                                <li><?= $this->e($file['field_label']) ?> : <a href="/admin/prime-builder/submissions/<?= $this->e((string) $submission['id']) ?>/files/<?= $this->e((string) $file['id']) ?>"><?= $this->e($file['filename']) ?></a> (<?= $this->e((string) $file['bytes']) ?> <?= $this->e(t('plugin::prime-builder.forms.bytes')) ?>)</li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
                 </div>
                 <div class="pc-card__footer">
                     <form method="post" action="/admin/prime-builder/submissions/<?= $this->e((string) $submission['id']) ?>/delete">

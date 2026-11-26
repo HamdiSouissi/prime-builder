@@ -12,6 +12,7 @@ use Prime\Site\PageContext;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\MediaReferences;
 use PrimeBuilder\Forms\Fields;
+use PrimeBuilder\Forms\FileInput;
 use PrimeBuilder\Styles\CssClasses;
 use PrimeBuilder\Styles\Scope;
 use Throwable;
@@ -416,7 +417,7 @@ final class Renderer
             . '<label for="' . self::escape($prefix) . '-email">' . $copy('email') . '</label><input id="' . self::escape($prefix) . '-email" name="email" type="email" autocomplete="email" maxlength="254" required>'
             . '<label for="' . self::escape($prefix) . '-message">' . $copy('message') . '</label><textarea id="' . self::escape($prefix) . '-message" name="message" rows="5" maxlength="5000" required></textarea>';
         return '<form class="pb-contact-form" method="post" action="/api/prime-builder/v1/forms/' . $entryId . '/submit" data-pb-form data-pb-node="' . self::escape($id) . '"'
-            . ($custom ? ' data-pb-custom="1" data-pb-required-error="' . $copy('choose_required') . '"' : '')
+            . ($custom ? ' data-pb-custom="1" data-pb-required-error="' . $copy('choose_required') . '" data-pb-file-error="' . $copy('file_error') . '"' : '')
             . ' data-pb-error="' . $copy('error') . '" data-pb-wait="' . $copy('wait') . '" data-pb-sent="' . $copy('sent') . '" data-pb-limited="' . $copy('limited') . '">'
             . ($title !== '' ? '<h3>' . self::escape($title) . '</h3>' : '')
             . $content
@@ -471,6 +472,9 @@ final class Renderer
                     $output .= '</select>';
                 } elseif ($field['type'] === 'textarea') {
                     $output .= '<label for="' . $id . '">' . $label . $suffix . '</label><textarea id="' . $id . '" name="' . $name . '" rows="5" maxlength="2000"' . $required . '></textarea>';
+                } elseif ($field['type'] === 'file') {
+                    $output .= '<label for="' . $id . '">' . $label . $suffix . '</label><input id="' . $id . '" name="' . $name . '" type="file" accept="' . FileInput::ACCEPT . '" aria-describedby="' . $id . '-help"' . $required . '>'
+                        . '<p id="' . $id . '-help" class="pb-form-help">' . self::escape(t('plugin::prime-builder.forms.file_help')) . '</p>';
                 } else {
                     $type = $field['type'] === 'phone' ? 'tel' : $field['type'];
                     $extra = match ($type) {

@@ -48,6 +48,10 @@
           } else if (group.dataset.pbKind === 'phone') {
             const valid = first.value === '' || /^[0-9+()./ -]{3,40}$/.test(first.value.trim());
             first.setCustomValidity(valid ? '' : form.dataset.pbError);
+          } else if (group.dataset.pbKind === 'file') {
+            const file = first.files?.[0];
+            const valid = !file || (file.size > 0 && file.size <= 512 * 1024 && /^.+\.(pdf|png|jpe?g|txt)$/iu.test(file.name));
+            first.setCustomValidity(valid ? '' : form.dataset.pbFileError);
           }
           const invalid = controls.find(control => !control.checkValidity());
           if (invalid) return invalid;
@@ -86,13 +90,37 @@
         }
       }
 
+      async function encodeFile(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error('file read failed'));
+          reader.onload = () => {
+            const result = reader.result;
+            const comma = typeof result === 'string' ? result.indexOf(',') : -1;
+            if (comma < 0) { reject(new Error('invalid file data')); return; }
+            resolve({ name: file.name, content: result.slice(comma + 1) });
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
       form.addEventListener('submit', async event => {
         event.preventDefault();
         if (!token || busy) return;
         if (custom) {
+          let fileBytes = 0;
+          let fileCount = 0;
           for (let index = 0; index < steps.length; index++) {
             const invalid = invalidIn(steps[index]);
             if (invalid) { showStep(index); invalid.reportValidity(); return; }
+            for (const input of steps[index].querySelectorAll('[data-pb-kind="file"] input[type="file"]')) {
+              const file = input.files?.[0];
+              if (file) { fileCount++; fileBytes += file.size; }
+              if (fileCount > 4 || fileBytes > 512 * 1024) {
+                input.setCustomValidity(form.dataset.pbFileError);
+                showStep(index); input.reportValidity(); return;
+              }
+            }
           }
         }
         busy = true;
@@ -112,7 +140,10 @@
               if (!/^f_[a-z0-9]{1,24}$/.test(key)) throw new Error('invalid form field');
               if (group.dataset.pbKind === 'checkbox') fields[key] = values.getAll(key);
               else if (group.dataset.pbKind === 'acceptance') fields[key] = values.has(key);
-              else fields[key] = values.get(key) ?? '';
+              else if (group.dataset.pbKind === 'file') {
+                const file = group.querySelector('input[type="file"]')?.files?.[0];
+                fields[key] = file ? await encodeFile(file) : null;
+              } else fields[key] = values.get(key) ?? '';
             }
             body = { node, token, fields, website: values.get('website') };
           } else {

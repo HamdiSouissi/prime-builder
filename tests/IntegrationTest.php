@@ -4566,6 +4566,159 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('Thèmes: Alpha', $csv->body());
     }
 
+    public function testPrivateFormFilesAreValidatedDownloadedAndDeletedWithTheirSubmission(): void
+    {
+        $app = $this->activated(null);
+        $editorToken = $this->tokens($app)->issue($this->user($app, 1), 'files editor', ['*'])['token'];
+        $fields = [
+            ['id' => 'f_name', 'type' => 'text', 'label' => 'Nom', 'required' => true, 'step' => 1, 'options' => [], 'value' => ''],
+            ['id' => 'f_file', 'type' => 'file', 'label' => 'Pièce jointe', 'required' => true, 'step' => 1, 'options' => [], 'value' => ''],
+        ];
+        $document = $this->document();
+        $document['blocks'][0]['data']['elements'] = [[
+            'id' => 'upload', 'type' => 'form', 'settings' => ['form_fields' => (string) json_encode($fields)], 'styles' => [], 'children' => [],
+        ]];
+        $saved = $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $editorToken);
+        self::assertSame(200, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        self::assertStringContainsString('type="file"', $entry->contentHtml);
+        self::assertStringContainsString('accept=".pdf,.png,.jpg,.jpeg,.txt"', $entry->contentHtml);
+        self::assertStringNotContainsString('name="token"', $entry->contentHtml);
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $path = '/api/prime-builder/v1/forms/1';
+        $bytes = "Private text, prêt.\n";
+        $payload = static fn (string $ip, int $age = 4): array => [
+            'node' => 'upload', 'token' => $tokens->issue(1, 'upload', $ip, time() - $age), 'website' => '',
+            'fields' => ['f_name' => 'Expéditeur', 'f_file' => ['name' => 'rapport <important>.txt', 'content' => base64_encode($bytes)]],
+        ];
+        $early = $payload('198.51.100.160', 0);
+        self::assertSame(422, $this->formRequest($app, 'POST', $path . '/submit', $early, '198.51.100.160')->status());
+        $trap = $payload('198.51.100.161');
+        $trap['website'] = 'bot';
+        self::assertSame(201, $this->formRequest($app, 'POST', $path . '/submit', $trap, '198.51.100.161')->status());
+        $wrongType = $payload('198.51.100.162');
+        $wrongType['fields']['f_file']['name'] = 'disguised.pdf';
+        self::assertSame(422, $this->formRequest($app, 'POST', $path . '/submit', $wrongType, '198.51.100.162')->status());
+        $oversized = $payload('198.51.100.163');
+        $oversized['fields']['f_file']['content'] = base64_encode(str_repeat('x', \PrimeBuilder\Forms\FileInput::MAX_BYTES + 1));
+        self::assertSame(422, $this->formRequest($app, 'POST', $path . '/submit', $oversized, '198.51.100.163')->status());
+        self::assertSame(0, $this->db($app)->table('prime_builder_form_files')->count());
+
+        // Exercise the real CMS API middleware, not only the plugin's size check:
+        // a lower site-wide limit must reject the JSON/base64 body before storage.
+        $largeIp = '198.51.100.165';
+        $large = $payload($largeIp);
+        $large['fields']['f_file'] = ['name' => 'large.txt', 'content' => base64_encode(str_repeat('x', \PrimeBuilder\Forms\FileInput::MAX_BYTES))];
+        $app->get(Settings::class)->set('api.max_body_kb', 16);
+        $limited = $this->formRequest($app, 'POST', $path . '/submit', $large, $largeIp);
+        self::assertSame(413, $limited->status(), $limited->body());
+        self::assertStringContainsString('payload_too_large', $limited->body());
+        self::assertSame(0, $this->db($app)->table('prime_builder_submissions')->count());
+        self::assertSame(0, $this->db($app)->table('prime_builder_form_files')->count());
+        $app->get(Settings::class)->set('api.max_body_kb', 1024);
+        $accepted = $this->formRequest($app, 'POST', $path . '/submit', $large, $largeIp);
+        self::assertSame(201, $accepted->status(), $accepted->body());
+        $largeFile = $this->db($app)->table('prime_builder_form_files')->first();
+        self::assertNotNull($largeFile);
+        self::assertSame(\PrimeBuilder\Forms\FileInput::MAX_BYTES, (int) $largeFile['bytes']);
+        self::assertTrue((new \PrimeBuilder\Forms\Submissions($this->db($app)))->delete((int) $largeFile['submission_id']));
+        self::assertSame(0, $this->db($app)->table('prime_builder_form_files')->count());
+
+        $ip = '198.51.100.164';
+        self::assertSame(200, $this->formRequest($app, 'GET', $path . '/start?node=upload', ip: $ip)->status());
+        $valid = $payload($ip);
+        $sent = $this->formRequest($app, 'POST', $path . '/submit', $valid, $ip);
+        self::assertSame(201, $sent->status(), $sent->body());
+        self::assertSame(409, $this->formRequest($app, 'POST', $path . '/submit', $valid, $ip)->status());
+        self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->count());
+        self::assertSame(1, $this->db($app)->table('prime_builder_form_files')->count());
+        $row = $this->db($app)->table('prime_builder_form_files')->first();
+        self::assertNotNull($row);
+        self::assertSame(base64_encode($bytes), $row['content_base64']);
+        $id = (int) $row['submission_id'];
+        $fileId = (int) $row['id'];
+        $downloadUrl = '/admin/prime-builder/submissions/' . $id . '/files/' . $fileId;
+        self::assertNotSame(200, $this->send($app, 'GET', $downloadUrl)->status());
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        self::assertSame(403, $this->send($app, 'GET', $downloadUrl)->status());
+        $this->db($app)->pdo()->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.forms')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $inbox = $this->send($app, 'GET', '/admin/prime-builder/submissions');
+        self::assertSame(200, $inbox->status(), $inbox->body());
+        self::assertStringContainsString('rapport &lt;important&gt;.txt', $inbox->body());
+        self::assertStringNotContainsString('rapport <important>.txt', $inbox->body());
+        self::assertStringContainsString($downloadUrl, $inbox->body());
+        self::assertStringNotContainsString(base64_encode($bytes), $inbox->body());
+        $download = $this->send($app, 'GET', $downloadUrl);
+        self::assertSame(200, $download->status());
+        self::assertSame($bytes, $download->body());
+        self::assertSame('application/octet-stream', $download->header('Content-Type'));
+        self::assertStringContainsString('attachment;', (string) $download->header('Content-Disposition'));
+        self::assertStringContainsString('rapport%20%3Cimportant%3E.txt', (string) $download->header('Content-Disposition'));
+        self::assertSame('nosniff', $download->header('X-Content-Type-Options'));
+        self::assertStringContainsString('no-store', (string) $download->header('Cache-Control'));
+        self::assertSame(404, $this->send($app, 'GET', '/admin/prime-builder/submissions/' . ($id + 1) . '/files/' . $fileId)->status());
+        self::assertSame(419, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/submissions/' . $id . '/delete'))->status());
+        $csrf = $app->get(Csrf::class)->token();
+        self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/submissions/' . $id . '/delete', body: ['_csrf_token' => $csrf]))->status());
+        self::assertSame(0, $this->db($app)->table('prime_builder_form_files')->count());
+        self::assertSame(404, $this->send($app, 'GET', $downloadUrl)->status());
+    }
+
+    public function testScheduledPurgeDeletesOldFilesWithoutTouchingRecentFiles(): void
+    {
+        $app = $this->activated(null);
+        $repository = new \PrimeBuilder\Forms\Submissions($this->db($app));
+        $file = \PrimeBuilder\Forms\FileInput::validate(['name' => 'notes.txt', 'content' => base64_encode('A private document.')]);
+        self::assertNotNull($file);
+        $values = ['name' => 'Nom', 'email' => 'a@example.test', 'message' => 'Notes', 'files' => [['field_id' => 'f_one', 'field_label' => 'Notes'] + $file]];
+        $now = time();
+        self::assertTrue($repository->create(1, 'old', $values, hash('sha256', 'old-file'), $now - 31 * 86400));
+        self::assertTrue($repository->create(1, 'new', $values, hash('sha256', 'new-file'), $now));
+        self::assertSame(2, $this->db($app)->table('prime_builder_form_files')->count());
+        $schedule = $app->get(Hooks::class)->apply('scheduler.register', new \Prime\Scheduler\Schedule());
+        $purge = $schedule->get('prime-builder.purge-submissions')->closure();
+        self::assertNotNull($purge);
+        $purge();
+        self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->count());
+        self::assertSame(1, $this->db($app)->table('prime_builder_form_files')->count());
+        $remaining = $this->db($app)->table('prime_builder_form_files')->first();
+        self::assertNotNull($remaining);
+        $message = $this->db($app)->table('prime_builder_submissions')->where('id', '=', (int) $remaining['submission_id'])->first();
+        self::assertNotNull($message);
+        self::assertSame('new', $message['node_id']);
+    }
+
+    public function testFileMigrationUpgradesAnActiveLegacyInstallationWithoutLosingSubmissions(): void
+    {
+        $app = $this->activated(null);
+        $db = $this->db($app);
+        $db->table('prime_builder_submissions')->insert(['entry_id' => 1, 'node_id' => 'legacy', 'sender_name' => 'Nom', 'sender_email' => 'a@example.test', 'message' => 'Historique', 'created_at' => '2025-01-01 00:00:00']);
+        // Recreate the pre-upgrade 0.1.0 schema and migration ledger, then use
+        // the CMS's public synchronization API, the same one used by ZIP upgrades.
+        $db->schema()->dropIfExists('prime_builder_form_files');
+        self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000002_create_prime_builder_form_files')->delete());
+        $db->table('plugins')->where('slug', '=', 'prime-builder')->update(['version' => '0.1.0']);
+        $manager = $app->get(PluginManager::class);
+        $before = $manager->get('prime-builder', fresh: true);
+        self::assertNotNull($before);
+        self::assertTrue($before->needsUpdate);
+        self::assertTrue($before->isValid(), implode('; ', $before->errors));
+        self::assertFalse($db->schema()->hasTable('prime_builder_form_files'));
+        $manager->syncUpgradedPlugin('prime-builder', '0.1.0');
+        self::assertTrue($db->schema()->hasTable('prime_builder_form_files'));
+        self::assertSame(1, $db->table('prime_builder_submissions')->count());
+        self::assertSame('Historique', $db->table('prime_builder_submissions')->first()['message'] ?? null);
+        $after = $manager->get('prime-builder', fresh: true);
+        self::assertNotNull($after);
+        self::assertSame('0.1.1', $after->installedVersion);
+        self::assertFalse($after->needsUpdate);
+        self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000002_create_prime_builder_form_files')->count());
+    }
+
     public function testLegacyFormWithoutSettingsRemainsSubmittableButCorruptSchemaDoesNotFallBack(): void
     {
         $app = $this->activated(null);
@@ -5682,6 +5835,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(true, $schema->hasTable('prime_builder_submissions'));
         self::assertSame(true, $schema->hasTable('prime_builder_form_tokens'));
         self::assertSame(true, $schema->hasTable('prime_builder_form_limits'));
+        self::assertSame(true, $schema->hasTable('prime_builder_form_files'));
         $manager = $app->get(PluginManager::class);
         $manager->deactivate('prime-builder');
         $entry = $app->get(EntryRepository::class)->find(1);
@@ -5695,6 +5849,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(false, $schema->hasTable('prime_builder_submissions'));
         self::assertSame(false, $schema->hasTable('prime_builder_form_tokens'));
         self::assertSame(false, $schema->hasTable('prime_builder_form_limits'));
+        self::assertSame(false, $schema->hasTable('prime_builder_form_files'));
         self::assertSame(false, $settings->has('plugin.prime-builder.kit_primary'));
         $capabilities = $pdo->query("SELECT COUNT(*) FROM pc_role_capabilities WHERE capability LIKE 'prime!_builder.%' ESCAPE '!'");
         if ($capabilities === false) {

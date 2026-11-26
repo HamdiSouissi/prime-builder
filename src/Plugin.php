@@ -314,6 +314,7 @@ final class Plugin extends AbstractPlugin
         $context->router()->adminGroup(static function (Router $router) use ($forms): void {
             $router->get('/submissions', [$forms, 'index'])->name('submissions');
             $router->get('/submissions/export', [$forms, 'export'])->name('submissions.export');
+            $router->get('/submissions/{id:\d+}/files/{file:\d+}', [$forms, 'download'])->name('submissions.file');
             $router->post('/submissions/{id:\d+}/delete', [$forms, 'delete'])->name('submissions.delete');
         }, capability: 'prime_builder.forms');
         $context->router()->frontGroup(static function (Router $router) use ($controller, $theme): void {

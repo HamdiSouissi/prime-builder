@@ -10,7 +10,7 @@ final class Fields
     public const MAX_FIELDS = 24;
     public const MAX_STEPS = 5;
     public const MAX_BYTES = 20000;
-    public const TYPES = ['text', 'email', 'phone', 'number', 'textarea', 'select', 'checkbox', 'radio', 'date', 'acceptance', 'hidden'];
+    public const TYPES = ['text', 'email', 'phone', 'number', 'textarea', 'select', 'checkbox', 'radio', 'date', 'acceptance', 'hidden', 'file'];
     private const CHOICES = ['select', 'checkbox', 'radio'];
 
     /**
@@ -29,6 +29,7 @@ final class Fields
         $seen = [];
         $visibleSteps = [];
         $maxStep = 0;
+        $fileFields = 0;
         foreach ($raw as $field) {
             if (!is_array($field) || count($field) !== 7
                 || array_diff(array_keys($field), ['id', 'type', 'label', 'required', 'step', 'options', 'value']) !== []) {
@@ -68,6 +69,9 @@ final class Fields
                 || ($type === 'hidden' && $required)) {
                 return null;
             }
+            if ($type === 'file' && ++$fileFields > FileInput::MAX_FILES) {
+                return null;
+            }
             $seen[$id] = true;
             $maxStep = max($maxStep, $step);
             if ($type !== 'hidden') {
@@ -97,7 +101,7 @@ final class Fields
      * Validate exactly the published schema; unknown/missing fields are rejected.
      *
      * @param list<array{id: string, type: string, label: string, required: bool, step: int, options: list<string>, value: string}> $fields
-     * @return array{name: string, email: string, message: string}|null
+     * @return array{name: string, email: string, message: string, files: list<array{field_id: string, field_label: string, filename: string, mime: string, bytes: int, content_base64: string}>}|null
      */
     public static function submitted(array $fields, mixed $input): ?array
     {
@@ -107,13 +111,26 @@ final class Fields
         $name = '';
         $email = '';
         $lines = [];
+        $files = [];
+        $fileBytes = 0;
         foreach ($fields as $field) {
             if (!array_key_exists($field['id'], $input)) {
                 return null;
             }
             $raw = $input[$field['id']];
             $type = $field['type'];
-            if ($type === 'checkbox') {
+            if ($type === 'file') {
+                if ($raw === null && !$field['required']) {
+                    $display = '';
+                } else {
+                    $file = FileInput::validate($raw);
+                    if ($file === null || count($files) >= FileInput::MAX_FILES || ($fileBytes += $file['bytes']) > FileInput::MAX_BYTES) {
+                        return null;
+                    }
+                    $files[] = ['field_id' => $field['id'], 'field_label' => $field['label']] + $file;
+                    $display = $file['filename'];
+                }
+            } elseif ($type === 'checkbox') {
                 if (!is_array($raw) || !array_is_list($raw) || count($raw) > count($field['options'])) {
                     return null;
                 }
@@ -161,7 +178,7 @@ final class Fields
         if (mb_strlen($message, 'UTF-8') > 5000 || strlen($message) > 20000) {
             return null;
         }
-        return ['name' => $name, 'email' => $email, 'message' => $message];
+        return ['name' => $name, 'email' => $email, 'message' => $message, 'files' => $files];
     }
 
     /** @param list<string> $options */
