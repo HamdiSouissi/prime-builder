@@ -200,7 +200,7 @@ test('build and publish four widgets with the mouse', async ({ page }) => {
   await page.locator('[data-pb-panel="widgets"]').click();
   await page.getByRole('button', { name: 'Ajouter Bouton', exact: true }).click();
   await page.getByLabel('Texte', { exact: true }).fill('Lien souris');
-  await page.getByLabel('Adresse URL').fill('/');
+  await page.getByLabel('Adresse URL', { exact: true }).fill('/');
   await page.locator('[data-pb-panel="widgets"]').click();
   await page.getByRole('button', { name: 'Ajouter Séparateur' }).click();
   await expect(page.frameLocator('[data-pb-frame]').locator('.pb-element')).toHaveCount(4);
@@ -240,7 +240,11 @@ test('build and publish four widgets using keyboard controls', async ({ page }) 
   await expect(page.getByLabel('Texte', { exact: true })).toBeFocused();
   await page.keyboard.press('Control+a'); await page.keyboard.insertText('Lien clavier');
   await page.keyboard.press('Tab');
-  await expect(page.getByLabel('Adresse URL')).toBeFocused();
+  await expect(page.locator('[data-pb-dynamic-for="text"]')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-pb-dynamic-insert="text"]')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Adresse URL', { exact: true })).toBeFocused();
   await page.keyboard.insertText('/');
   await addWithKeyboard('Séparateur');
   await expect(page.getByLabel('Déplacer vers')).toBeFocused();
@@ -422,9 +426,9 @@ test('call to action and pricing widgets can be edited and remain usable without
       await page.getByLabel('Texte du bouton', { exact: true }).fill('Nous contacter');
     } else if (type === 'price_table') {
       await page.getByLabel('Titre', { exact: true }).fill('Offre mensuelle');
-      await page.getByLabel('Prix (texte et devise)').fill('29 €');
-      await page.getByLabel('Période (facultative)').fill('par mois');
-      await page.getByLabel('Avantages (un par ligne)').fill('Conseil inclus\nSuivi personnalisé');
+      await page.getByLabel('Prix (texte et devise)', { exact: true }).fill('29 €');
+      await page.getByLabel('Période (facultative)', { exact: true }).fill('par mois');
+      await page.getByLabel('Avantages (un par ligne)', { exact: true }).fill('Conseil inclus\nSuivi personnalisé');
       await page.getByLabel('Adresse URL', { exact: true }).fill('/test-prime-builder#tarifs');
       await page.getByLabel('Texte du bouton', { exact: true }).fill('Choisir cette offre');
     } else {
@@ -546,9 +550,9 @@ test('animated heading and highlighted code stay readable and safe without JavaS
   expect(reset).toBe(200);
   await page.reload();
   await page.getByRole('button', { name: 'Ajouter Titre animé', exact: true }).click();
-  await page.getByLabel('Texte avant la mise en valeur').fill('Créons');
-  await page.getByLabel('Texte mis en valeur').fill('ensemble');
-  await page.getByLabel('Texte après la mise en valeur').fill('demain');
+  await page.getByLabel('Texte avant la mise en valeur', { exact: true }).fill('Créons');
+  await page.getByLabel('Texte mis en valeur', { exact: true }).fill('ensemble');
+  await page.getByLabel('Texte après la mise en valeur', { exact: true }).fill('demain');
   await page.getByLabel('Effet du titre').selectOption('rise');
   const frame = page.frameLocator('[data-pb-frame]');
   await expect(frame.locator('.pb-animated_heading h2')).toHaveText('Créons ensemble demain');
@@ -559,7 +563,7 @@ test('animated heading and highlighted code stay readable and safe without JavaS
   await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
   await page.locator('[data-pb-panel="widgets"]').click();
   await page.getByRole('button', { name: 'Ajouter Code coloré', exact: true }).click();
-  await page.getByLabel('Libellé du code').fill('Exemple sécurisé');
+  await page.getByLabel('Libellé du code', { exact: true }).fill('Exemple sécurisé');
   await page.getByLabel('Langage du code').selectOption('javascript');
   const source = `const message = "</code><img src=x onerror=alert(1)>";\n// café & thé\nconst longLine = "${'x'.repeat(240)}";`;
   await page.getByLabel('Code source', { exact: true }).fill(source);
@@ -628,10 +632,10 @@ test('review and flip box remain accessible with keyboard, reduced motion and no
   await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
   await page.locator('[data-pb-panel="widgets"]').click();
   await page.getByRole('button', { name: 'Ajouter Boîte retournable', exact: true }).click();
-  await page.getByLabel('Titre du recto').fill('Nos services');
-  await page.getByLabel('Texte du recto').fill('<p>Une présentation.</p>');
-  await page.getByLabel('Titre du verso').fill('Les détails');
-  await page.getByLabel('Texte du verso').fill('<p>Une suite accessible.</p>');
+  await page.getByLabel('Titre du recto', { exact: true }).fill('Nos services');
+  await page.getByLabel('Texte du recto', { exact: true }).fill('<p>Une présentation.</p>');
+  await page.getByLabel('Titre du verso', { exact: true }).fill('Les détails');
+  await page.getByLabel('Texte du verso', { exact: true }).fill('<p>Une suite accessible.</p>');
   await page.getByLabel('Adresse URL', { exact: true }).fill('/test-prime-builder#details');
   await page.getByLabel('Texte du bouton', { exact: true }).fill('Découvrir');
   const frame = page.frameLocator('[data-pb-frame]');
@@ -644,7 +648,7 @@ test('review and flip box remain accessible with keyboard, reduced motion and no
   await expect(page.getByLabel('Marge intérieure', { exact: true })).toBeVisible();
   await page.locator('[data-pb-panel="widgets"]').click();
   await page.getByRole('button', { name: 'Ajouter Boîte retournable', exact: true }).click();
-  await page.getByLabel('Titre du recto').fill('Deuxième carte');
+  await page.getByLabel('Titre du recto', { exact: true }).fill('Deuxième carte');
   await page.locator('[data-pb-save]').click();
   await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
 
@@ -721,8 +725,8 @@ test('search form uses the CMS search and refreshes its URL without disturbing t
   expect(reset).toBe(200);
   await page.reload();
   await page.getByRole('button', { name: 'Ajouter Formulaire de recherche', exact: true }).click();
-  await page.getByLabel('Libellé du champ de recherche').fill('Chercher une actualité');
-  await page.getByLabel('Texte indicatif (facultatif)').fill('Mots clés');
+  await page.getByLabel('Libellé du champ de recherche', { exact: true }).fill('Chercher une actualité');
+  await page.getByLabel('Texte indicatif (facultatif)', { exact: true }).fill('Mots clés');
   await page.getByLabel('Texte du bouton', { exact: true }).fill('Trouver');
   const frame = page.frameLocator('[data-pb-frame]');
   await expect(frame.locator('link[href*="/css/widgets/search_form.css"]')).toHaveCount(1);
@@ -1273,7 +1277,7 @@ test('OpenStreetMap is requested only after activation and remains a link withou
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
   await page.getByRole('button', { name: 'Ajouter Carte OpenStreetMap' }).click();
-  await page.getByLabel('Titre de la carte').fill('Carte de Créteil');
+  await page.getByLabel('Titre de la carte', { exact: true }).fill('Carte de Créteil');
   await page.getByLabel('Latitude (de −85 à 85, point décimal)').fill('48.790000');
   await page.getByLabel('Longitude (de −180 à 180, point décimal)').fill('2.450000');
   await page.getByLabel('Zoom (3 à 18)').fill('14');
@@ -1417,11 +1421,11 @@ test('tabs work with keyboard and remain readable without JavaScript', async ({ 
   await login(page);
   await page.goto(`/admin/prime-builder/edit/${id}`);
   await page.getByRole('button', { name: 'Ajouter Onglets' }).click();
-  await page.getByLabel('Nom du groupe').fill('Choisir une vue');
-  await page.getByLabel('Titre du premier onglet').fill('Rouge');
-  await page.getByLabel('Contenu du premier onglet').fill('<p>Contenu rouge</p>');
-  await page.getByLabel('Titre du deuxième onglet').fill('Bleu');
-  await page.getByLabel('Contenu du deuxième onglet').fill('<p>Contenu bleu</p>');
+  await page.getByLabel('Nom du groupe', { exact: true }).fill('Choisir une vue');
+  await page.getByLabel('Titre du premier onglet', { exact: true }).fill('Rouge');
+  await page.getByLabel('Contenu du premier onglet', { exact: true }).fill('<p>Contenu rouge</p>');
+  await page.getByLabel('Titre du deuxième onglet', { exact: true }).fill('Bleu');
+  await page.getByLabel('Contenu du deuxième onglet', { exact: true }).fill('<p>Contenu bleu</p>');
   await page.locator('[data-pb-status]').selectOption('published');
   await page.locator('[data-pb-save]').click();
   await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
@@ -1460,8 +1464,8 @@ test('image selection uses the Prime media picker', async ({ page }) => {
   await expectAccessible(page);
   await modal.getByRole('option', { name: /Paysage/ }).click();
   await modal.locator('[data-prime-picker-confirm]').click();
-  await expect(page.getByLabel('Adresse URL')).toHaveValue('/assets/plugins/prime-builder/images/landscape.svg');
-  await expect(page.getByLabel('Texte alternatif')).toHaveValue('Montagnes');
+  await expect(page.getByLabel('Adresse URL', { exact: true })).toHaveValue('/assets/plugins/prime-builder/images/landscape.svg');
+  await expect(page.getByLabel('Texte alternatif', { exact: true })).toHaveValue('Montagnes');
   await expect(page.getByLabel('Largeur')).toHaveValue('1200');
 });
 

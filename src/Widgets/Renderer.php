@@ -404,7 +404,10 @@ final class Renderer
             'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author' => $this->pageContext !== null
                 ? ($this->content?->entryWidgetInPage($type, $settings, $this->pageContext) ?? '')
                 : ($this->content?->entryWidget($type, $settings, $this->entry, $this->live) ?? ''),
-            'entry_content' => $this->pageContext !== null
+            // The current-content widget belongs to a theme layout, not the
+            // entry's own tree. A live entry also carries a page context for
+            // pagination and dynamic zones, but must never copy itself.
+            'entry_content' => $this->pageContext !== null && $this->entry === null
                 ? ($this->content?->entryContentInPage($this->pageContext) ?? '')
                 : ($this->live && $this->trustedPreview ? '<p class="pb-entry-content__preview">' . self::escape(t('plugin::prime-builder.ui.entry_content_preview')) . '</p>' : ''),
             'archive_title', 'archive_list' => $this->pageContext !== null

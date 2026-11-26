@@ -5769,6 +5769,9 @@ final class IntegrationTest extends TestCase
             $node('past', 'heading', ['text' => 'PERIODE ACTIVE'], ['start' => '2000-01-01T00:00', 'end' => '2999-01-01T00:00']),
             $node('future', 'heading', ['text' => 'PERIODE FUTURE'], ['start' => '2999-01-01T00:00']),
             $node('mobile', 'heading', ['text' => 'APPAREIL MOBILE'], ['device' => 'mobile']),
+            // An entry_content widget in an entry must not copy that same entry,
+            // even when runtime rendering supplies the surrounding page context.
+            $node('self', 'entry_content'),
         ];
         $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => $elements]]]];
         $token = $this->tokens($app)->issue($this->user($app, 1), 'dynamic', ['*'])['token'];
@@ -5792,6 +5795,8 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('no-store', (string) $guest->header('Cache-Control'));
         $html = $guest->body();
         self::assertSame(1, substr_count(strtolower($html), '<!doctype'));
+        self::assertSame(1, substr_count($html, 'SITE Atelier &amp; &lt;Site&gt; — Le slogan public'), 'A live entry must never duplicate its own content');
+        self::assertStringNotContainsString('data-pb-content-copy=', $html);
         self::assertStringContainsString('SITE Atelier &amp; &lt;Site&gt; — Le slogan public', $html);
         self::assertStringContainsString('CONTENU Article publié — Résumé', $html);
         self::assertStringContainsString('Admin Prime', $html, 'An active author name can be public');

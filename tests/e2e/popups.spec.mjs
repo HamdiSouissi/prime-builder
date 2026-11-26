@@ -77,7 +77,7 @@ test('popup models use explicit, accessible activation, conditions, all triggers
     await page.locator('[data-pb-panel="widgets"]').click();
     await page.getByRole('button', { name: 'Ajouter Bouton', exact: true }).click();
     await page.getByLabel('Texte', { exact: true }).fill('Lien dans la fenêtre');
-    await page.getByLabel('Adresse URL').fill('/');
+    await page.getByLabel('Adresse URL', { exact: true }).fill('/');
     await page.locator('[data-pb-save]').click();
     await expect(page.locator('[data-pb-save-state]')).toHaveText('Enregistré');
 

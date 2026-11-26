@@ -33,7 +33,10 @@ test('dynamic zones rendered by a Builder widget retain their visitor through li
     const created = await api('/api/v1/content/page', 'POST', { title, slug, status: 'draft', content: { version: 1, blocks: [] } });
     expect(created.status, created.body).toBe(201);
     id = JSON.parse(created.body).data.id;
-    const elements = [{ id: 'zone', type: 'theme_zone', settings: { zone: 'sidebar' }, styles: {}, children: [] }];
+    const elements = [
+      { id: 'zone', type: 'theme_zone', settings: { zone: 'sidebar' }, styles: {}, children: [] },
+      { id: 'self', type: 'entry_content', settings: {}, styles: {}, children: [] },
+    ];
     const content = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements } }] };
     const updated = await api(`/api/prime-builder/v1/documents/${id}`, 'PATCH', { content, status: 'published', published_at: '' });
     expect(updated.status, updated.body).toBe(200);
@@ -47,6 +50,7 @@ test('dynamic zones rendered by a Builder widget retain their visitor through li
       expect(response.headers()['cache-control']).toContain('no-store');
       const heading = noJs.locator('.pb-theme_zone h2');
       await expect(heading).toContainText(`ZONE ${title} / `);
+      await expect(noJs.locator('.pb-entry_content [data-pb-content-copy]')).toHaveCount(0);
       const value = await heading.innerText();
       expect(value).not.toContain('{{');
       expect(value.split(' / ')[1].trim()).not.toBe('');
@@ -63,6 +67,7 @@ test('dynamic zones rendered by a Builder widget retain their visitor through li
     expect((await live).ok()).toBe(true);
     await expect(page.locator('.pb-theme_zone h2')).toContainText(`ZONE ${title} / `);
     await expect(page.locator('.pb-theme_zone h2')).not.toContainText('{{');
+    await expect(page.locator('.pb-entry_content [data-pb-content-copy]')).toHaveCount(0);
   } finally {
     await page.goto('/admin/appearance/zones?zone=sidebar');
     if (id !== null) {
