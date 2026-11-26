@@ -23,6 +23,7 @@ final class Renderer
     /** @var array<string, array{width: int, height: int}> */
     private array $inferredImageDimensions = [];
 
+    /** @param array<mixed> $pageQuery */
     public function __construct(
         private readonly Registry $registry,
         private readonly HtmlSanitizer $sanitizer,
@@ -36,6 +37,8 @@ final class Renderer
         private readonly bool $trustedPreview = false,
         private readonly ?PageContext $pageContext = null,
         private readonly ?MediaReferences $mediaReferences = null,
+        private readonly bool $allowThemeHtml = false,
+        private readonly array $pageQuery = [],
     ) {
     }
 
@@ -350,8 +353,12 @@ final class Renderer
             'gallery' => $this->renderGallery($settings),
             'image_carousel' => $this->renderImageCarousel($settings),
             'video', 'audio' => $this->renderMedia($type, $settings, $id),
-            'posts' => $this->content?->posts($settings, $this->live, $id) ?? '',
-            'current_content' => $this->content?->current($settings, $this->entry, $this->live) ?? '',
+            'posts' => $this->pageContext !== null
+                ? ($this->content?->postsInPage($settings, $id, $this->pageContext, $this->pageQuery) ?? '')
+                : ($this->content?->posts($settings, $this->live, $id) ?? ''),
+            'current_content' => $this->pageContext !== null
+                ? ($this->content?->currentInPage($settings, $this->pageContext) ?? '')
+                : ($this->content?->current($settings, $this->entry, $this->live) ?? ''),
             'search_form' => $this->content?->searchForm($settings, $id) ?? '',
             'navigation' => $this->pageContext !== null
                 ? ($this->content?->navigationInPage($settings, $this->pageContext) ?? Navigation::render($settings, null, false))
@@ -374,7 +381,9 @@ final class Renderer
                 ? ($this->content?->shareButtonsInPage($settings, $this->pageContext) ?? ShareButtons::render($settings, '', false))
                 : ($this->content?->shareButtons($settings, $this->entry) ?? ShareButtons::render($settings, '')),
             'table_of_contents' => ($this->tableOfContents ?? new TableOfContents([], $this->sanitizer))->render($settings),
-            'theme_zone' => $this->content?->themeZone($settings, $this->live, $this->entry) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>',
+            'theme_zone' => $this->pageContext !== null
+                ? ($this->content?->themeZoneInPage($settings, $this->pageContext) ?? '')
+                : ($this->content?->themeZone($settings, $this->live, $this->entry) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>'),
             'form' => $this->renderForm($settings, $id),
             'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry, is_string($settings['block_anchor'] ?? null) ? $settings['block_anchor'] : null),
             'original_content' => $this->renderOriginal($settings, false),
@@ -412,7 +421,11 @@ final class Renderer
     private function renderHtmlWidget(string $id, array $settings): string
     {
         $verified = $this->entry !== null && ($this->html?->valid($id, $settings, $this->entry->id) ?? false);
-        if (!$this->trustedPreview && !$verified) {
+        // Theme layouts have their own capability-protected storage, not an
+        // entry-bound seal. Do not turn on trusted preview for public rendering:
+        // that flag also enables preview-only behavior in other widgets.
+        $themeHtml = $this->allowThemeHtml && $this->pageContext !== null && $this->entry === null;
+        if (!$this->trustedPreview && !$verified && !$themeHtml) {
             return '';
         }
         return $this->sanitizer->sanitizeBasic(is_string($settings['markup'] ?? null) ? $settings['markup'] : '');

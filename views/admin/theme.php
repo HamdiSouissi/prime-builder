@@ -7,6 +7,8 @@ declare(strict_types=1);
 /** @var list<array{label: string, url: ?string}> $breadcrumbs */
 /** @var array<string, string> $values */
 /** @var list<array<string, mixed>> $choices */
+/** @var list<array<string, mixed>> $sourceChoices */
+/** @var list<array<string, mixed>> $models */
 /** @var string|null $error */
 $this->layout('admin::layouts/app');
 ?>
@@ -16,7 +18,33 @@ $this->layout('admin::layouts/app');
     'subtitle' => t('plugin::prime-builder.theme.description'),
     'breadcrumbs' => $breadcrumbs,
 ])) ?>
-<div class="pc-form-constrained" data-pb-theme>
+<div class="pc-form-constrained pc-stack pc-stack--lg" data-pb-theme>
+    <section class="pc-card" aria-labelledby="pb-models-title">
+        <header class="pc-card__header"><h2 class="pc-card__title" id="pb-models-title"><?= $this->e(t('plugin::prime-builder.theme.models')) ?></h2></header>
+        <div class="pc-card__body pc-stack pc-stack--md">
+            <?php if ($models === []): ?><p><?= $this->e(t('plugin::prime-builder.theme.empty')) ?></p><?php endif; ?>
+            <?php foreach ($models as $model): ?>
+                <article class="pb-theme-model-row">
+                    <div><strong><?= $this->e((string) $model['name']) ?></strong><br><span><?= $this->e(t('plugin::prime-builder.theme.kind_' . $model['kind'])) ?> · <?= $this->e(t('plugin::prime-builder.theme.' . ($model['enabled'] ? 'active' : 'inactive'))) ?></span></div>
+                    <div class="pb-theme-actions">
+                        <a class="pc-btn pc-btn--secondary" href="/admin/prime-builder/theme/<?= $this->e((string) $model['id']) ?>"><?= $this->e(t('plugin::prime-builder.theme.edit_conditions')) ?></a>
+                        <a class="pc-btn pc-btn--secondary" href="/admin/prime-builder/theme/<?= $this->e((string) $model['id']) ?>/edit"><?= $this->e(t('plugin::prime-builder.theme.edit_layout')) ?></a>
+                        <form method="post" action="/admin/prime-builder/theme/<?= $this->e((string) $model['id']) ?>/delete"><?= $this->raw($this->csrfField()) ?><button class="pc-btn pc-btn--secondary" type="submit" aria-label="<?= $this->e(t('plugin::prime-builder.theme.delete') . ' — ' . (string) $model['name']) ?>"><?= $this->e(t('plugin::prime-builder.theme.delete')) ?></button></form>
+                    </div>
+                </article>
+            <?php endforeach; ?>
+        </div>
+    </section>
+    <form method="post" action="/admin/prime-builder/theme/create" class="pc-card" aria-labelledby="pb-theme-create-title">
+        <?= $this->raw($this->csrfField()) ?>
+        <header class="pc-card__header"><h2 class="pc-card__title" id="pb-theme-create-title"><?= $this->e(t('plugin::prime-builder.theme.create_title')) ?></h2></header>
+        <div class="pc-card__body pc-stack pc-stack--md">
+            <div class="pc-field"><label class="pc-label" for="pb-model-name"><?= $this->e(t('plugin::prime-builder.theme.name')) ?></label><input class="pc-input" id="pb-model-name" name="name" maxlength="100" required></div>
+            <div class="pc-field"><label class="pc-label" for="pb-model-kind"><?= $this->e(t('plugin::prime-builder.theme.kind')) ?></label><select class="pc-input" id="pb-model-kind" name="kind"><?php foreach (\PrimeBuilder\Theme\Models::KINDS as $kind): ?><option value="<?= $this->e($kind) ?>"><?= $this->e(t('plugin::prime-builder.theme.kind_' . $kind)) ?></option><?php endforeach; ?></select></div>
+            <div class="pc-field"><label class="pc-label" for="pb-model-source"><?= $this->e(t('plugin::prime-builder.theme.source')) ?></label><select class="pc-input" id="pb-model-source" name="source"><option value=""><?= $this->e(t('plugin::prime-builder.theme.empty_source')) ?></option><?php foreach ($sourceChoices as $choice): ?><option value="<?= $this->e((string) $choice['id']) ?>"><?= $this->e((string) $choice['name']) ?></option><?php endforeach; ?></select></div>
+        </div>
+        <div class="pc-card__footer"><button class="pc-btn pc-btn--primary" type="submit"><?= $this->e(t('plugin::prime-builder.theme.create')) ?></button></div>
+    </form>
     <form method="post" action="/admin/prime-builder/theme" class="pc-stack pc-stack--lg">
         <?= $this->raw($this->csrfField()) ?>
         <?php if ($error !== null): ?>

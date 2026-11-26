@@ -30,6 +30,8 @@ use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
+use PrimeBuilder\Theme\Models;
+use PrimeBuilder\Theme\Partials;
 use PrimeBuilder\Widgets\Assets;
 use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\OriginalContent;
@@ -118,9 +120,38 @@ final class Documents
     {
         $user = $this->plugin->app()->get(Auth::class)->user($request);
         $entry = $this->entry((int) $id, $user);
-        if ($entry === null) {
+        if ($entry === null || !$user instanceof User) {
             return Response::text(t('plugin::prime-builder.ui.not_found'), 404);
         }
+        return $this->editorView($request, $entry, $user);
+    }
+
+    /** Open a theme model in the same visual editor, without creating a public entry. */
+    public function editTheme(Request $request, string $id): Response
+    {
+        $user = $this->plugin->app()->get(Auth::class)->user($request);
+        if (!$user instanceof User || !$user->can('prime_builder.theme_builder')) {
+            return Response::text('', 403);
+        }
+        $model = (new Models($this->plugin->settings(), $this->plugin->app()->get(\Prime\Settings\Settings::class)))->find($id);
+        if ($model === null || !is_array($model['elements'] ?? null)) {
+            return Response::text(t('plugin::prime-builder.ui.not_found'), 404);
+        }
+        $layout = (new Partials($this->plugin))->normalize($model['elements'], true, contextual: true);
+        if ($layout === null) {
+            return Response::text(t('plugin::prime-builder.theme.invalid'), 422);
+        }
+        $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => $layout]]];
+        $entry = Entry::fromRow([
+            'id' => 0, 'type' => 'page', 'status' => 'draft', 'title' => $model['name'],
+            'content' => json_encode($document, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '',
+        ]);
+        return $this->editorView($request, $entry, $user, $model);
+    }
+
+    /** @param array<string, mixed>|null $themeModel */
+    private function editorView(Request $request, Entry $entry, User $user, ?array $themeModel = null): Response
+    {
         $type = $this->plugin->app()->get(ContentTypeRegistry::class)->get($entry->type);
         $service = $this->plugin->app()->get(EntryService::class);
         $registry = new Registry($this->plugin->app()->get(\Prime\Hooks\Hooks::class));
@@ -215,8 +246,10 @@ final class Documents
                 'style' => Assets::safeUrl($definition['style'] ?? null, 'css'),
                 'fields' => $fields,
                 'container' => ($definition['container'] ?? false) === true,
-                'hidden' => ($definition['hidden'] ?? false) === true || ($name === 'html' && !$user?->can('prime_builder.unfiltered_html')),
-                'readOnly' => ($definition['read_only'] ?? false) === true || ($name === 'html' && !$user?->can('prime_builder.unfiltered_html')),
+                // The contact widget's endpoints currently require a persisted entry.
+                'hidden' => ($definition['hidden'] ?? false) === true || ($name === 'html' && !$user->can('prime_builder.unfiltered_html'))
+                    || ($themeModel !== null && $name === 'form'),
+                'readOnly' => ($definition['read_only'] ?? false) === true || ($name === 'html' && !$user->can('prime_builder.unfiltered_html')),
             ];
         }
         $ui = [];
@@ -228,15 +261,21 @@ final class Documents
         }
         $document = $entry->decodedContent();
         $originals = OriginalContent::fromAppKey($this->plugin->app()->config()->get('app.key'));
-        $converted = (new Converter($this->plugin->app()->get(BlockRegistry::class), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $registry, $originals))->convert($entry);
+        $converted = $themeModel !== null ? $document : (new Converter($this->plugin->app()->get(BlockRegistry::class), $this->plugin->app()->get(\Prime\Security\HtmlSanitizer::class), $registry, $originals))->convert($entry);
+        $themeId = $themeModel !== null && is_string($themeModel['id'] ?? null) ? $themeModel['id'] : null;
+        $previewUrl = $themeId !== null ? '/admin/prime-builder/theme/' . $themeId . '/preview' : $entry->previewUrl();
+        $editUrl = $themeId !== null ? '/admin/prime-builder/theme/' . $themeId : $entry->editUrl();
         $config = [
             'entryId' => $entry->id,
-            'userId' => $user instanceof User ? $user->id : 0,
-            'sourceHash' => $this->sourceHash($entry),
+            'documentKey' => $themeId !== null ? 'theme:' . $themeId : (string) $entry->id,
+            'themeKind' => $themeId !== null ? ($themeModel['kind'] ?? null) : null,
+            'apiBase' => $themeId !== null ? '/api/prime-builder/v1/theme-models/' . $themeId : '/api/prime-builder/v1/documents/' . $entry->id,
+            'userId' => $user->id,
+            'sourceHash' => $themeModel !== null && is_array($themeModel['elements'] ?? null) ? Models::sourceHash($themeModel['elements']) : $this->sourceHash($entry),
             'document' => $converted ?? $document,
             'conversionFailed' => $converted === null,
-            'converted' => $converted !== null && ($document['blocks'] !== [] || $entry->contentHtml !== '') && $converted !== $document,
-            'previewUrl' => $entry->previewUrl(),
+            'converted' => $themeModel === null && $converted !== null && ($document['blocks'] !== [] || $entry->contentHtml !== '') && $converted !== $document,
+            'previewUrl' => $previewUrl,
             'publicCssUrl' => $this->plugin->url('css/public.css'),
             'kitCssUrl' => '/prime-builder/kit/' . substr(hash('sha256', Kit::fromSettings($this->plugin->settings())), 0, 16) . '.css',
             'kitColors' => ['primary' => Configuration::get($this->plugin->settings(), 'kit_primary', '#c9441f'), 'text' => Configuration::get($this->plugin->settings(), 'kit_text', '#1a1d29')],
@@ -244,21 +283,24 @@ final class Documents
             'mediaMessages' => array_filter($this->plugin->app()->get(Translator::class)->messages(), static fn (string $key): bool => str_starts_with($key, 'admin.js.media.'), ARRAY_FILTER_USE_KEY),
             'tabletBreakpoint' => max(600, min(2000, (int) Configuration::get($this->plugin->settings(), 'breakpoint_tablet', 1024))),
             'mobileBreakpoint' => max(320, min(1600, (int) Configuration::get($this->plugin->settings(), 'breakpoint_mobile', 767))),
-            'editUrl' => $entry->editUrl(),
+            'editUrl' => $editUrl,
             'revisionsUrl' => '/admin/content/' . rawurlencode($entry->type) . '/' . $entry->id . '/revisions',
             'status' => $entry->status,
             'publishedAt' => $entry->publishedAt,
-            'canPublish' => $user instanceof User && $type !== null && $service->canPublish($user, $type),
+            'canPublish' => $themeModel === null && $type !== null && $service->canPublish($user, $type),
             'widgets' => $definitions,
             'widgetDefaults' => $this->widgetDefaults(),
-            'canTemplates' => $user instanceof User && $user->can('prime_builder.templates'),
-            'canHtml' => $user instanceof User && $user->can('prime_builder.unfiltered_html'),
+            'canTemplates' => $user->can('prime_builder.edit') && $user->can('prime_builder.templates'),
+            'canHtml' => $user->can('prime_builder.unfiltered_html'),
             // Editors may insert shared templates; only managers may save, import or delete them.
             'library' => (new Templates($this->plugin))->all(),
             'ui' => $ui,
         ];
         $html = $this->plugin->views()->render('prime-builder::admin/builder', [
             'entry' => $entry,
+            'previewUrl' => $previewUrl,
+            'editUrl' => $editUrl,
+            'themeModel' => $themeModel !== null,
             'canTemplates' => $config['canTemplates'],
             'conversionFailed' => $config['conversionFailed'],
             'configJson' => json_encode($config, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) ?: '{}',

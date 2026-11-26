@@ -4752,6 +4752,385 @@ final class IntegrationTest extends TestCase
         self::assertSame($css->body(), $this->send($app, 'GET', '/prime-builder/theme/' . ($matches[1] ?? ''))->body());
     }
 
+    public function testThemeModelsAreEditableConditionalAndRestoreTheTheme(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $pdo->exec('CREATE TABLE pc_menus (id ' . $idColumn . ', name VARCHAR(150) NOT NULL, slug VARCHAR(120) NOT NULL UNIQUE, location VARCHAR(80) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)');
+        $pdo->exec('CREATE TABLE pc_menu_items (id ' . $idColumn . ", menu_id INTEGER NOT NULL, parent_id INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0, type VARCHAR(20) NOT NULL DEFAULT 'url', target_id INTEGER NULL, url VARCHAR(500) NULL, label VARCHAR(255) NOT NULL DEFAULT '', target VARCHAR(16) NOT NULL DEFAULT '_self', css_class VARCHAR(255) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
+        $pdo->exec("INSERT INTO pc_terms (id, taxonomy, name, slug, parent_id, menu_order, `count`) VALUES (11, 'category', 'Arts', 'arts', 0, 0, 1)");
+        $pdo->exec('INSERT INTO pc_entry_terms (entry_id, term_id, position) VALUES (1, 11, 0)');
+        $csrf = $app->get(Csrf::class)->token();
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'theme models', ['*'])['token'];
+        $kernel = $app->get(Kernel::class);
+        $post = static fn (string $url, array $fields): Response => $kernel->handle(Request::create('POST', $url, body: ['_csrf_token' => $csrf] + $fields));
+        $create = static function (string $name, string $kind) use ($post): string {
+            $response = $post('/admin/prime-builder/theme/create', ['name' => $name, 'kind' => $kind, 'source' => '']);
+            self::assertSame(302, $response->status(), $response->body());
+            $location = (string) $response->header('Location');
+            self::assertSame(1, preg_match('~^/admin/prime-builder/theme/([a-f0-9]{32})$~D', $location, $matches));
+            return $matches[1] ?? '';
+        };
+        $setLayout = function (string $id, array $elements) use ($app, $token): void {
+            $editor = $this->send($app, 'GET', '/admin/prime-builder/theme/' . $id . '/edit');
+            self::assertSame(200, $editor->status(), $editor->body());
+            self::assertSame(1, preg_match('/<textarea hidden data-pb-config>(.*?)<\/textarea>/s', $editor->body(), $matches));
+            $config = json_decode(html_entity_decode($matches[1] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8'), true);
+            self::assertSame('/api/prime-builder/v1/theme-models/' . $id, $config['apiBase']);
+            self::assertSame('theme:' . $id, $config['documentKey']);
+            $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => $elements]]]];
+            $response = $this->send($app, 'PATCH', '/api/prime-builder/v1/theme-models/' . $id, ['content' => $document, 'source_hash' => $config['sourceHash']], $token);
+            self::assertSame(200, $response->status(), $response->body());
+            self::assertSame(409, $this->send($app, 'PATCH', '/api/prime-builder/v1/theme-models/' . $id, ['content' => $document, 'source_hash' => str_repeat('0', 64)], $token)->status());
+        };
+        $heading = static fn (string $text): array => [['id' => 'title', 'type' => 'heading', 'settings' => ['text' => $text, 'level' => 2], 'styles' => ['desktop' => ['color' => '#123456']], 'children' => []]];
+        $activate = static function (string $id, string $name, int $priority, array $include, array $exclude = []) use ($post): void {
+            $fields = ['name' => $name, 'priority' => (string) $priority, 'enabled' => '1', 'include_type' => [], 'include_value' => [], 'exclude_type' => [], 'exclude_value' => []];
+            foreach (['include' => $include, 'exclude' => $exclude] as $group => $rules) {
+                foreach ($rules as $rule) {
+                    $fields[$group . '_type'][] = $rule[0];
+                    $fields[$group . '_value'][] = $rule[1];
+                }
+            }
+            $response = $post('/admin/prime-builder/theme/' . $id, $fields);
+            self::assertSame(302, $response->status(), $response->body());
+        };
+        $header = $create('En-tête général', 'header');
+        $specific = $create('En-tête article', 'header');
+        $single = $create('Article seul', 'single');
+        $missing = $create('Page introuvable', 'not_found');
+        $archive = $create('Archive', 'archive');
+        $search = $create('Recherche', 'search');
+        $setLayout($header, $heading('Entête général'));
+        $setLayout($specific, $heading('Entête précis'));
+        $setLayout($single, array_merge($heading('Gabarit article'), [['id' => 'content', 'type' => 'entry_content', 'settings' => [], 'styles' => [], 'children' => []]]));
+        $setLayout($missing, $heading('404 composée'));
+        $setLayout($archive, array_merge($heading('Archive composée'), [
+            ['id' => 'archive-title', 'type' => 'archive_title', 'settings' => [], 'styles' => [], 'children' => []],
+            ['id' => 'archive-list', 'type' => 'archive_list', 'settings' => [], 'styles' => [], 'children' => []],
+        ]));
+        $setLayout($search, array_merge($heading('Recherche composée'), [
+            ['id' => 'search-title', 'type' => 'archive_title', 'settings' => [], 'styles' => [], 'children' => []],
+            ['id' => 'search-list', 'type' => 'archive_list', 'settings' => [], 'styles' => [], 'children' => []],
+        ]));
+        $preview = $this->send($app, 'GET', '/admin/prime-builder/theme/' . $header . '/preview');
+        self::assertSame(200, $preview->status(), $preview->body());
+        self::assertStringContainsString('data-pb-theme-preview-target', $preview->body());
+        self::assertStringContainsString('data-pb-editor-content', $preview->body());
+        self::assertStringContainsString('no-store', (string) $preview->header('Cache-Control'));
+        self::assertSame('noindex, nofollow', $preview->header('X-Robots-Tag'));
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $cachedRequest = Request::create('GET', '/avant-theme');
+        self::assertTrue($cache->isCacheableRequest($cachedRequest));
+        $cache->store($cachedRequest, Response::html('Avant activation'));
+        self::assertNotNull($cache->lookup($cachedRequest));
+        $activate($header, 'En-tête général', 999, [['all', '']], [['entry', '3']]);
+        self::assertNull($cache->lookup($cachedRequest), 'Changing model settings purges previously cached pages');
+        $activate($specific, 'En-tête article', -999, [['entry', '1']]);
+        $activate($single, 'Article seul', 0, [['content_type', 'post']]);
+        $activate($missing, 'Page introuvable', 0, [['not_found', '']]);
+        $activate($archive, 'Archive', 0, [['archive', '']]);
+        $activate($search, 'Recherche', 0, [['search', '']]);
+
+        $entry = $app->get(EntryRepository::class)->find(1);
+        $excluded = $app->get(EntryRepository::class)->find(3);
+        self::assertNotNull($entry);
+        self::assertNotNull($excluded);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry, contentType: $app->get(ContentTypeRegistry::class)->get('post'));
+        $excludedPage = new PageContext(type: PageContext::TYPE_ENTRY, entry: $excluded);
+        $hooks = $app->get(Hooks::class);
+        $partial = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($partial);
+        self::assertStringContainsString('Entête précis', $partial, 'Specificity beats numeric priority');
+        self::assertNull($hooks->apply('site.partial', null, 'header', $excludedPage, []));
+        $activate($specific, 'En-tête article', -999, [['all', '']]);
+        self::assertStringContainsString('Entête général', (string) $hooks->apply('site.partial', null, 'header', $page, []));
+        $activate($specific, 'En-tête article', 1000, [['all', '']]);
+        self::assertStringContainsString('Entête précis', (string) $hooks->apply('site.partial', null, 'header', $page, []));
+        $activate($specific, 'En-tête article', 999, [['all', '']]);
+        $tie = strcmp($specific, $header) < 0 ? 'Entête précis' : 'Entête général';
+        self::assertStringContainsString($tie, (string) $hooks->apply('site.partial', null, 'header', $page, []));
+        $activate($specific, 'En-tête article', -999, [['term', 'category:11']]);
+        self::assertStringContainsString('Entête précis', (string) $hooks->apply('site.partial', null, 'header', $page, []));
+        $termPage = new PageContext(type: PageContext::TYPE_TERM, taxonomy: $app->get(TaxonomyRegistry::class)->get('category'), term: $app->get(\Prime\Content\TermRepository::class)->find(11));
+        self::assertStringContainsString('Entête précis', (string) $hooks->apply('site.partial', null, 'header', $termPage, []));
+        $activate($specific, 'En-tête article', 1000, [['all', '']], [['term', 'category:11']]);
+        self::assertStringContainsString('Entête général', (string) $hooks->apply('site.partial', null, 'header', $page, []));
+        $activate($specific, 'En-tête article', -999, [['entry', '1']]);
+        $candidates = $hooks->apply('site.template_candidates', ['single/default.php'], $page);
+        self::assertSame('prime-builder-theme/content.php', $candidates[0]);
+        $resolved = $app->get(\Prime\Site\TemplateResolver::class)->resolve($page, []);
+        self::assertSame('prime-builder-theme/content.php', $resolved['candidate'] ?? null);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, PageContext::notFound('/inconnue'));
+        self::assertStringContainsString('/prime-builder/theme/', $assets->renderStyles());
+        self::assertFalse($app->get(\Prime\Cache\PageCache::class)->isCacheableRequest(Request::create('GET', '/article-publie')));
+        $html = $app->get(\Prime\Site\SiteRenderer::class)->render($page);
+        self::assertSame(1, substr_count(strtolower($html), '<!doctype'));
+        self::assertSame(1, substr_count(strtolower($html), '<head>'));
+        self::assertStringContainsString('Gabarit article', $html);
+        self::assertStringContainsString('<p>Bonjour</p>', $html);
+        self::assertStringContainsString('Entête précis', $html);
+        $html404 = $app->get(\Prime\Site\SiteRenderer::class)->render(PageContext::notFound('/inconnue'));
+        self::assertStringContainsString('404 composée', $html404);
+        self::assertSame(1, substr_count(strtolower($html404), '<!doctype'));
+        $archivePage = new PageContext(type: PageContext::TYPE_ARCHIVE, path: '/blog', entries: [$entry], contentType: $app->get(ContentTypeRegistry::class)->get('post'));
+        $archiveHtml = $app->get(\Prime\Site\SiteRenderer::class)->render($archivePage);
+        self::assertStringContainsString('Archive composée', $archiveHtml);
+        self::assertStringContainsString('Article publié', $archiveHtml);
+        self::assertStringNotContainsString('Recherche composée', $archiveHtml);
+        $searchPage = new PageContext(type: PageContext::TYPE_SEARCH, path: '/recherche', entries: [$entry], searchQuery: 'Terme <sûr>');
+        $searchHtml = $app->get(\Prime\Site\SiteRenderer::class)->render($searchPage);
+        self::assertStringContainsString('Recherche composée', $searchHtml);
+        self::assertStringContainsString('Article publié', $searchHtml);
+        self::assertStringContainsString('Terme &lt;sûr&gt;', $searchHtml);
+        self::assertStringNotContainsString('Archive composée', $searchHtml);
+        $pageAssets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $pageAssets, $page);
+        self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\.css)~', $pageAssets->renderStyles(), $cssMatch));
+        $cssUrl = '/prime-builder/theme/' . ($cssMatch[1] ?? '');
+        $css = $this->send($app, 'GET', $cssUrl);
+        self::assertSame(200, $css->status());
+        self::assertStringContainsString('#123456', $css->body());
+        $snapshot = $app->storagePath('prime-builder/styles/theme-' . ($cssMatch[1] ?? ''));
+        self::assertFileExists($snapshot);
+        self::assertTrue(unlink($snapshot));
+        $recovered = $this->send($app, 'GET', $cssUrl);
+        self::assertSame(200, $recovered->status());
+        self::assertSame($css->body(), $recovered->body(), 'The active model can rebuild a missing CSS snapshot');
+        $changed = $heading('Entête modifié');
+        $changed[0]['styles']['desktop']['color'] = '#fedcba';
+        $setLayout($specific, $changed);
+        self::assertSame($css->body(), $this->send($app, 'GET', $cssUrl)->body(), 'Previously advertised CSS stays available after editing');
+        self::assertStringContainsString('Entête modifié', (string) $hooks->apply('site.partial', null, 'header', $page, []));
+        $changedAssets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $changedAssets, $page);
+        self::assertSame(1, preg_match('~/prime-builder/theme/([a-f0-9]{16}\.css)~', $changedAssets->renderStyles(), $changedCss));
+        $changedFile = $changedCss[1] ?? '';
+        self::assertNotSame($cssMatch[1] ?? '', $changedFile);
+        $changedSnapshot = $app->storagePath('prime-builder/styles/theme-' . $changedFile);
+        self::assertFileExists($changedSnapshot);
+        self::assertTrue(unlink($changedSnapshot));
+        $newCss = $this->send($app, 'GET', '/prime-builder/theme/' . $changedFile);
+        self::assertSame(200, $newCss->status(), 'The stylesheet controller must invalidate its own model cache');
+        self::assertStringContainsString('#fedcba', $newCss->body());
+
+        $app->get(PluginManager::class)->deactivate('prime-builder');
+        self::assertNull($hooks->apply('site.partial', null, 'header', $page, []));
+        self::assertSame(['single/default.php'], $hooks->apply('site.template_candidates', ['single/default.php'], $page));
+        $restored = $app->get(\Prime\Site\SiteRenderer::class)->render($page);
+        self::assertStringNotContainsString('Gabarit article', $restored);
+        self::assertStringContainsString('Bonjour', $restored);
+    }
+
+    public function testThemeModelContextualWidgetsArePublicScopedAndPageable(): void
+    {
+        $app = $this->activated('admin');
+        $pdo = $this->db($app)->pdo();
+        $pdo->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $idColumn = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $pdo->exec('CREATE TABLE pc_menus (id ' . $idColumn . ', name VARCHAR(150) NOT NULL, slug VARCHAR(120) NOT NULL UNIQUE, location VARCHAR(80) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)');
+        $pdo->exec('CREATE TABLE pc_menu_items (id ' . $idColumn . ", menu_id INTEGER NOT NULL, parent_id INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0, type VARCHAR(20) NOT NULL DEFAULT 'url', target_id INTEGER NULL, url VARCHAR(500) NULL, label VARCHAR(255) NOT NULL DEFAULT '', target VARCHAR(16) NOT NULL DEFAULT '_self', css_class VARCHAR(255) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
+        $insert = $pdo->prepare('INSERT INTO pc_entries (type, status, title, slug, content, content_html, content_text, author_id, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $insert->execute(['post', 'published', 'Deuxième public', 'deuxieme-public', '{"blocks":[]}', '<p>Deuxième</p>', 'Deuxième', 1, '2021-01-01 00:00:00', '2021-01-01 00:00:00', '2021-01-01 00:00:00']);
+        $insert->execute(['post', 'published', 'Troisième public', 'troisieme-public', '{"blocks":[]}', '<p>Troisième</p>', 'Troisième', 1, '2020-01-01 00:00:00', '2020-01-01 00:00:00', '2020-01-01 00:00:00']);
+        $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $zones->save('sidebar', ['version' => 1, 'blocks' => [[
+            'id' => 'zone-block', 'type' => 'html', 'data' => ['html' => '<p id="zone-original">Zone en contexte <a href="#zone-original">ici</a></p><script>secret()</script>'],
+        ]]], true);
+        $kernel = $app->get(Kernel::class);
+        $csrf = $app->get(Csrf::class)->token();
+        $created = $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/create', body: ['_csrf_token' => $csrf, 'name' => 'Contextuel', 'kind' => 'header', 'source' => '']));
+        self::assertSame(302, $created->status(), $created->body());
+        self::assertSame(1, preg_match('~([a-f0-9]{32})$~D', (string) $created->header('Location'), $matches));
+        $id = $matches[1] ?? '';
+        $token = $this->tokens($app)->issue($this->user($app, 1), 'contextual theme', ['*'])['token'];
+        $elements = [
+            ['id' => 'grid', 'type' => 'posts', 'settings' => ['limit' => 1, 'pagination' => 'show'], 'styles' => [], 'children' => []],
+            ['id' => 'current', 'type' => 'current_content', 'settings' => ['source' => 'title'], 'styles' => [], 'children' => []],
+            ['id' => 'zone-a', 'type' => 'theme_zone', 'settings' => ['zone' => 'sidebar'], 'styles' => [], 'children' => []],
+            ['id' => 'zone-b', 'type' => 'theme_zone', 'settings' => ['zone' => 'sidebar'], 'styles' => [], 'children' => []],
+            ['id' => 'html', 'type' => 'html', 'settings' => ['markup' => '<strong>HTML autorisé</strong><script>bad()</script>'], 'styles' => [], 'children' => []],
+        ];
+        $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => $elements]]]];
+        $updated = $this->send($app, 'PATCH', '/api/prime-builder/v1/theme-models/' . $id, ['content' => $document, 'source_hash' => \PrimeBuilder\Theme\Models::sourceHash([])], $token);
+        self::assertSame(200, $updated->status(), $updated->body());
+        $saved = $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/' . $id, body: [
+            '_csrf_token' => $csrf, 'name' => 'Contextuel', 'priority' => '0', 'enabled' => '1',
+            'include_type' => ['all'], 'include_value' => [''], 'exclude_type' => [], 'exclude_value' => [],
+        ]));
+        self::assertSame(302, $saved->status(), $saved->body());
+        $entry = $app->get(EntryRepository::class)->find(1);
+        $draft = $app->get(EntryRepository::class)->find(2);
+        self::assertNotNull($entry);
+        self::assertNotNull($draft);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry);
+        $grid = 'pbt_header_' . substr(hash('sha256', 'grid'), 0, 24);
+        $hooks = $app->get(Hooks::class);
+        $hooks->emit('site.context', $page, Request::create('GET', '/blog/article-publie', query: ['pb_page_' . $grid => '2', 'secret' => 'ne-pas-propager']));
+        $rendered = $hooks->apply('site.partial', null, 'header', $page, []);
+        self::assertIsString($rendered);
+        self::assertStringContainsString('Deuxième public', $rendered);
+        self::assertStringNotContainsString('Troisième public', $rendered);
+        self::assertStringContainsString('Article publié', $rendered, 'Current title is resolved from the public page');
+        self::assertStringContainsString('<strong>HTML autorisé</strong>', $rendered);
+        self::assertStringNotContainsString('<script', $rendered);
+        self::assertStringNotContainsString('ne-pas-propager', $rendered);
+        self::assertStringContainsString('pb_page_' . $grid . '=1', $rendered);
+        self::assertSame(2, preg_match_all('/id="(pbc-[a-f0-9]{24}-[0-9]+)"/', $rendered, $scoped));
+        self::assertCount(2, array_unique($scoped[1]));
+        foreach ($scoped[1] as $scopedId) {
+            self::assertStringContainsString('href="#' . $scopedId . '"', $rendered);
+        }
+        $privatePage = new PageContext(type: PageContext::TYPE_ENTRY, entry: $draft, isPreview: true);
+        $privateRender = $hooks->apply('site.partial', null, 'header', $privatePage, []);
+        self::assertIsString($privateRender);
+        self::assertStringNotContainsString('Brouillon admin', $privateRender);
+        self::assertStringContainsString('Article publié', $privateRender, 'A different context must not inherit pagination from the first page');
+        $search = new PageContext(type: PageContext::TYPE_SEARCH, path: '/recherche', searchQuery: 'mot & sens');
+        $hooks->emit('site.context', $search, Request::create('GET', '/recherche', query: ['pb_page_' . $grid => '2', 'secret' => 'ne-pas-propager']));
+        $searchRender = $hooks->apply('site.partial', null, 'header', $search, []);
+        self::assertIsString($searchRender);
+        self::assertStringContainsString('q=mot%20%26%20sens', $searchRender);
+        self::assertStringNotContainsString('ne-pas-propager', $searchRender);
+
+        // renderPage() bypasses site.context entirely: the real route pipeline
+        // must still pass bounded pagination without retaining another request.
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        $app->get(\Prime\Http\Router::class)->get('/theme-plugin-page', static fn (Request $request): Response => $plugin->renderPage($request, 'Page de plugin', '<p>Page tierce</p>'));
+        $second = $kernel->handle(Request::create('GET', '/theme-plugin-page', query: ['pb_page_' . $grid => '2', 'secret' => 'ne-pas-propager']));
+        self::assertSame(200, $second->status(), $second->body());
+        self::assertStringContainsString('Page tierce', $second->body());
+        self::assertStringContainsString('Deuxième public', $second->body());
+        self::assertStringNotContainsString('Troisième public', $second->body());
+        self::assertStringNotContainsString('ne-pas-propager', $second->body());
+        $first = $kernel->handle(Request::create('GET', '/theme-plugin-page'));
+        self::assertSame(200, $first->status(), $first->body());
+        self::assertStringContainsString('Article publié', $first->body());
+        self::assertStringNotContainsString('Deuxième public', $first->body());
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringContainsString('/assets/plugins/prime-builder/css/widgets/posts.css', $assets->renderStyles());
+        self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
+    }
+
+    public function testThemeModelCapabilitiesValidationAndPrivateTitleSearch(): void
+    {
+        $app = $this->activated('contributor');
+        $kernel = $app->get(Kernel::class);
+        $csrf = $app->get(Csrf::class)->token();
+        $createFields = ['_csrf_token' => $csrf, 'name' => 'Contrôles', 'kind' => 'header', 'source' => ''];
+        self::assertSame(403, $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/create', body: $createFields))->status());
+        self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/theme/content-search?q=Brouillon')->status());
+        $this->db($app)->pdo()->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'prime_builder.theme_builder')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
+        $csrf = $app->get(Csrf::class)->token();
+        $createFields['_csrf_token'] = $csrf;
+        $missingCsrf = $createFields;
+        unset($missingCsrf['_csrf_token']);
+        self::assertSame(419, $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/create', body: $missingCsrf))->status());
+        $created = $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/create', body: $createFields));
+        self::assertSame(302, $created->status(), $created->body());
+        self::assertSame(1, preg_match('~([a-f0-9]{32})$~D', (string) $created->header('Location'), $matches));
+        $id = $matches[1] ?? '';
+        self::assertSame(200, $this->send($app, 'GET', '/admin/prime-builder/theme/' . $id)->status());
+        self::assertSame(200, $this->send($app, 'GET', '/admin/prime-builder/theme/' . $id . '/preview')->status());
+        $results = $this->send($app, 'GET', '/admin/prime-builder/theme/content-search?q=Brouillon');
+        self::assertSame(200, $results->status());
+        self::assertStringContainsString('Brouillon contributeur', $results->body());
+        self::assertStringNotContainsString('Brouillon admin', $results->body());
+        self::assertStringNotContainsString('Brouillon', $this->send($app, 'GET', '/admin/prime-builder/theme/content-search?q=Secret')->body(), 'Search uses titles, not body text');
+        $fields = ['_csrf_token' => $csrf, 'name' => 'Contrôles', 'priority' => '0', 'enabled' => '1', 'include_type' => ['all'], 'include_value' => [''], 'exclude_type' => ['entry'], 'exclude_value' => ['2']];
+        self::assertSame(422, $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/' . $id, body: $fields))->status(), 'Cannot reference another user’s draft');
+        $fields['exclude_value'] = ['3'];
+        self::assertSame(302, $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/' . $id, body: $fields))->status());
+        $fields['include_type'] = ['all'];
+        $fields['include_value'] = ['post'];
+        self::assertSame(422, $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/' . $id, body: $fields))->status());
+        $fields['include_type'] = ['term'];
+        $fields['include_value'] = ['category:999999'];
+        self::assertSame(422, $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/' . $id, body: $fields))->status());
+        $fields['include_type'] = ['all'];
+        $fields['include_value'] = [''];
+        $fields['priority'] = '1001';
+        self::assertSame(422, $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/' . $id, body: $fields))->status());
+
+        $token = $this->tokens($app)->issue($this->user($app, 2), 'theme without HTML', ['*'])['token'];
+        $base = '/api/prime-builder/v1/theme-models/' . $id;
+        $wrap = static fn (array $elements): array => ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => $elements]]]];
+        $hash = \PrimeBuilder\Theme\Models::sourceHash([]);
+        $html = [['id' => 'html', 'type' => 'html', 'settings' => ['markup' => '<p>Privileged</p>'], 'styles' => [], 'children' => []]];
+        self::assertSame(403, $this->send($app, 'PATCH', $base, ['content' => $wrap($html), 'source_hash' => $hash], $token)->status());
+        self::assertSame(403, $this->send($app, 'POST', $base . '/render', ['data' => ['version' => 1, 'elements' => $html]], $token)->status());
+        $form = [['id' => 'form', 'type' => 'form', 'settings' => [], 'styles' => [], 'children' => []]];
+        self::assertSame(422, $this->send($app, 'PATCH', $base, ['content' => $wrap($form), 'source_hash' => $hash], $token)->status());
+        $anchors = [
+            ['id' => 'a', 'type' => 'anchor', 'settings' => ['anchor' => 'duplicate'], 'styles' => [], 'children' => []],
+            ['id' => 'b', 'type' => 'anchor', 'settings' => ['anchor' => 'duplicate'], 'styles' => [], 'children' => []],
+        ];
+        self::assertSame(422, $this->send($app, 'PATCH', $base, ['content' => $wrap($anchors), 'source_hash' => $hash], $token)->status());
+        self::assertSame(403, $this->send($app, 'POST', $base . '/import', ['data' => ['version' => 1, 'elements' => []]], $token)->status());
+        $this->db($app)->pdo()->exec("INSERT INTO pc_role_capabilities (role_id, capability) VALUES (2, 'settings.manage')");
+        $app->get(\Prime\Auth\RoleRepository::class)->forget();
+        $settingsToken = $this->tokens($app)->issue($this->user($app, 2), 'settings', ['*'])['token'];
+        self::assertSame(422, $this->send($app, 'PATCH', '/api/v1/settings', ['plugin.prime-builder.theme_model.' . $id => ['enabled' => true]], $settingsToken)->status());
+        $admin = $this->tokens($app)->issue($this->user($app, 1), 'theme HTML author', ['*'])['token'];
+        $validImport = ['version' => 1, 'elements' => [['id' => 'imported', 'type' => 'heading', 'settings' => ['text' => 'Imported', 'level' => 2], 'styles' => [], 'children' => []]]];
+        $imported = $this->send($app, 'POST', $base . '/import', ['data' => $validImport], $admin);
+        self::assertSame(200, $imported->status(), $imported->body());
+        self::assertStringContainsString('Imported', $imported->body());
+        self::assertSame(422, $this->send($app, 'POST', $base . '/import', ['data' => ['version' => 1, 'elements' => $form]], $admin)->status());
+        self::assertSame(200, $this->send($app, 'PATCH', $base, ['content' => $wrap($html), 'source_hash' => $hash], $admin)->status());
+        $fields['priority'] = '0';
+        $fields['enabled'] = '1';
+        self::assertSame(403, $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/' . $id, body: $fields))->status());
+        unset($fields['enabled']);
+        self::assertSame(302, $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/' . $id, body: $fields))->status(), 'A theme manager may disable HTML after their HTML capability is revoked');
+        $fields['enabled'] = '1';
+        self::assertSame(403, $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/' . $id, body: $fields))->status(), 'Reactivation still requires the HTML capability');
+    }
+
+    public function testThemeModelCopiesAreIndependentAndStorageIsBounded(): void
+    {
+        $app = $this->activated('admin');
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        $settings = $app->get(Settings::class);
+        $templates = new \PrimeBuilder\Document\SavedTemplates($plugin->settings(), $settings);
+        $models = new \PrimeBuilder\Theme\Models($plugin->settings(), $settings);
+        $elements = [['id' => 'title', 'type' => 'heading', 'settings' => ['text' => 'Copied heading', 'level' => 2], 'styles' => [], 'children' => []]];
+        $template = $templates->create('Reusable', 'section', $elements);
+        self::assertNotNull($template);
+        $kernel = $app->get(Kernel::class);
+        $created = $kernel->handle(Request::create('POST', '/admin/prime-builder/theme/create', body: [
+            '_csrf_token' => $app->get(Csrf::class)->token(), 'name' => 'Independent', 'kind' => 'header', 'source' => $template['id'],
+        ]));
+        self::assertSame(302, $created->status(), $created->body());
+        self::assertSame(1, preg_match('~([a-f0-9]{32})$~D', (string) $created->header('Location'), $matches));
+        $id = $matches[1] ?? '';
+        $copy = $models->find($id);
+        self::assertNotNull($copy);
+        self::assertFalse($copy['enabled']);
+        self::assertSame('Copied heading', $copy['elements'][0]['settings']['text']);
+        self::assertTrue($templates->delete($template['id']));
+        self::assertSame('Copied heading', $models->find($id)['elements'][0]['settings']['text'] ?? null);
+
+        for ($i = 1; $i < \PrimeBuilder\Theme\Models::MAX_MODELS; $i++) {
+            self::assertNotNull($models->create('Model ' . $i, 'footer'));
+        }
+        self::assertCount(\PrimeBuilder\Theme\Models::MAX_MODELS, $models->all());
+        self::assertNull($models->create('One too many', 'header'));
+        $oversized = $copy;
+        $oversized['elements'] = [['id' => 'large', 'settings' => ['text' => str_repeat('x', 200000)]]];
+        self::assertFalse($models->save($oversized));
+        self::assertSame('Copied heading', $models->find($id)['elements'][0]['settings']['text'] ?? null);
+        self::assertTrue($models->delete($id));
+        self::assertNotNull($models->create('Replacement', 'header'));
+        self::assertCount(\PrimeBuilder\Theme\Models::MAX_MODELS, $models->all());
+    }
+
     public function testSettingsRequirePluginCapabilityAndCannotBeChangedThroughCoreApi(): void
     {
         $app = $this->activated('contributor');

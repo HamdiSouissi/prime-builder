@@ -62,6 +62,12 @@ if (($argv[1] ?? '') === 'seed') {
         $statement->execute($roleParameters);
     }
     expectCount('plugin setting', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}settings` WHERE `name` = ?", ['plugin.prime-builder.configuration']), 1);
+    $themeKey = 'plugin.prime-builder.theme_model.' . str_repeat('a', 32);
+    $theme = json_encode(['name' => 'Lifecycle fixture', 'kind' => 'header', 'enabled' => false, 'priority' => 0, 'include' => [['type' => 'all', 'value' => '']], 'exclude' => [], 'elements' => []], JSON_THROW_ON_ERROR);
+    $now = gmdate('Y-m-d H:i:s');
+    $themeInsert = $pdo->prepare("INSERT INTO `{$prefix}settings` (`name`, `value`, `autoload`, `created_at`, `updated_at`) VALUES (?, ?, 0, ?, ?)");
+    $themeInsert->execute([$themeKey, $theme, $now, $now]);
+    expectCount('theme model fixture', countRows($pdo, "SELECT COUNT(*) FROM `{$prefix}settings` WHERE `name` = ?", [$themeKey]), 1);
     expectCount('plugin capability', countRows($pdo, $roleCapability, $roleParameters), 1);
     expectCount('installed plugin', countRows($pdo, $plugin, ['prime-builder']), 1);
     expectCount('form tables', countRows($pdo, $formTables, $formTableNames), 3);

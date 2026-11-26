@@ -45,7 +45,8 @@ const isContainer = node => !!node && containerTypes.includes(node.type);
 const hasHtml = nodes => Array.isArray(nodes) && nodes.some(node => node?.type === 'html' || hasHtml(node?.children));
 const cannotCopyHtml = node => !config.canHtml && hasHtml([node]);
 const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-const localKey = `prime-builder:document:${config.userId}:${config.entryId}`;
+const apiBase = config.apiBase || `/api/prime-builder/v1/documents/${config.entryId}`;
+const localKey = `prime-builder:document:${config.userId}:${config.documentKey || config.entryId}`;
 const favoritesKey = `prime-builder:favorites:${config.userId}`;
 let favorites = new Set();
 try { const saved = JSON.parse(localStorage.getItem(favoritesKey) || '[]'); if (Array.isArray(saved)) favorites = new Set(saved.filter(item => typeof item === 'string')); } catch { /* Storage is optional. */ }
@@ -447,7 +448,7 @@ async function importDocument(file) {
     const input = JSON.parse(await file.text());
     const layout = Array.isArray(input.blocks) ? input.blocks.find(block => block.type === 'prime-builder/layout')?.data : input;
     if (!layout || !Array.isArray(layout.elements) || layout.version !== 1) throw new Error('invalid');
-    const response = await fetch(`/api/prime-builder/v1/documents/${config.entryId}/import`, {
+    const response = await fetch(`${apiBase}/import`, {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf }, body: JSON.stringify({ data: layout }),
     });
     if (!response.ok) throw new Error('invalid');
@@ -938,6 +939,12 @@ function initialPreviewLocation(doc) {
   // known wrapper. Neither a copied entry nor a nested Builder layout is an area.
   const areas = selector => [...doc.querySelectorAll(selector)]
     .filter(area => !area.closest('[data-pb-content-copy]') && !area.closest('.pb-layout'));
+  // A model preview replaces a CMS partial only when the theme really called
+  // it. Otherwise use the explicit content canvas, never a guessed header.
+  if (['header', 'footer'].includes(config.themeKind)) {
+    const partial = areas('[data-pb-theme-preview-target]');
+    if (partial.length) return partial.length === 1 ? { area: partial[0] } : null;
+  }
   const explicit = areas('[data-pb-editor-content]');
   if (explicit.length) return explicit.length === 1 ? { area: explicit[0] } : null;
   const aurora = areas('.aurora-prose');
@@ -1153,7 +1160,7 @@ async function renderPreview(sequence) {
   // the whole preview whenever one is present, even for a single-node edit.
   const target = !previewNeedsFull && previewTargets.size === 1 && !containsWidget(history.present, 'table_of_contents') ? [...previewTargets][0] : null;
   try {
-    const response = await fetch(`/api/prime-builder/v1/documents/${config.entryId}/render`, {
+    const response = await fetch(`${apiBase}/render`, {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
       body: JSON.stringify({ data: { version: 1, elements: history.present }, ...(target === null ? {} : { target }) }),
     });
@@ -1290,7 +1297,7 @@ async function save() {
   const data = { version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements: history.present } }] };
   const button = $('[data-pb-save]'); button.disabled = true; $('[data-pb-save-state]').textContent = ui.saving;
   try {
-    const response = await fetch(`/api/prime-builder/v1/documents/${config.entryId}`, {
+    const response = await fetch(apiBase, {
       method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf },
       body: JSON.stringify({ content: data, source_hash: config.sourceHash, status: currentStatus, ...(currentStatus === 'scheduled' ? { published_at: currentSchedule } : currentStatus === 'published' && config.status !== 'published' ? { published_at: '' } : {}) }),
     });

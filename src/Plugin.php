@@ -22,6 +22,7 @@ use Prime\Editor\BlockDefinition;
 use Prime\Editor\BlockRegistry;
 use Prime\Hooks\Hooks;
 use Prime\Http\Kernel;
+use Prime\Http\Request;
 use Prime\Http\Router;
 use Prime\I18n\Translator;
 use Prime\Plugins\AbstractPlugin;
@@ -42,6 +43,7 @@ use PrimeBuilder\Controller\Documents;
 use PrimeBuilder\Controller\Settings;
 use PrimeBuilder\Controller\Templates;
 use PrimeBuilder\Controller\ThemeBuilder;
+use PrimeBuilder\Controller\ThemeModels;
 use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Layout;
 use PrimeBuilder\Document\MediaReferences;
@@ -53,6 +55,7 @@ use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Kit;
 use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Styles\ZoneLayouts;
+use PrimeBuilder\Theme\PageRequest;
 use PrimeBuilder\Theme\Partials;
 use PrimeBuilder\Widgets\Assets;
 use PrimeBuilder\Widgets\Content;
@@ -200,17 +203,58 @@ final class Plugin extends AbstractPlugin
             $payload['content_text'] = $renderer->extractText($candidate);
             return $payload;
         });
-        $context->hooks()->filter('site.partial', static function (mixed $previous, mixed $name, mixed $page) use ($context, $partials, $registry, $content, $blocks, $originals, $htmlContent, $mediaReferences): mixed {
+        // A public plugin page and entry preview can render without emitting
+        // site.context. Scope the request to the route, including nested calls,
+        // rather than retaining one request's pagination for the next.
+        $pageRequest = new PageRequest();
+        $context->app()->get(Kernel::class)->addRouteMiddleware($pageRequest);
+        $context->hooks()->on('site.context', $pageRequest->resolved(...));
+        $context->hooks()->filter('site.partial', static function (mixed $previous, mixed $name, mixed $page) use ($context, $partials, $registry, $content, $blocks, $originals, $htmlContent, $mediaReferences, $pageRequest): mixed {
             if (is_string($previous) || !is_string($name) || !in_array($name, ['header', 'footer'], true) || !$page instanceof PageContext) {
                 return $previous;
+            }
+            // On the authenticated model canvas, replace only the requested
+            // partial, never a guessed element in an arbitrary theme's markup.
+            if ($page->isPlugin() && $page->isPreview && $page->isCustomizerPreview
+                && preg_match('~^/admin/prime-builder/theme/[a-f0-9]{32}/preview$~D', $page->path) === 1
+                && ($page->extra['pb_theme_preview'] ?? null) === $name) {
+                return '<' . $name . ' class="pb-theme-' . $name . '" data-pb-theme-preview-target></' . $name . '>';
             }
             $layout = $partials->layout($name, $page);
             if ($layout === null) {
                 return $previous;
             }
-            // Only validated library snapshots can reach here; HTML is still filtered.
-            $renderer = new Renderer($registry, $context->app()->get(\Prime\Security\HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, true, $page, $mediaReferences);
+            // Only capability-protected, revalidated theme layouts can reach
+            // this public path. HTML is filtered without enabling preview trust.
+            $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page));
             return '<' . $name . ' class="pb-theme-' . $name . '">' . $renderer->render($layout) . '</' . $name . '>';
+        });
+        // Prime 1.0.1/1.0.2 expose candidates and plugin paths, but not a
+        // site.template filter. A uniquely named full-document candidate avoids
+        // being wrapped a second time by the theme's layout.
+        $context->hooks()->filter('site.template_candidates', static function (mixed $candidates, mixed $page) use ($partials): mixed {
+            if (!is_array($candidates) || !$page instanceof PageContext || $partials->pageLayout($page) === null) {
+                return $candidates;
+            }
+            array_unshift($candidates, 'prime-builder-theme/content.php');
+            return $candidates;
+        });
+        $context->hooks()->filter('site.template_paths', static function (mixed $paths, mixed $page) use ($context, $partials): mixed {
+            if (is_array($paths) && $page instanceof PageContext && $partials->pageLayout($page) !== null) {
+                $paths[] = $context->path('views/site');
+            }
+            return $paths;
+        });
+        $context->hooks()->filter('prime_builder.theme_content', static function (mixed $previous, mixed $page) use ($context, $partials, $registry, $content, $blocks, $originals, $htmlContent, $mediaReferences, $pageRequest): mixed {
+            if (!$page instanceof PageContext) {
+                return $previous;
+            }
+            $layout = $partials->pageLayout($page);
+            if ($layout === null) {
+                return $previous;
+            }
+            $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page));
+            return '<div class="pb-theme-content">' . $renderer->render($layout) . '</div>';
         });
         // Contextual snapshots depend on routes, terms, profiles, media and other
         // entries. Core has no complete invalidation events for all dependencies.
@@ -221,7 +265,7 @@ final class Plugin extends AbstractPlugin
                 return $cacheable;
             }
             try {
-                return !$zoneLayouts->hasSavedDeclaredZone() && !$partials->usesAnyWidget([
+                return !$zoneLayouts->hasSavedDeclaredZone() && !$partials->hasEnabledModels() && !$partials->usesAnyWidget([
                     'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image',
                     'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'navigation', 'share_buttons',
                 ]);
@@ -234,7 +278,7 @@ final class Plugin extends AbstractPlugin
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
             if ($menu instanceof AdminMenu) {
                 $menu->add(new MenuItem(id: 'plugin.prime-builder', label: 'plugin::prime-builder.menu', icon: 'layout-dashboard', url: '/admin/prime-builder', position: 60, accent: 'brand', capability: 'prime_builder.edit', group: 'admin.menu.groups.content'));
-                $menu->add(new MenuItem(id: 'plugin.prime-builder-theme', label: 'plugin::prime-builder.theme.title', icon: 'layout-dashboard', url: '/admin/prime-builder/theme', position: 61, accent: 'brand', capability: 'prime_builder.theme_builder', group: 'admin.menu.groups.content'));
+                $menu->add(new MenuItem(id: 'plugin.prime-builder-theme', label: 'plugin::prime-builder.theme.menu', icon: 'palette', url: '/admin/prime-builder/theme', position: 61, accent: 'brand', capability: 'prime_builder.theme_builder', group: 'admin.menu.groups.content'));
                 $menu->add(new MenuItem(id: 'plugin.prime-builder-submissions', label: 'plugin::prime-builder.forms.inbox', icon: 'inbox', url: '/admin/prime-builder/submissions', position: 62, accent: 'brand', capability: 'prime_builder.forms', group: 'admin.menu.groups.content'));
             }
             return $menu;
@@ -244,6 +288,7 @@ final class Plugin extends AbstractPlugin
         $settings = new Settings($context);
         $templates = new Templates($context);
         $theme = new ThemeBuilder($context);
+        $themeModels = new ThemeModels($context);
         $forms = new ContactForms($context);
         $context->router()->adminGroup(static function (Router $router) use ($controller, $dashboard): void {
             $router->get('/', [$dashboard, 'index'])->name('index');
@@ -255,9 +300,16 @@ final class Plugin extends AbstractPlugin
             $router->get('/settings', [$settings, 'show'])->name('settings');
             $router->post('/settings', [$settings, 'save'])->name('settings.save');
         }, capability: 'prime_builder.settings');
-        $context->router()->adminGroup(static function (Router $router) use ($theme): void {
+        $context->router()->adminGroup(static function (Router $router) use ($theme, $themeModels, $controller): void {
             $router->get('/theme', [$theme, 'show'])->name('theme');
             $router->post('/theme', [$theme, 'save'])->name('theme.save');
+            $router->post('/theme/create', [$themeModels, 'create'])->name('theme.create');
+            $router->get('/theme/content-search', [$themeModels, 'search'])->name('theme.search');
+            $router->get('/theme/{id:[a-f0-9]+}', [$themeModels, 'show'])->name('theme.model');
+            $router->post('/theme/{id:[a-f0-9]+}', [$themeModels, 'save'])->name('theme.model.save');
+            $router->post('/theme/{id:[a-f0-9]+}/delete', [$themeModels, 'delete'])->name('theme.model.delete');
+            $router->get('/theme/{id:[a-f0-9]+}/edit', [$controller, 'editTheme'])->name('theme.model.edit');
+            $router->get('/theme/{id:[a-f0-9]+}/preview', [$themeModels, 'preview'])->name('theme.model.preview');
         }, capability: 'prime_builder.theme_builder');
         $context->router()->adminGroup(static function (Router $router) use ($forms): void {
             $router->get('/submissions', [$forms, 'index'])->name('submissions');
@@ -271,6 +323,9 @@ final class Plugin extends AbstractPlugin
         $context->api()->patch('/documents/{id}', [$controller::class, 'update'], permission: 'prime_builder.edit');
         $context->api()->post('/documents/{id}/render', [$controller::class, 'render'], permission: 'prime_builder.edit');
         $context->api()->post('/documents/{id}/import', [$controller::class, 'import'], permission: 'prime_builder.templates');
+        $context->api()->patch('/theme-models/{id}', [$themeModels::class, 'updateLayout'], permission: 'prime_builder.theme_builder');
+        $context->api()->post('/theme-models/{id}/render', [$themeModels::class, 'render'], permission: 'prime_builder.theme_builder');
+        $context->api()->post('/theme-models/{id}/import', [$themeModels::class, 'import'], permission: 'prime_builder.theme_builder');
         $context->api()->get('/documents/{id}/live', [$controller::class, 'live'], public: true);
         $context->api()->get('/forms/{id}/start', [$forms::class, 'start'], public: true);
         $context->api()->post('/forms/{id}/submit', [$forms::class, 'submit'], public: true);
@@ -280,6 +335,7 @@ final class Plugin extends AbstractPlugin
         // PluginContext is not a container service, so API controllers need explicit bindings.
         $context->app()->container()->singleton(Documents::class, static fn (): Documents => $controller);
         $context->app()->container()->singleton(Templates::class, static fn (): Templates => $templates);
+        $context->app()->container()->singleton(ThemeModels::class, static fn (): ThemeModels => $themeModels);
         $context->app()->container()->singleton(ContactForms::class, static fn (): ContactForms => $forms);
         $context->hooks()->filter('scheduler.register', static function (mixed $schedule) use ($context): mixed {
             if ($schedule instanceof Schedule) {
@@ -341,8 +397,8 @@ final class Plugin extends AbstractPlugin
                 return;
             }
             $types = [];
-            foreach (['header', 'footer'] as $slot) {
-                $layout = $partials->layout($slot, $page);
+            foreach (['header', 'footer', 'content'] as $slot) {
+                $layout = $slot === 'content' ? $partials->pageLayout($page) : $partials->layout($slot, $page);
                 if ($layout === null) {
                     continue;
                 }
@@ -356,7 +412,7 @@ final class Plugin extends AbstractPlugin
             $definitions = $registry->all();
             // These widgets are fully resolved in a theme partial; there is no
             // data-pb-live endpoint for the snapshot and no refresh script needed.
-            foreach (['site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'search_form'] as $type) {
+            foreach (['posts', 'current_content', 'theme_zone', 'site_title', 'site_logo', 'entry_title', 'entry_excerpt', 'entry_featured_image', 'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'search_form'] as $type) {
                 if (($definitions[$type]['script'] ?? null) === '/assets/plugins/prime-builder/js/content.js') {
                     unset($definitions[$type]['script']);
                 }
@@ -415,8 +471,11 @@ final class Plugin extends AbstractPlugin
             }
             return $directives;
         });
-        $context->hooks()->on('settings.updated', static function (mixed $name) use ($context): void {
+        $context->hooks()->on('settings.updated', static function (mixed $name) use ($context, $partials, $theme, $themeModels): void {
             if (is_string($name) && str_starts_with($name, 'plugin.prime-builder.')) {
+                $partials->invalidate();
+                $theme->invalidate();
+                $themeModels->invalidate();
                 $context->app()->get(\Prime\Cache\CacheManager::class)->clearPages();
             }
         });

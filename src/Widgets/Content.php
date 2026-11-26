@@ -78,8 +78,11 @@ final class Content
         $this->adjacentEntries = [];
     }
 
-    /** @param array<string, mixed> $settings */
-    public function posts(array $settings, bool $live, string $id = '', int $page = 1): string
+    /**
+     * @param array<string, mixed> $settings
+     * @param array<string, string> $paginationQuery
+     */
+    public function posts(array $settings, bool $live, string $id = '', int $page = 1, array $paginationQuery = []): string
     {
         $typeName = is_string($settings['content_type'] ?? null) && $settings['content_type'] !== '' ? $settings['content_type'] : 'post';
         $type = $this->types->get($typeName);
@@ -160,7 +163,7 @@ final class Content
             $html .= '</ul>';
         }
         if ($pagination && $result['last_page'] > 1) {
-            $html .= $this->postPagination($id, $result['page'], $result['last_page']);
+            $html .= $this->postPagination($id, $result['page'], $result['last_page'], $paginationQuery);
         }
         return $html;
     }
@@ -231,10 +234,39 @@ final class Content
         return $safe;
     }
 
-    private function postPagination(string $id, int $page, int $lastPage): string
+    /**
+     * A model is rendered live rather than persisted inside an entry. Accept only
+     * bounded page numbers and the resolved search term; no arbitrary visitor
+     * parameters are copied into its links.
+     *
+     * @param array<string, mixed> $settings
+     * @param array<mixed> $query
+     */
+    public function postsInPage(array $settings, string $id, PageContext $context, array $query): string
     {
-        $key = rawurlencode('pb_page_' . $id);
-        $link = static fn (int $target, string $rel, string $label): string => '<a href="?' . $key . '=' . $target . '" data-pb-post-page="' . $target . '" rel="' . $rel . '">' . Renderer::escape($label) . '</a>';
+        $safe = [];
+        foreach (array_slice($query, 0, 50, true) as $key => $value) {
+            if (is_string($key) && preg_match('/^pb_page_[a-zA-Z0-9_-]{1,64}$/D', $key) === 1
+                && is_string($value) && preg_match('/^[1-9][0-9]{0,3}$/D', $value) === 1 && (int) $value <= 1000) {
+                $safe[$key] = $value;
+            }
+        }
+        if ($context->isSearch() && is_string($context->searchQuery) && strlen($context->searchQuery) <= 2000) {
+            $safe['q'] = $context->searchQuery;
+        }
+        $page = (int) ($safe['pb_page_' . $id] ?? '1');
+        return $this->posts($settings, true, $id, $page, $safe);
+    }
+
+    /** @param array<string, string> $query */
+    private function postPagination(string $id, int $page, int $lastPage, array $query = []): string
+    {
+        $key = 'pb_page_' . $id;
+        $link = static function (int $target, string $rel, string $label) use ($key, $query): string {
+            $query[$key] = (string) $target;
+            $href = '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+            return '<a href="' . Renderer::escape($href) . '" data-pb-post-page="' . $target . '" rel="' . $rel . '">' . Renderer::escape($label) . '</a>';
+        };
         $html = '<nav class="pb-post-pagination" aria-label="' . Renderer::escape(t('plugin::prime-builder.ui.post_pagination_label')) . '">';
         if ($page > 1) {
             $html .= $link($page - 1, 'prev', t('plugin::prime-builder.ui.post_previous'));
@@ -784,6 +816,27 @@ final class Content
             // this URL, including when a zone renderer throws.
             $this->zoneShareEntry = $previous;
         }
+    }
+
+    /** @param array<string, mixed> $settings */
+    public function currentInPage(array $settings, PageContext $page): string
+    {
+        $entry = $this->publicPageEntry($page);
+        return $entry !== null ? $this->current($settings, $entry, true) : '';
+    }
+
+    /** @param array<string, mixed> $settings */
+    public function themeZoneInPage(array $settings, PageContext $page): string
+    {
+        $html = $this->themeZone($settings, true, $this->publicPageEntry($page));
+        if ($html === '') {
+            return '';
+        }
+        // The theme can also render the zone itself or another copy of it.
+        // Scope its IDs and references just like a copy of entry content.
+        $prefix = 'pbc-' . bin2hex(random_bytes(12));
+        $html = ContentFragment::scope($html, $prefix);
+        return $html !== '' ? '<div data-pb-content-copy="' . $prefix . '">' . $html . '</div>' : '';
     }
 
     /** @param array<string, mixed> $settings */

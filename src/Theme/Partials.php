@@ -13,13 +13,15 @@ use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Widgets\Registry;
 
-/** Static header/footer snapshots chosen by a theme manager. */
+/** Validated theme layouts, including the original header/footer snapshots. */
 final class Partials
 {
     public const SETTING = 'theme_partials';
+    private readonly Models $models;
 
     public function __construct(private readonly PluginContext $plugin)
     {
+        $this->models = new Models($plugin->settings(), $plugin->app()->get(\Prime\Settings\Settings::class));
     }
 
     /**
@@ -49,14 +51,15 @@ final class Partials
     }
 
     /**
-     * Revalidate even stored data. Some route-dependent widgets lack a suitable
-     * theme context and are not accepted in this first slice. Site identity,
-     * entry metadata, breadcrumbs, menus, sharing, search forms and archives are server-rendered.
+     * Revalidate stored data as well as editor input. Historical snapshots keep
+     * their original restrictions; new models can resolve more widgets against
+     * the current public page. Forms and entry-bound original fragments cannot
+     * be reused as theme documents without a suitable independent identity.
      *
      * @param array<mixed> $elements
      * @return array<string, mixed>|null
      */
-    public function normalize(array $elements): ?array
+    public function normalize(array $elements, bool $allowEmpty = false, bool $contextual = false): ?array
     {
         $validator = new Validator(
             new Registry($this->plugin->app()->get(Hooks::class)),
@@ -66,7 +69,7 @@ final class Partials
         $result = $validator->validate(['version' => 1, 'elements' => $elements]);
         $normalized = $result['data']['elements'] ?? null;
         $anchors = [];
-        if ($result['errors'] !== [] || !is_array($normalized) || $normalized === [] || self::unsupported($normalized, $anchors)) {
+        if ($result['errors'] !== [] || !is_array($normalized) || (!$allowEmpty && $normalized === []) || self::unsupported($normalized, $anchors, $contextual)) {
             return null;
         }
         return HtmlContent::withoutSeals($result['data']);
@@ -82,6 +85,10 @@ final class Partials
         if (!in_array($slot, ['header', 'footer'], true)) {
             return null;
         }
+        $model = $this->modelLayout($slot, $page);
+        if ($model !== null) {
+            return $model;
+        }
         $stored = $this->stored();
         if ($page->entry !== null && in_array($page->entry->id, $stored['exclude'], true)) {
             return null;
@@ -94,18 +101,84 @@ final class Partials
         return $layout === null ? null : self::namespaceLayout($layout, $slot);
     }
 
+    /** The best valid model wins; a damaged model cannot hide a valid fallback.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function modelLayout(string $kind, PageContext $page): ?array
+    {
+        foreach ($this->models->matching($kind, $page) as $model) {
+            $elements = $model['elements'] ?? null;
+            if (!is_array($elements)) {
+                continue;
+            }
+            $layout = $this->normalize($elements, contextual: true);
+            if ($layout !== null) {
+                return self::namespaceLayout($layout, $kind);
+            }
+        }
+        return null;
+    }
+
+    /** A full-page model is selected according to the resolved CMS context.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function pageLayout(PageContext $page): ?array
+    {
+        foreach (['single', 'archive', 'search', 'not_found'] as $kind) {
+            $layout = $this->modelLayout($kind, $page);
+            if ($layout !== null) {
+                return $layout;
+            }
+        }
+        return null;
+    }
+
+    /** Layouts for content-addressed CSS recovery when snapshot storage is unavailable.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function modelLayouts(): array
+    {
+        $layouts = [];
+        foreach ($this->models->all() as $model) {
+            $elements = $model['elements'] ?? null;
+            $kind = $model['kind'] ?? null;
+            if (!is_array($elements) || !is_string($kind)) {
+                continue;
+            }
+            $layout = $this->normalize($elements, contextual: true);
+            if ($layout !== null) {
+                $layouts[] = self::namespaceLayout($layout, $kind);
+            }
+        }
+        return $layouts;
+    }
+
+    public function hasEnabledModels(): bool
+    {
+        return $this->models->hasEnabled();
+    }
+
+    public function invalidate(): void
+    {
+        $this->models->invalidate();
+    }
+
     /**
      * @param array<mixed> $elements
      * @param array<string, true> $anchors
      */
-    private static function unsupported(array $elements, array &$anchors): bool
+    private static function unsupported(array $elements, array &$anchors, bool $contextual): bool
     {
         foreach ($elements as $element) {
             if (!is_array($element)) {
                 continue;
             }
             $type = $element['type'] ?? null;
-            if (in_array($type, ['posts', 'current_content', 'theme_zone', 'form'], true)) {
+            $forbidden = $contextual ? ['form', 'original_content', 'original_group'] : ['posts', 'current_content', 'theme_zone', 'form'];
+            if (in_array($type, $forbidden, true)) {
                 return true;
             }
             $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
@@ -116,7 +189,7 @@ final class Partials
                 }
                 $anchors[$anchor] = true;
             }
-            if (is_array($element['children'] ?? null) && self::unsupported($element['children'], $anchors)) {
+            if (is_array($element['children'] ?? null) && self::unsupported($element['children'], $anchors, $contextual)) {
                 return true;
             }
         }
@@ -152,6 +225,12 @@ final class Partials
         foreach (['header', 'footer'] as $slot) {
             $elements = $stored[$slot]['elements'] ?? [];
             if (is_array($elements) && $contains($elements)) {
+                return true;
+            }
+        }
+        foreach ($this->models->all() as $model) {
+            $elements = $model['elements'] ?? [];
+            if (($model['enabled'] ?? false) === true && is_array($elements) && $contains($elements)) {
                 return true;
             }
         }

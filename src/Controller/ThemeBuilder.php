@@ -20,9 +20,10 @@ use PrimeBuilder\Document\SavedTemplates;
 use PrimeBuilder\Styles\Compiler;
 use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Styles\ZoneLayouts;
+use PrimeBuilder\Theme\Models;
 use PrimeBuilder\Theme\Partials;
 
-/** Manage the real, deliberately limited static header/footer integration. */
+/** Manage historical header/footer copies and shared theme stylesheets. */
 final class ThemeBuilder
 {
     private readonly Partials $partials;
@@ -32,6 +33,11 @@ final class ThemeBuilder
     {
         $this->partials = new Partials($plugin);
         $this->templates = new SavedTemplates($plugin->settings(), $plugin->app()->get(Settings::class));
+    }
+
+    public function invalidate(): void
+    {
+        $this->partials->invalidate();
     }
 
     public function show(Request $request): Response
@@ -156,6 +162,17 @@ final class ThemeBuilder
             }
         }
         if ($css === null) {
+            $compiler = new Compiler((int) Configuration::get($this->plugin->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($this->plugin->settings(), 'breakpoint_mobile', 767));
+            foreach ($this->partials->modelLayouts() as $layout) {
+                $candidate = $compiler->compile($layout, legacy: false);
+                if (hash_equals(substr(hash('sha256', $candidate), 0, 16) . '.css', $file)) {
+                    $css = $candidate;
+                    $persisted = $snapshots->remember('theme-' . $file, $css);
+                    break;
+                }
+            }
+        }
+        if ($css === null) {
             // If snapshot storage is unavailable, rebuild only a currently
             // declared zone whose content-addressed CSS matches the request.
             $zones = new ZoneLayouts($this->plugin->app()->get(ThemeManager::class), $this->plugin->app()->get(ZoneRepository::class));
@@ -211,6 +228,8 @@ final class ThemeBuilder
             ],
             'values' => $values,
             'choices' => $choices,
+            'sourceChoices' => $this->templates->all(),
+            'models' => (new Models($this->plugin->settings(), $this->plugin->app()->get(Settings::class)))->all(),
             'error' => $error,
         ]);
         if (is_array($data['adminStyles'] ?? null)) {
