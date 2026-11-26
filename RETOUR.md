@@ -2,7 +2,7 @@
 
 ## État actuel
 
-**A est terminé ; B est clos pour la V1 par décision du demandeur**, qui accepte les lignes encore partielles du catalogue. Les constats et résultats B conservés ci-dessous sont historiques : ils ne constituent pas une demande de rouvrir B. **D — Theme Builder et E — formulaires sont implémentés et verts en CI**, avec les limites précisées ci-dessous. **F — popups est implémenté et testé localement, sa CI reste à observer**. L’ordre restant est F vert en CI, **C — widgets globaux et contenu dynamique**, puis **G — finitions** ; chaque jalon doit être vert avant le suivant. Le produit reste partiel et n’est pas prêt pour la production.
+**A est terminé ; B est clos pour la V1 par décision du demandeur**, qui accepte les lignes encore partielles du catalogue. Les constats et résultats B conservés ci-dessous sont historiques : ils ne constituent pas une demande de rouvrir B. **D — Theme Builder, E — formulaires et F — popups sont implémentés et verts en CI**, avec les limites précisées ci-dessous. L’ordre restant est **C — widgets globaux et contenu dynamique**, puis **G — finitions** ; chaque jalon doit être vert avant le suivant. Le produit reste partiel et n’est pas prêt pour la production.
 
 Révision D et correction du test poussées : `51e6d8523c6ec221a2604621a96ea468dbe501ad`, [run 45758874543](https://github.com/HamdiSouissi/prime-builder/actions/runs/45758874543), `completed/success` sur huit jobs. Le rapport seul `a486652d58beaba388dc4203184a10dd3f136edd` est également vert sur huit jobs : [run 45760575987](https://github.com/HamdiSouissi/prime-builder/actions/runs/45760575987), Playwright `111 passed (9.9m)` et cycle de vie réussi. Un fichier ne peut pas contenir son propre SHA ni les résultats futurs de sa CI ; pour la tête effective, consulter `git ls-remote origin refs/heads/arena/2d5ecf33-prime-builder` et le run associé.
 
@@ -19,7 +19,7 @@ Révision D et correction du test poussées : `51e6d8523c6ec221a2604621a96ea468d
 
 GitHub signale le forçage d’actions Node 20 vers Node 24.
 
-## Jalon F — popups : vérifications locales, CI à observer
+## Jalon F — popups : CI verte et limites
 
 Les popups sont des modèles distincts composés dans l’éditeur, avec les conditions et priorités du Theme Builder. Le déclenchement par clic utilise l’ancre affichée dans l’administration ; chargement avec délai, défilement, sortie par le haut et inactivité présentent d’abord une invitation non modale. Sans déplacement de focus ni ouverture automatique par défaut, elle permet une action explicite ; l’autorisation d’ouverture automatique, facultative et révocable, est partagée dans l’onglet. La fréquence est conservée par onglet ou période dans le navigateur ; un stockage refusé ne conserve qu’une limite en mémoire jusqu’à la navigation. Plusieurs offres sont mises en file. Le dialogue natif est fermé initialement, nommé, modal, sans animation, avec Échap et gestion du focus. Le formulaire et les fragments liés à une entrée ne sont pas pris en charge dans ces modèles.
 
@@ -27,7 +27,7 @@ Les popups sont des modèles distincts composés dans l’éditeur, avec les con
 
 Chromium : `popups.spec.mjs` vert sur les deux CMS, couvrant les cinq déclencheurs, conditions et exclusion, fréquence, expiration, stockage refusé, consentement et révocation, deux popups, autre dialogue ouvert, Échap, focus et axe sans violation sérieuse/critique sur les écrans exercés. Régressions du formulaire et du Theme Builder vertes sur les deux versions. Un lancement parallèle des deux versions partageait le répertoire d’artefacts Playwright et a échoué à fermer une trace sur 1.0.1 ; le test Theme Builder relancé seul a réussi. Captures desktop/mobile et mouvement réduit examinés pour le popup ; pas de test avec lecteur d’écran réel, ni sur d’autres navigateurs. Les caches externes, extensions concurrentes et situations de stockage partagé restent à vérifier sur le site cible.
 
-La CI F n’a pas encore été observée : ne pas déclarer le jalon vert avant son résultat.
+**CI observée verte** : commit `6f14118fa06259e07cc808cb626e0a464d67b669`, [run 45817597938](https://github.com/HamdiSouissi/prime-builder/actions/runs/45817597938), `completed/success` sur huit jobs. PHPStan `[OK] No errors`, lint PHP sans erreur, fixer `0/93` ; PHPUnit/MySQL 8 `247/7126` sur CMS main et `247/7130` sur 1.0.1 ; Node `60/60` ; catalogue cohérent ; smoke réussi ; Playwright `115 passed (10.3m)`, courses de notifications et cycle désactivation/réactivation/désinstallation réussis. GitHub signale toujours le forçage de certaines actions de Node 20 vers Node 24.
 
 ## Jalon E — premier sous-ensemble : Envois et conservation
 
@@ -456,7 +456,7 @@ La révision des classes `fa56b4285e825f6532bc6c8e4ad4323526b29946` est poussée
 
 - **D** : livré et vert dans le run indiqué en tête, sous les limites documentées.
 - **E** : livré et vert dans le run indiqué ; la purge des données et fichiers dépend du planificateur.
-- **F** : implémenté et vérifié localement ; pousser et observer la CI avant de le déclarer vert.
+- **F** : livré et vert dans le run indiqué ; limites de stockage et d’assistance précisées ci-dessus.
 - **C**, puis **G** : widgets globaux et contenu dynamique, puis finitions et version. Ne pas commencer un jalon avant que le précédent soit vert.
 - **B** est clos pour la V1 ; ses limites documentées ne sont pas à reprendre dans les jalons ci-dessus.
 
@@ -497,8 +497,8 @@ Statuts demandés : **Fait et testé**, **Fait sans test automatique**, **Non fa
 | 3.6 API publique, pot de miel, délai et débit | **Fait et testé pour les champs actuels** : jeton HMAC 3–1 800 s à usage unique, pot de miel et quotas ; validation du schéma public courant et parcours navigateur avec pièce jointe. | `src/Controller/ContactForms.php`, `src/Forms/` |
 | 3.6 Actions, envois, e-mails et export | **Fait et testé** : stockage, recherche, suppression, CSV, message, redirection interne et notifications par la file ; CI `45805543013`. Gabarits génériques, fournisseur SMTP externe non testé. | `src/Forms/{Submissions,Success,Notifications}.php`, `views/{admin/submissions,mail/}` |
 | 3.6 Conservation et purge des données personnelles | **Fait et testé** : réglage de 1 à 3 650 jours, purge des messages, fichiers et tâches associées dépendante du planificateur ; journaux et sauvegardes restent à gérer. CI `45805543013`. | `src/Forms/Submissions.php`, `src/Plugin.php` |
-| 3.7 Popups, déclencheurs, conditions et fréquence | **Fait et testé localement** : cinq déclencheurs, conditions et fréquence dans le navigateur ; CI à observer, stockage refusé limité au document. | `src/Popup/`, `tests/PopupOptionsTest.php`, `tests/e2e/popups.spec.mjs` |
-| 3.7 Dialogue de popup accessible | **Fait et testé localement** : dialogue natif, focus, Échap, invitation non modale et opt-in révocable ; axe sur les écrans exercés, pas de test de lecteur d’écran réel ; CI à observer. | `assets/js/popup.js`, `assets/css/popup.css`, `tests/e2e/popups.spec.mjs` |
+| 3.7 Popups, déclencheurs, conditions et fréquence | **Fait et testé** : cinq déclencheurs, conditions et fréquence dans le navigateur ; CI `45817597938`, stockage refusé limité au document. | `src/Popup/`, `tests/PopupOptionsTest.php`, `tests/e2e/popups.spec.mjs` |
+| 3.7 Dialogue de popup accessible | **Fait et testé** : dialogue natif, focus, Échap, invitation non modale et opt-in révocable ; axe sur les écrans exercés, pas de test de lecteur d’écran réel ; CI `45817597938`. | `assets/js/popup.js`, `assets/css/popup.css`, `tests/e2e/popups.spec.mjs` |
 | 3.8 Balises dynamiques dans les champs | **Non fait** — partiel : le widget `current_content` ne fournit que titre, extrait, date et auteur. E2E `recent posts and current content refresh safely with a no-JS fallback`. | `src/Widgets/Content.php` |
 | 3.8 Conditions de visibilité | **Non fait** : `hidden` est un simple masquage HTML, pas une condition ni un contrôle d’accès. | `src/Widgets/Renderer.php` |
 | 3.9 Enregistrer/insérer/exporter/importer les modèles | **Non fait** — partiel : modèles partagés enregistrés, insérés et supprimés ; export/import JSON avec droits dédiés. E2E `context menu saves a reusable template with keyboard, reload and deletion`, `template library supports insertion and JSON export/import`, IT `testSharedTemplatesAreValidatedPersistentAndProtectedByCapabilitiesAndCsrf` ; les médias référencés ne sont pas réimportés. | `src/Document/{Library,SavedTemplates}.php`, `src/Controller/Templates.php`, `assets/js/editor.js` |
@@ -513,7 +513,7 @@ Statuts demandés : **Fait et testé**, **Fait sans test automatique**, **Non fa
 | 4 Robustesse/désactivation | **Fait et testé** pour les cas couverts : `DT::testCrashingExtensionDoesNotBreakOtherElements`, IT et parcours CLI de désactivation ; pas de garantie universelle pour les extensions ou thèmes. | `src/Widgets/Renderer.php`, `tests/e2e/lifecycle-check.php` |
 | 5 PHPUnit | **Non fait** — partiel : validateurs, rendu, CSS, accès et cycle de vie couverts ; formulaires et pièces jointes testés localement ; conditions de thème vertes dans `45758874543` ; balises dynamiques absentes. | `tests/*.php` |
 | 5 JavaScript | **Non fait** — partiel : modèle, historique et responsive ; pas de tests unitaires de toutes les interactions et raccourcis. | `tests/js/model.test.js` |
-| 5 Playwright + axe | **Non fait** — partiel : construction souris/clavier, import, formulaire et Theme Builder passés en CI ; popup testé localement sur les deux CMS, CI à observer ; pas d’audit exhaustif. | `tests/e2e/` |
+| 5 Playwright + axe | **Non fait** — partiel : construction souris/clavier, import, formulaire, Theme Builder et popup passés en CI `45817597938` ; pas d’audit exhaustif. | `tests/e2e/` |
 | 5 PHPStan 8 et PHP-CS-Fixer | **Fait et testé** sur le PHP analysé/configuré, résultats exacts dans « État actuel ». PHPStan vise `src`, `views`, `lang`, `migrations`, `tests`, `tools` et la configuration du fixer ; le lint et le fixer couvrent les fichiers PHP du plugin. | `phpstan.neon`, `.github/workflows/ci.yml` |
 | 5 CI complète | **Non fait** — partiel : huit jobs indépendants et artefact navigateur ; couverture fonctionnelle complète impossible tant que les fonctions manquent. | `.github/workflows/ci.yml` |
 | 6 Livrables et version | **Non fait** — partiel : structure, langues, tests, gabarits d’e-mail et docs présents ; version 0.1.2, modules manquants et version 1.0.0 non livrés. | `plugin.json`, `CHANGELOG.md`, `src/`, `views/` |
