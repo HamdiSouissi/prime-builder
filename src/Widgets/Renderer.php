@@ -61,11 +61,14 @@ final class Renderer
         $sourceElements = is_array($data['elements'] ?? null) ? $data['elements'] : [];
         // CSS belongs to the saved tree, never to a visitor-dependent filtered copy.
         $this->styleOwner = Scope::forLayout($styleLayout ?? $data);
-        $dynamic = $this->dynamicContext();
+        // Resolving an authenticated user starts a native PHP session. Avoid it
+        // for a genuinely static tree, otherwise an anonymous cache MISS sets a
+        // cookie and every later request bypasses the page cache.
+        $outlineSource = is_array($styleLayout['elements'] ?? null) ? $styleLayout['elements'] : $sourceElements;
+        $dynamic = DynamicLayout::uses($sourceElements) || DynamicLayout::uses($outlineSource) ? $this->dynamicContext() : null;
         $elements = DynamicLayout::prepare($sourceElements, $definitions, $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null);
         // A targeted preview renders only one subtree, but its anchors and any
         // table of contents must still agree with the complete visible document.
-        $outlineSource = is_array($styleLayout['elements'] ?? null) ? $styleLayout['elements'] : $sourceElements;
         $outlineElements = DynamicLayout::prepare($outlineSource, $definitions, $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null);
         $this->tableOfContents = $this->containsTableOfContents($outlineElements) ? new TableOfContents($outlineElements, $this->sanitizer) : null;
         $this->inferredImageDimensions = [];
@@ -282,8 +285,9 @@ final class Renderer
                 }
             }
         };
-        $dynamic = $this->dynamicContext();
-        $elements = DynamicLayout::prepare(is_array($data['elements'] ?? null) ? $data['elements'] : [], $this->registry->all(), $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null);
+        $source = is_array($data['elements'] ?? null) ? $data['elements'] : [];
+        $dynamic = DynamicLayout::uses($source) ? $this->dynamicContext() : null;
+        $elements = DynamicLayout::prepare($source, $this->registry->all(), $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null);
         $walk($elements);
         return $output;
     }

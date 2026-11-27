@@ -575,8 +575,10 @@ final class Documents
         }
         $type = $this->plugin->app()->get(ContentTypeRegistry::class)->get($entry->type);
         $public = $entry->status === Entry::STATUS_PUBLISHED && $type !== null && $type->public && ($entry->publishedAt === null || $entry->publishedAt <= gmdate('Y-m-d H:i:s'));
-        $user = $this->plugin->app()->get(Auth::class)->user($request);
-        if (!$public && $this->entry($entry->id, $user) === null) {
+        // Public styles do not require authentication. Avoid starting a native
+        // session for an anonymous asset request, which would otherwise make all
+        // subsequent page requests bypass the CMS page cache.
+        if (!$public && $this->entry($entry->id, $this->plugin->app()->get(Auth::class)->user($request)) === null) {
             return Response::text('', 404);
         }
         $snapshots = new Snapshots($this->plugin->app()->storagePath('prime-builder/styles'));

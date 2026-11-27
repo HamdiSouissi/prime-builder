@@ -40,7 +40,16 @@ final class Context
     ) {
         $app = $plugin->app();
         $apiUser = $request?->attribute('api.user');
-        $this->user = $apiUser instanceof User ? $apiUser : $app->get(Auth::class)->user($request);
+        $auth = $app->get(Auth::class);
+        $session = $app->get(\Prime\Http\Session::class);
+        // An anonymous dynamic page should not create a session merely to
+        // discover that there is no user; doing so would also bypass later
+        // otherwise cacheable pages. Unknown request scopes remain conservative.
+        $mayBeAuthenticated = $request === null || $session->isStarted()
+            || ($request->cookie($session->name()) ?? '') !== ''
+            || ($request->cookie($auth->rememberCookieName()) ?? '') !== ''
+            || $request->header('authorization') !== null;
+        $this->user = $apiUser instanceof User ? $apiUser : ($mayBeAuthenticated ? $auth->user($request) : null);
         if ($this->user !== null && !$this->user->isActive()) {
             $this->user = null;
         }

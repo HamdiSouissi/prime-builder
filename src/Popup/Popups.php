@@ -49,10 +49,21 @@ final class Popups
                 continue;
             }
             if ($options['hide_logged_in']) {
-                $request = $this->plugin->app()->get(PageRequest::class)->request($page);
-                $user = $this->plugin->app()->get(Auth::class)->user($request);
-                if ($user !== null && $user->isActive()) {
-                    continue;
+                $app = $this->plugin->app();
+                $request = $app->get(PageRequest::class)->request($page);
+                $auth = $app->get(Auth::class);
+                $session = $app->get(\Prime\Http\Session::class);
+                // Do not start a new session for a cookie-free visitor: that
+                // would make an otherwise anonymous page uncacheable.
+                $mayBeAuthenticated = $request === null || $session->isStarted()
+                    || ($request->cookie($session->name()) ?? '') !== ''
+                    || ($request->cookie($auth->rememberCookieName()) ?? '') !== ''
+                    || $request->header('authorization') !== null;
+                if ($mayBeAuthenticated) {
+                    $user = $auth->user($request);
+                    if ($user !== null && $user->isActive()) {
+                        continue;
+                    }
                 }
             }
             $elements = $model['elements'] ?? null;

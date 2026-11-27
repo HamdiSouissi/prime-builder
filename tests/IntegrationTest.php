@@ -1707,7 +1707,7 @@ final class IntegrationTest extends TestCase
 
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
-        self::assertSame(false, $cache->isCacheableRequest(Request::create('GET', '/parent-public/page-publique')));
+        self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/parent-public/page-publique')));
 
         // The live endpoint for an entry uses the same typed-target checks and
         // still persists only the conservative home-link fallback.
@@ -1884,7 +1884,7 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
-        self::assertSame(false, $cache->isCacheableRequest(Request::create('GET', '/racine/parent/enfant')));
+        self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/racine/parent/enfant')));
 
         foreach ([
             ['/blog', PageContext::TYPE_BLOG, 'Blog'],
@@ -2302,7 +2302,7 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('/assets/plugins/prime-builder/js/content.js', $assets->renderScripts());
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
-        self::assertSame(false, $cache->isCacheableRequest(Request::create('GET', '/')));
+        self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/')));
         $settings->set('plugin.prime-builder.theme_partials', []);
         self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/')));
         $other = $app->get(EntryRepository::class)->find(2);
@@ -2422,7 +2422,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, substr_count($entryAssets->renderScripts(), '/assets/plugins/prime-builder/js/content.js'));
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
-        self::assertSame(false, $cache->isCacheableRequest(Request::create('GET', '/blog/article-publie')));
+        self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/blog/article-publie')));
 
         // The context is guarded independently of the source of the PageContext.
         $draft = $entries->find(2);
@@ -2545,7 +2545,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, substr_count($assets->renderScripts(), '/assets/plugins/prime-builder/js/tabs.js'));
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
-        self::assertSame(false, $cache->isCacheableRequest(Request::create('GET', '/blog/article-publie')));
+        self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/blog/article-publie')));
 
         $provider = $app->get(Content::class);
         $draft = $entries->find(2);
@@ -2954,7 +2954,7 @@ final class IntegrationTest extends TestCase
         $template = json_decode($created->body(), true)['data']['id'];
         $fields = ['_csrf_token' => $app->get(Csrf::class)->token(), 'header' => $template, 'footer' => $template, 'exclude' => ''];
         self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/theme', body: $fields))->status());
-        self::assertSame(false, $cache->isCacheableRequest($request));
+        self::assertSame(true, $cache->isCacheableRequest($request));
 
         // Archive/search contexts have no entry. Their paths are resolved by the
         // CMS, but query strings and fragments must not be shared.
@@ -6217,6 +6217,68 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('Valeur initiale', $site->render($page), 'The saved HTML remains readable after deactivation');
     }
 
+    public function testModelCachePurgesDependenciesAndNeverSharesVisitorSpecificOutput(): void
+    {
+        $app = $this->activated('admin');
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        $models = new \PrimeBuilder\Theme\Models($plugin->settings(), $app->get(Settings::class));
+        $elements = [['id' => 'title', 'type' => 'heading', 'settings' => ['text' => 'En-tête public'], 'styles' => [], 'children' => []]];
+        $model = $models->create('Public', 'header', $elements);
+        self::assertNotNull($model);
+        $model['enabled'] = true;
+        self::assertTrue($models->save($model));
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $request = Request::create('GET', '/cache-model-test');
+        $hooks = $app->get(Hooks::class);
+        $store = static function () use ($cache, $request): void {
+            self::assertTrue($cache->isCacheableRequest($request));
+            $cache->store($request, Response::html('old cached model'));
+            self::assertNotNull($cache->lookup($request));
+        };
+        foreach (['content.saved', 'content.updated', 'content.deleted', 'content.status_changed', 'menu.updated', 'menu.item_created', 'menu.item_deleted', 'media.updated', 'media.deleted'] as $event) {
+            $store();
+            $hooks->emit($event, null, null, null, null);
+            self::assertNull($cache->lookup($request), $event . ' must invalidate dependent model pages');
+        }
+        $store();
+        $app->get(Settings::class)->set('site.name', 'New site name');
+        self::assertNull($cache->lookup($request), 'Core settings changes must invalidate model pages');
+        $store();
+        $hooks->apply('http.response', Response::html('saved'), Request::create('POST', '/admin/appearance/menus/1/save'));
+        self::assertNull($cache->lookup($request), 'The menu editor emits no event in the observed CMS');
+        $store();
+        $model['elements'][0]['settings']['text'] = 'Bonjour {{user.name}}';
+        $model['elements'][0]['conditions'] = ['auth' => 'authenticated'];
+        self::assertTrue($models->save($model));
+        self::assertFalse($cache->isCacheableRequest($request));
+        self::assertNull($cache->lookup($request));
+        $response = $hooks->apply('http.response', Response::html('visitor-specific'), $request);
+        self::assertInstanceOf(Response::class, $response);
+        self::assertStringContainsString('no-store', (string) $response->header('Cache-Control'));
+        $model['elements'] = $elements;
+        self::assertTrue($models->save($model));
+        self::assertTrue($cache->isCacheableRequest($request));
+        self::assertNull($cache->lookup($request), 'Disabling a sensitive model must not restore an old cached page');
+
+        // A private-popup option still allows the anonymous *internal* cache;
+        // authenticated cookies bypass it, while external proxies get no-store.
+        $popup = $models->create('Members excluded', 'popup', $elements);
+        self::assertNotNull($popup);
+        $popup['enabled'] = true;
+        $popup['popup']['hide_logged_in'] = true;
+        self::assertTrue($models->save($popup));
+        self::assertTrue($cache->isCacheableRequest($request));
+        $session = $app->get(Session::class)->name();
+        self::assertFalse($cache->isCacheableRequest(Request::create('GET', '/cache-model-test', cookies: [$session => 'a-session'])));
+        $remember = $app->get(\Prime\Auth\Auth::class)->rememberCookieName();
+        self::assertFalse($cache->isCacheableRequest(Request::create('GET', '/cache-model-test', cookies: [$remember => 'remember-me'])));
+        $response = $hooks->apply('http.response', Response::html('anonymous popup'), $request);
+        self::assertInstanceOf(Response::class, $response);
+        self::assertStringContainsString('private', (string) $response->header('Cache-Control'));
+        self::assertStringContainsString('no-store', (string) $response->header('Cache-Control'));
+    }
+
     public function testThemeModelsAreEditableConditionalAndRestoreTheTheme(): void
     {
         $app = $this->activated('admin');
@@ -6331,7 +6393,7 @@ final class IntegrationTest extends TestCase
         $assets = new ThemeAssetRegistry();
         $hooks->emit('site.assets', $assets, PageContext::notFound('/inconnue'));
         self::assertStringContainsString('/prime-builder/theme/', $assets->renderStyles());
-        self::assertFalse($app->get(\Prime\Cache\PageCache::class)->isCacheableRequest(Request::create('GET', '/article-publie')));
+        self::assertTrue($app->get(\Prime\Cache\PageCache::class)->isCacheableRequest(Request::create('GET', '/article-publie')));
         $html = $app->get(\Prime\Site\SiteRenderer::class)->render($page);
         self::assertSame(1, substr_count(strtolower($html), '<!doctype'));
         self::assertSame(1, substr_count(strtolower($html), '<head>'));

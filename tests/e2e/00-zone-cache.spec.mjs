@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-// This must run first against a freshly installed, disposable CMS with no saved
-// zones. It proves a genuine cached response exists before a zone is introduced.
+// Run before tests that save zones, on a disposable CMS with no saved zones.
+// 00-model-cache runs immediately before this test and leaves no zone behind.
 test('an existing anonymous page cache is bypassed after adding, changing and clearing a zone', async ({ page, browser }) => {
   test.setTimeout(90_000);
   await page.goto('/admin/login');

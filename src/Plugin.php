@@ -156,22 +156,58 @@ final class Plugin extends AbstractPlugin
                 $identity->invalidate();
             });
         }
+        // Core settings may affect a model on every route, and the core's
+        // settings subscriber only flushes data-cache namespaces, not pages.
+        $context->hooks()->on('settings.updated', static function (mixed $name) use ($context): void {
+            if (!is_string($name) || !str_starts_with($name, 'plugin.prime-builder.')) {
+                $context->app()->get(\Prime\Cache\PageCache::class)->purgeAll();
+            }
+        });
         foreach (['media.updated', 'media.deleted'] as $event) {
-            $context->hooks()->on($event, static function () use ($identity, $content, $partials, $context): void {
+            $context->hooks()->on($event, static function () use ($identity, $content, $context): void {
                 $identity->invalidate();
                 $content->invalidate();
-                // Core settings and theme changes purge pages, but media changes do
-                // not. A logo in a theme snapshot can appear on every cached page.
-                if ($partials->usesWidget('site_logo')) {
-                    $context->app()->get(\Prime\Cache\PageCache::class)->purgeAll();
-                }
+                // Models and snapshots can expose media on unrelated pages.
+                $context->app()->get(\Prime\Cache\PageCache::class)->purgeAll();
             });
         }
+        // A contextual model may refer to another entry, menu, author or term.
+        // The core purges only the edited entry and some archive paths, so a
+        // broader purge is required when any active model can depend on it.
+        $purgeContextualPages = static function () use ($context, $partials): void {
+            try {
+                $needed = $partials->hasEnabledModels() || $partials->usesAnyWidget([
+                    'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image',
+                    'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'navigation', 'share_buttons', 'posts', 'current_content',
+                ]);
+            } catch (\Throwable) {
+                // Hook exceptions are isolated by the CMS: on failure, purge
+                // rather than silently leaving possibly sensitive old pages.
+                $needed = true;
+            }
+            if ($needed) {
+                $context->app()->get(\Prime\Cache\PageCache::class)->purgeAll();
+            }
+        };
         foreach (['content.saved', 'content.updated', 'content.published', 'content.deleted', 'content.trashed', 'content.restored', 'content.status_changed'] as $event) {
-            $context->hooks()->on($event, static function () use ($content): void {
+            $context->hooks()->on($event, static function () use ($content, $purgeContextualPages): void {
                 $content->invalidate();
+                $purgeContextualPages();
             });
         }
+        foreach (['menu.updated', 'menu.item_created', 'menu.item_deleted'] as $event) {
+            $context->hooks()->on($event, $purgeContextualPages);
+        }
+        // The observed CMS menu editor calls its repository directly and emits
+        // none of those events. Cover state-changing admin/API HTTP requests as
+        // a conservative fallback, including profile and taxonomy edits.
+        $context->hooks()->filter('http.response', static function (mixed $response, mixed $request) use ($purgeContextualPages): mixed {
+            if ($request instanceof Request && in_array($request->method(), ['POST', 'PUT', 'PATCH', 'DELETE'], true)
+                && (str_starts_with($request->path(), '/admin/') || str_starts_with($request->path(), '/api/v1/'))) {
+                $purgeContextualPages();
+            }
+            return $response;
+        });
         $context->blocks()->register(new BlockDefinition(
             type: 'prime-builder/layout',
             title: 'plugin::prime-builder.block.title',
@@ -298,20 +334,28 @@ final class Plugin extends AbstractPlugin
             $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page), dynamicPlugin: $context, request: $pageRequest->request($page));
             return '<div class="pb-theme-content">' . $renderer->render($layout) . '</div>';
         });
-        // Contextual snapshots depend on routes, terms, profiles, media and other
-        // entries. Core has no complete invalidation events for all dependencies.
-        // Zone saves also have no page-purge event, so bypass before cache lookup
-        // whenever a declared zone has been saved, including after it is cleared.
+        // Zone saves have no page-purge event, so bypass before lookup whenever
+        // a declared zone has been saved, including after it has been cleared.
+        // Visitor/time-dependent dynamic layouts also fail closed until the core
+        // offers a safe per-page dependency/expiry hook.
         $cacheGuard = new CacheGuard($context, $partials, $zoneLayouts);
-        $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable) use ($partials, $cacheGuard): mixed {
+        $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable, mixed $request = null) use ($context, $cacheGuard): mixed {
             if ($cacheable !== true) {
                 return $cacheable;
             }
             try {
-                return !$cacheGuard->sensitive() && !$partials->usesAnyWidget([
-                    'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image',
-                    'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'navigation', 'share_buttons',
-                ]);
+                if ($request instanceof Request) {
+                    // The core checks its default cookie names only. Also avoid
+                    // shared pages for deployments using custom session names.
+                    $session = $context->app()->get(\Prime\Http\Session::class)->name();
+                    $remember = $context->app()->get(Auth::class)->rememberCookieName();
+                    foreach ([$session, $remember] as $cookie) {
+                        if (($request->cookie($cookie) ?? '') !== '') {
+                            return false;
+                        }
+                    }
+                }
+                return !$cacheGuard->sensitive();
             } catch (\Throwable) {
                 // The hook engine isolates exceptions; never authorize a stale cached response.
                 return false;
@@ -326,7 +370,7 @@ final class Plugin extends AbstractPlugin
                 || str_contains(strtolower((string) $response->header('Cache-Control')), 'no-store')) {
                 return $response;
             }
-            return $cacheGuard->sensitive() ? $response->withHeader('Cache-Control', 'private, no-store') : $response;
+            return $cacheGuard->privateResponse() ? $response->withHeader('Cache-Control', 'private, no-store') : $response;
         });
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
             if ($menu instanceof AdminMenu) {
@@ -612,7 +656,7 @@ final class Plugin extends AbstractPlugin
                 $globals->invalidate();
                 $theme->invalidate();
                 $themeModels->invalidate();
-                $context->app()->get(\Prime\Cache\CacheManager::class)->clearPages();
+                $context->app()->get(\Prime\Cache\PageCache::class)->purgeAll();
             }
         });
         $context->hooks()->filter('system.checks', static function (mixed $checks) use ($context): mixed {

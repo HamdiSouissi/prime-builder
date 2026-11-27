@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PrimeBuilder\Dynamic;
 
 use Prime\Plugins\PluginContext;
+use PrimeBuilder\Popup\Options as PopupOptions;
 use PrimeBuilder\Styles\ZoneLayouts;
 use PrimeBuilder\Theme\Models;
 use PrimeBuilder\Theme\Partials;
@@ -26,10 +27,35 @@ final class CacheGuard
         $this->models = new Models($plugin->settings(), $plugin->app()->get(\Prime\Settings\Settings::class));
     }
 
+    /**
+     * The core cache excludes authenticated requests, but an external proxy may
+     * not. A popup hidden from connected visitors must never be shared by one.
+     */
+    public function privateResponse(): bool
+    {
+        if ($this->sensitive()) {
+            return true;
+        }
+        try {
+            foreach ($this->models->all() as $model) {
+                if (($model['kind'] ?? null) !== 'popup' || ($model['enabled'] ?? false) !== true) {
+                    continue;
+                }
+                $options = PopupOptions::normalize($model['popup'] ?? null);
+                if ($options === null || $options['hide_logged_in']) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Throwable) {
+            return true;
+        }
+    }
+
     public function sensitive(): bool
     {
         try {
-            if ($this->zones->hasSavedDeclaredZone() || $this->partials->hasEnabledModels()) {
+            if ($this->zones->hasSavedDeclaredZone()) {
                 return true;
             }
             $stored = $this->partials->stored();
