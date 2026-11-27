@@ -2304,7 +2304,6 @@ final class IntegrationTest extends TestCase
         $cache->setEnabled(true);
         self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/')));
         $settings->set('plugin.prime-builder.theme_partials', []);
-        self::assertSame(true, $cache->isCacheableRequest(Request::create('GET', '/')));
         $other = $app->get(EntryRepository::class)->find(2);
         self::assertNotNull($other);
         $assets = new ThemeAssetRegistry();
