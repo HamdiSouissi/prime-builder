@@ -29,10 +29,10 @@ final class Submissions
      * @param (callable(int): void)|null $enqueue Called inside the same transaction as the submission and token.
      * @return bool False when the same start token has already been used.
      */
-    public function create(int $entryId, string $node, array $values, string $tokenHash, int $now, ?callable $enqueue = null): bool
+    public function create(int $entryId, string $node, array $values, string $tokenHash, int $now, ?callable $enqueue = null, ?string $modelId = null): bool
     {
         try {
-            $this->db->transaction(function () use ($entryId, $node, $values, $tokenHash, $now, $enqueue): void {
+            $this->db->transaction(function () use ($entryId, $node, $values, $tokenHash, $now, $enqueue, $modelId): void {
                 // Keep a short-lived digest separately, so deleting a message does not
                 // make its still-valid token reusable. Both inserts succeed or neither does.
                 $this->db->table(self::TOKEN_TABLE)->insert([
@@ -42,6 +42,7 @@ final class Submissions
                 $submissionId = $this->db->table(self::TABLE)->insertGetId([
                     'entry_id' => $entryId,
                     'node_id' => $node,
+                    'model_id' => $modelId,
                     'sender_name' => $values['name'],
                     'sender_email' => $values['email'],
                     'message' => $values['message'],
@@ -65,7 +66,7 @@ final class Submissions
     }
 
     /**
-     * @return list<array{id: int, entry_id: int, node_id: string, name: string, email: string, message: string, created_at: string}>
+     * @return list<array{id: int, entry_id: int, node_id: string, model_id: ?string, name: string, email: string, message: string, created_at: string}>
      */
     public function latest(): array
     {
@@ -76,7 +77,7 @@ final class Submissions
      * Search all historical messages, not just the first page. The same literal
      * search is used for the inbox and export, with a keyset cursor for export.
      *
-     * @return list<array{id: int, entry_id: int, node_id: string, name: string, email: string, message: string, created_at: string}>
+     * @return list<array{id: int, entry_id: int, node_id: string, model_id: ?string, name: string, email: string, message: string, created_at: string}>
      */
     public function search(string $search, int $limit, int $offset = 0, ?int $beforeId = null): array
     {
@@ -88,14 +89,14 @@ final class Submissions
             // search contains the escape character itself (for example '!').
             $escape = "\x1f";
             $pattern = '%' . str_replace([$escape, '%', '_'], [$escape . $escape, $escape . '%', $escape . '_'], $search) . '%';
-            $where[] = '(sender_name LIKE ? ESCAPE ? OR sender_email LIKE ? ESCAPE ? OR message LIKE ? ESCAPE ? OR node_id LIKE ? ESCAPE ?)';
-            $bindings = [$pattern, $escape, $pattern, $escape, $pattern, $escape, $pattern, $escape];
+            $where[] = '(sender_name LIKE ? ESCAPE ? OR sender_email LIKE ? ESCAPE ? OR message LIKE ? ESCAPE ? OR node_id LIKE ? ESCAPE ? OR model_id LIKE ? ESCAPE ?)';
+            $bindings = [$pattern, $escape, $pattern, $escape, $pattern, $escape, $pattern, $escape, $pattern, $escape];
         }
         if ($beforeId !== null) {
             $where[] = 'id < ?';
             $bindings[] = $beforeId;
         }
-        $sql = 'SELECT id, entry_id, node_id, sender_name, sender_email, message, created_at FROM `'
+        $sql = 'SELECT id, entry_id, node_id, model_id, sender_name, sender_email, message, created_at FROM `'
             . $this->db->prefixed(self::TABLE) . '`'
             . ($where === [] ? '' : ' WHERE ' . implode(' AND ', $where))
             . ' ORDER BY id DESC LIMIT ' . max(1, min(self::PAGE_SIZE + 1, $limit))
@@ -105,6 +106,7 @@ final class Submissions
             'id' => (int) $row['id'],
             'entry_id' => (int) $row['entry_id'],
             'node_id' => (string) $row['node_id'],
+            'model_id' => is_string($row['model_id'] ?? null) ? $row['model_id'] : null,
             'name' => (string) $row['sender_name'],
             'email' => (string) $row['sender_email'],
             'message' => (string) $row['message'],

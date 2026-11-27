@@ -178,6 +178,7 @@ return [
         'message' => 'Message',
         'files' => 'Fichiers joints',
         'bytes' => 'octets',
+        'model' => 'Modèle',
         'file_help' => 'PDF, PNG, JPEG ou texte UTF-8 ; quatre fichiers et 512 Kio au total maximum.',
         'file_error' => 'Choisissez des fichiers PDF, PNG, JPEG ou texte non vides, 512 Kio au total maximum.',
         'redirecting' => 'Redirection en cours dans quelques secondes.',

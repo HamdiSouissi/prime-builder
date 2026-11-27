@@ -17,6 +17,7 @@ use PrimeBuilder\Dynamic\Context as DynamicContext;
 use PrimeBuilder\Dynamic\Layout as DynamicLayout;
 use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Forms\FileInput;
+use PrimeBuilder\Forms\Tokens;
 use PrimeBuilder\Styles\CssClasses;
 use PrimeBuilder\Styles\Scope;
 use Throwable;
@@ -26,6 +27,7 @@ final class Renderer
 {
     private ?TableOfContents $tableOfContents = null;
     private string $styleOwner = '';
+    private ?string $formModel = null;
     /** @var array<string, array{width: int, height: int}> */
     private array $inferredImageDimensions = [];
 
@@ -58,6 +60,8 @@ final class Renderer
     public function render(array $data, ?array $styleLayout = null): string
     {
         $definitions = $this->registry->all();
+        $modelId = $data['_pb_form_model'] ?? null;
+        $this->formModel = is_string($modelId) && preg_match('/^[a-f0-9]{32}$/D', $modelId) === 1 ? $modelId : null;
         $sourceElements = is_array($data['elements'] ?? null) ? $data['elements'] : [];
         // CSS belongs to the saved tree, never to a visitor-dependent filtered copy.
         $this->styleOwner = Scope::forLayout($styleLayout ?? $data);
@@ -311,7 +315,8 @@ final class Renderer
                 continue;
             }
             try {
-                $content = $this->renderWidget($type, $settings, $definitions[$type], $id);
+                $formNode = is_string($element['_pb_form_node'] ?? null) ? $element['_pb_form_node'] : $id;
+                $content = $this->renderWidget($type, $settings, $definitions[$type], $id, $formNode);
                 if (($definitions[$type]['container'] ?? false) === true || $type === 'global_widget') {
                     $content .= $this->renderElements($children, $definitions);
                 }
@@ -334,7 +339,7 @@ final class Renderer
      * @param array<string, mixed> $settings
      * @param array<string, mixed> $definition
      */
-    private function renderWidget(string $type, array $settings, array $definition, string $id): string
+    private function renderWidget(string $type, array $settings, array $definition, string $id, string $formNode): string
     {
         $text = self::escape(is_string($settings['text'] ?? null) ? $settings['text'] : '');
         $rich = $this->richField($id, 'text', is_string($settings['text'] ?? null) ? $settings['text'] : '');
@@ -424,7 +429,7 @@ final class Renderer
             'theme_zone' => $this->pageContext !== null
                 ? ($this->content?->themeZoneInPage($settings, $this->pageContext, $this->request) ?? '')
                 : ($this->content?->themeZone($settings, $this->live, $this->entry) ?? '<p>' . self::escape(t('plugin::prime-builder.ui.theme_zone_fallback')) . '</p>'),
-            'form' => $this->renderForm($settings, $id),
+            'form' => $this->renderForm($settings, $id, $formNode),
             'prime_block' => (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->render($this->fieldText($settings, 'block_type', 'paragraph'), $this->fieldText($settings, 'block_data', '{}'), $id, $this->entry, is_string($settings['block_anchor'] ?? null) ? $settings['block_anchor'] : null),
             'original_content' => $this->renderOriginal($settings, false),
             'original_group' => $this->renderOriginal($settings, true),
@@ -438,9 +443,28 @@ final class Renderer
      *
      * @param array<string, mixed> $settings
      */
-    private function renderForm(array $settings, string $id): string
+    private function renderForm(array $settings, string $id, string $node): string
     {
         $entryId = $this->entry->id ?? 0;
+        $action = '/api/prime-builder/v1/forms/' . $entryId . '/submit';
+        $modelAttributes = '';
+        $page = $this->pageContext;
+        if ($this->formModel !== null && $page !== null && !$page->isPreview && !$page->isCustomizerPreview
+            && !$this->trustedPreview && $this->dynamicPlugin !== null && preg_match('/^[a-zA-Z0-9_-]{1,64}$/D', $node) === 1) {
+            $tokens = Tokens::fromAppKey($this->dynamicPlugin->app()->config()->get('app.key'));
+            if ($tokens !== null) {
+                $pageType = $page->isPlugin() ? 'plugin' : 'site';
+                $proof = $tokens->modelProof($this->formModel, $node, $page->path, $pageType);
+                $action = '/api/prime-builder/v1/forms/models/' . $this->formModel . '/submit';
+                $modelAttributes = ' data-pb-page="' . self::escape($page->path) . '" data-pb-page-type="' . $pageType . '" data-pb-proof="' . $proof . '"';
+            }
+        }
+        // Runtime-rendered forms may be conditional on the logged-in user.
+        // Static saved HTML has no request and keeps the anonymous protocol.
+        // Never start a session just to identify an anonymous visitor.
+        if ($this->request !== null && !$this->trustedPreview && $this->dynamicContext()?->user() !== null) {
+            $modelAttributes .= ' data-pb-authenticated="1"';
+        }
         $prefix = 'pb-form-' . $id;
         $title = $this->fieldText($settings, 'title');
         $copy = static fn (string $key): string => self::escape(t('plugin::prime-builder.forms.' . $key));
@@ -454,7 +478,7 @@ final class Renderer
             . '<label for="' . self::escape($prefix) . '-name">' . $copy('name') . '</label><input id="' . self::escape($prefix) . '-name" name="name" type="text" autocomplete="name" maxlength="160" required>'
             . '<label for="' . self::escape($prefix) . '-email">' . $copy('email') . '</label><input id="' . self::escape($prefix) . '-email" name="email" type="email" autocomplete="email" maxlength="254" required>'
             . '<label for="' . self::escape($prefix) . '-message">' . $copy('message') . '</label><textarea id="' . self::escape($prefix) . '-message" name="message" rows="5" maxlength="5000" required></textarea>';
-        return '<form class="pb-contact-form" method="post" action="/api/prime-builder/v1/forms/' . $entryId . '/submit" data-pb-form data-pb-node="' . self::escape($id) . '"'
+        return '<form class="pb-contact-form" method="post" action="' . self::escape($action) . '" data-pb-form data-pb-node="' . self::escape($node) . '"' . $modelAttributes
             . ($custom ? ' data-pb-custom="1" data-pb-required-error="' . $copy('choose_required') . '" data-pb-file-error="' . $copy('file_error') . '"' : '')
             . ' data-pb-error="' . $copy('error') . '" data-pb-wait="' . $copy('wait') . '" data-pb-sent="' . $copy('sent') . '" data-pb-limited="' . $copy('limited') . '" data-pb-redirecting="' . $copy('redirecting') . '">'
             . ($title !== '' ? '<h3>' . self::escape($title) . '</h3>' : '')

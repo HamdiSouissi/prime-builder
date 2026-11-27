@@ -18,7 +18,7 @@ final class CsvExport
         try {
             // A UTF-8 BOM is understood by common spreadsheet applications.
             if (fwrite($file, "\xef\xbb\xbf") !== 3
-                || fputcsv($file, ['id', 'entry_id', 'node_id', 'created_at_utc', 'name', 'email', 'message'], ',', '"', '', "\r\n") === false) {
+                || fputcsv($file, ['id', 'entry_id', 'node_id', 'created_at_utc', 'name', 'email', 'message', 'model_id'], ',', '"', '', "\r\n") === false) {
                 throw new RuntimeException('Unable to write the CSV export.');
             }
             $before = null;
@@ -32,7 +32,7 @@ final class CsvExport
                     }
                     $cells = [
                         (string) $row['id'], (string) $row['entry_id'], $row['node_id'], $row['created_at'],
-                        $row['name'], $row['email'], $row['message'],
+                        $row['name'], $row['email'], $row['message'], $row['model_id'] ?? '',
                     ];
                     $cells = array_map(self::safeCell(...), $cells);
                     if (fputcsv($file, $cells, ',', '"', '', "\r\n") === false) {

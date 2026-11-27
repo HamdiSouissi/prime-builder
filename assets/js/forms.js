@@ -13,16 +13,30 @@
       const node = form.dataset.pbNode || '';
       if (!(button instanceof HTMLButtonElement) || !status || !/^[a-zA-Z0-9_-]{1,64}$/.test(node)) continue;
       const action = new URL(form.action, window.location.href);
-      if (action.origin !== window.location.origin || !/^\/api\/prime-builder\/v1\/forms\/[1-9][0-9]*\/submit$/.test(action.pathname)) continue;
+      const model = /^\/api\/prime-builder\/v1\/forms\/models\/[a-f0-9]{32}\/submit$/.test(action.pathname);
+      if (action.origin !== window.location.origin || (!model && !/^\/api\/prime-builder\/v1\/forms\/[1-9][0-9]*\/submit$/.test(action.pathname))) continue;
+      const page = form.dataset.pbPage || '';
+      const pageType = form.dataset.pbPageType || '';
+      const proof = form.dataset.pbProof || '';
+      if (model && (!page.startsWith('/') || page.startsWith('//') || !['site', 'plugin'].includes(pageType) || !/^[a-f0-9]{64}$/.test(proof))) continue;
+      // Do not let an anonymous API request create a session cookie and defeat
+      // page caching. A runtime form may need the login session to recheck visibility.
+      const credentials = form.dataset.pbAuthenticated === '1' ? 'same-origin' : 'omit';
       enhanced.add(form);
       const startUrl = new URL(action.href.replace(/\/submit$/, '/start'));
       startUrl.searchParams.set('node', node);
+      if (model) {
+        startUrl.searchParams.set('page', page);
+        startUrl.searchParams.set('page_type', pageType);
+        startUrl.searchParams.set('proof', proof);
+      }
       const custom = form.dataset.pbCustom === '1';
       const steps = custom ? [...form.querySelectorAll('[data-pb-form-step]')] : [];
       const previous = form.querySelector('[data-pb-form-previous]');
       const next = form.querySelector('[data-pb-form-next]');
       let step = 0;
       let token = '';
+      let csrf = '';
       let started = 0;
       let busy = false;
 
@@ -74,8 +88,9 @@
       async function prepare() {
         button.disabled = true;
         token = '';
+        csrf = '';
         try {
-          const response = await fetch(startUrl, { credentials: 'omit', cache: 'no-store', headers: { Accept: 'application/json' } });
+          const response = await fetch(startUrl, { credentials, cache: 'no-store', headers: { Accept: 'application/json' } });
           if (!response.ok) {
             status.textContent = response.status === 429 ? form.dataset.pbLimited : form.dataset.pbError;
             return;
@@ -83,6 +98,7 @@
           const json = await response.json();
           if (typeof json?.data?.token !== 'string') throw new Error('invalid response');
           token = json.data.token;
+          if (credentials === 'same-origin' && typeof json.data.csrf === 'string' && /^[a-f0-9]{64}$/.test(json.data.csrf)) csrf = json.data.csrf;
           started = performance.now();
           button.disabled = false;
         } catch {
@@ -157,9 +173,10 @@
           } else {
             body = { node, token, name: values.get('name'), email: values.get('email'), message: values.get('message'), website: values.get('website') };
           }
+          if (model) Object.assign(body, { page, page_type: pageType, proof });
           const response = await fetch(action, {
-            method: 'POST', credentials: 'omit', cache: 'no-store',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            method: 'POST', credentials, cache: 'no-store',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(csrf ? { 'X-Prime-CSRF': csrf } : {}) },
             body: JSON.stringify(body),
           });
           if (response.ok) {

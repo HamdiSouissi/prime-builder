@@ -4,12 +4,13 @@
 
 - Les modèles statiques peuvent utiliser le cache anonyme du CMS ; invalidation conservatrice lors des changements pris en charge, avec contournement maintenu pour les zones enregistrées et les contenus dynamiques. Les limites des mutations directes, des requêtes concurrentes et des caches externes sont documentées.
 - Un test navigateur vérifie les vrais MISS/HIT, les modifications de modèle, widget global et menu, ainsi que l’isolation des visiteurs.
-- Version 1.0.1 : index autoloadé des conditions, lecture sélective des candidats et validation authentifiée des mises en page ; migration différée des modèles existants. Les blocs Prime et données invérifiables restent revalidés. Les évolutions des formulaires restent à faire.
+- Version 1.0.2 en cours : formulaires d’en-tête, pied, modèle de page et popup identifiés par modèle et nœud, avec protections et revérification du contexte ; migration additive. Les fichiers et champs structurés restent à faire.
+- Version 1.0.1 : index autoloadé des conditions, lecture sélective des candidats et validation authentifiée des mises en page ; migration différée des modèles existants. Les blocs Prime et données invérifiables restent revalidés.
 
 ## 1.0.0 — widgets partagés, contenu dynamique et administration
 
 - Widgets globaux édités une fois et référencés sur plusieurs pages, avec purge du cache interne ; balises de site, contenu, champs autorisés et visiteur, et conditions de connexion, rôle, appareil et dates.
-- Popups composés dans l’éditeur, conditions, cinq déclencheurs et fréquence par navigateur. Dialogue natif avec Échap et gestion du focus ; les déclencheurs automatiques ouvrent directement la fenêtre et une option exclut les visiteurs connectés. Les formulaires dans les popups restent à faire.
+- Popups composés dans l’éditeur, conditions, cinq déclencheurs et fréquence par navigateur. Dialogue natif avec Échap et gestion du focus ; les déclencheurs automatiques ouvrent directement la fenêtre et une option exclut les visiteurs connectés.
 - Menu d’administration regroupé, sélection entre police héritée et Inter locale du CMS, palette CSS filtrée de l’éditeur, documentation et captures. Le kit et les contrôles avancés restent limités.
 - Les aperçus natifs gardent un repli statique ; l’appareil est filtré par CSS et ne protège pas les données, les caches externes ne sont pas purgés. Cette version reste partielle : voir [README.md](README.md) et [RETOUR.md](RETOUR.md) avant utilisation.
 

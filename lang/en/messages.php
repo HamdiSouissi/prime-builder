@@ -178,6 +178,7 @@ return [
         'message' => 'Message',
         'files' => 'Attachments',
         'bytes' => 'bytes',
+        'model' => 'Model',
         'file_help' => 'PDF, PNG, JPEG or UTF-8 text; at most four files and 512 KiB total.',
         'file_error' => 'Choose non-empty PDF, PNG, JPEG or text files, up to 512 KiB total.',
         'redirecting' => 'Redirecting in a few seconds.',

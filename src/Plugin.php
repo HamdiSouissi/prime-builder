@@ -364,14 +364,25 @@ final class Plugin extends AbstractPlugin
         });
         // The core page cache is already bypassed before lookup. Also tell reverse
         // proxies and browsers not to share or retain visitor/time-dependent HTML.
-        $context->hooks()->filter('http.response', static function (mixed $response, mixed $request) use ($cacheGuard): mixed {
+        $context->hooks()->filter('http.response', static function (mixed $response, mixed $request) use ($context, $cacheGuard): mixed {
             if (!$response instanceof \Prime\Http\Response || !$request instanceof Request
                 || !in_array($request->method(), ['GET', 'HEAD'], true)
                 || !str_contains(strtolower((string) $response->header('Content-Type')), 'text/html')
                 || str_contains(strtolower((string) $response->header('Cache-Control')), 'no-store')) {
                 return $response;
             }
-            return $cacheGuard->privateResponse() ? $response->withHeader('Cache-Control', 'private, no-store') : $response;
+            try {
+                // Runtime form markup may identify an authenticated visitor even
+                // on an otherwise static page. Never offer that HTML to a proxy.
+                $session = $context->app()->get(\Prime\Http\Session::class)->name();
+                $remember = $context->app()->get(Auth::class)->rememberCookieName();
+                $private = $request->header('authorization') !== null
+                    || ($request->cookie($session) ?? '') !== '' || ($request->cookie($remember) ?? '') !== ''
+                    || $cacheGuard->privateResponse();
+            } catch (\Throwable) {
+                $private = true;
+            }
+            return $private ? $response->withHeader('Cache-Control', 'private, no-store') : $response;
         });
         $context->hooks()->filter('admin.menu', static function (mixed $menu): mixed {
             if ($menu instanceof AdminMenu) {
@@ -437,6 +448,8 @@ final class Plugin extends AbstractPlugin
         $context->api()->get('/documents/{id}/live', [$controller::class, 'live'], public: true);
         $context->api()->get('/forms/{id}/start', [$forms::class, 'start'], public: true);
         $context->api()->post('/forms/{id}/submit', [$forms::class, 'submit'], public: true);
+        $context->api()->get('/forms/models/{id}/start', [$forms::class, 'startModel'], public: true);
+        $context->api()->post('/forms/models/{id}/submit', [$forms::class, 'submitModel'], public: true);
         $context->api()->get('/templates', [$templates::class, 'index'], permission: 'prime_builder.edit');
         $context->api()->post('/templates', [$templates::class, 'create'], permission: 'prime_builder.templates');
         $context->api()->delete('/templates/{id}', [$templates::class, 'delete'], permission: 'prime_builder.templates');

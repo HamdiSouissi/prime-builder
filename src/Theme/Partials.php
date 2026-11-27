@@ -53,8 +53,8 @@ final class Partials
     /**
      * Revalidate stored data as well as editor input. Historical snapshots keep
      * their original restrictions; new models can resolve more widgets against
-     * the current public page. Forms and entry-bound original fragments cannot
-     * be reused as theme documents without a suitable independent identity.
+     * the current public page. Contextual forms have an independent model/node
+     * identity; entry-bound original fragments still cannot be reused.
      *
      * @param array<mixed> $elements
      * @return array<string, mixed>|null
@@ -114,7 +114,9 @@ final class Partials
             }
             $layout = $this->models->validatedLayout($model);
             if ($layout !== null) {
-                return $this->plugin->app()->get(GlobalWidgets::class)->expand(self::namespaceLayout($layout, $kind));
+                $layout = $this->plugin->app()->get(GlobalWidgets::class)->expand(self::namespaceLayout($layout, $kind));
+                $layout['_pb_form_model'] = $model['id'];
+                return $layout;
             }
         }
         return null;
@@ -177,7 +179,7 @@ final class Partials
                 continue;
             }
             $type = $element['type'] ?? null;
-            $forbidden = $contextual ? ['form', 'original_content', 'original_group'] : ['posts', 'current_content', 'theme_zone', 'form'];
+            $forbidden = $contextual ? ['original_content', 'original_group'] : ['posts', 'current_content', 'theme_zone', 'form'];
             if (in_array($type, $forbidden, true)) {
                 return true;
             }
@@ -279,6 +281,10 @@ final class Partials
                     continue;
                 }
                 $id = is_string($element['id'] ?? null) ? $element['id'] : '';
+                if (($element['type'] ?? null) === 'form') {
+                    // Preserve the actual model node independently of the HTML/CSS namespace.
+                    $element['_pb_form_node'] = $id;
+                }
                 $element['id'] = 'pbt_' . $slot . '_' . substr(hash('sha256', $id), 0, 24);
                 $settings = is_array($element['settings'] ?? null) ? $element['settings'] : [];
                 foreach (['anchor', 'block_anchor'] as $key) {

@@ -4733,6 +4733,146 @@ final class IntegrationTest extends TestCase
         self::assertSame(403, $request($fields)->status());
     }
 
+    public function testModelAndPopupFormsUseIndependentIdentitiesAndRecheckVisibility(): void
+    {
+        $app = $this->activated(null);
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        $models = new \PrimeBuilder\Theme\Models($plugin->settings(), $app->get(Settings::class), $plugin);
+        $form = ['id' => 'contact', 'type' => 'form', 'settings' => [], 'styles' => [], 'children' => []];
+        $header = $models->create('Header form', 'header', [$form]);
+        $popup = $models->create('Popup form', 'popup', [$form]);
+        self::assertNotNull($header);
+        self::assertNotNull($popup);
+        $header['enabled'] = $popup['enabled'] = true;
+        self::assertTrue($models->save($header));
+        self::assertTrue($models->save($popup));
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $path = $app->get(UrlGenerator::class)->entryUrl($entry);
+        $page = $app->get(UrlResolver::class)->resolve(Request::create('GET', $path));
+        self::assertSame($entry->id, $page->entry?->id);
+        $hooks = $app->get(Hooks::class);
+        $headHtml = $hooks->apply('site.partial', null, 'header', $page);
+        $popupHtml = $hooks->apply('site.foot', '', $page);
+        self::assertIsString($headHtml);
+        self::assertIsString($popupHtml);
+        self::assertStringContainsString('/forms/models/' . $header['id'] . '/submit', $headHtml);
+        self::assertStringContainsString('/forms/models/' . $popup['id'] . '/submit', $popupHtml);
+        self::assertStringContainsString('data-pb-node="contact"', $headHtml);
+        self::assertStringNotContainsString('name="token"', $headHtml);
+        self::assertSame(1, preg_match('/data-pb-proof="([a-f0-9]{64})"/', $headHtml, $headProof));
+        self::assertSame(1, preg_match('/data-pb-proof="([a-f0-9]{64})"/', $popupHtml, $popupProof));
+        $headerProof = $headProof[1] ?? '';
+        $popupProofValue = $popupProof[1] ?? '';
+        self::assertNotSame('', $headerProof);
+        self::assertNotSame('', $popupProofValue);
+        self::assertNotSame($headerProof, $popupProofValue);
+        $assets = new ThemeAssetRegistry();
+        $hooks->emit('site.assets', $assets, $page);
+        self::assertStringContainsString('/assets/plugins/prime-builder/js/forms.js', $assets->renderScripts());
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        $start = static fn (string $id, string $proof, string $path): string => '/api/prime-builder/v1/forms/models/' . $id . '/start?' . http_build_query(['node' => 'contact', 'page' => $path, 'page_type' => 'site', 'proof' => $proof]);
+        self::assertSame(200, $this->formRequest($app, 'GET', $start($header['id'], $headerProof, $path))->status());
+        self::assertSame(200, $this->formRequest($app, 'GET', $start($popup['id'], $popupProofValue, $path))->status());
+        self::assertSame(404, $this->formRequest($app, 'GET', $start($popup['id'], $headerProof, $path))->status());
+        self::assertSame(404, $this->formRequest($app, 'GET', $start($header['id'], $headerProof, '/elsewhere'))->status());
+        $ip = '198.51.100.70';
+        $body = ['node' => 'contact', 'page' => $path, 'page_type' => 'site', 'proof' => $headerProof, 'name' => 'Alice', 'email' => 'alice@example.test', 'message' => 'Bonjour', 'website' => '', 'token' => $tokens->issueModel($header['id'], 'contact', $path, 'site', $ip, time() - 4)];
+        $submit = '/api/prime-builder/v1/forms/models/' . $header['id'] . '/submit';
+        $wrong = $body;
+        $wrong['token'] = $tokens->issueModel($popup['id'], 'contact', $path, 'site', $ip, time() - 4);
+        self::assertSame(422, $this->formRequest($app, 'POST', $submit, $wrong, $ip)->status());
+        self::assertSame(201, $this->formRequest($app, 'POST', $submit, $body, $ip)->status());
+        self::assertSame(409, $this->formRequest($app, 'POST', $submit, $body, $ip)->status());
+        $row = $this->db($app)->table('prime_builder_submissions')->first();
+        self::assertNotNull($row);
+        self::assertSame($header['id'], $row['model_id']);
+        self::assertSame('contact', $row['node_id']);
+        self::assertSame((int) $entry->id, (int) $row['entry_id']);
+        $popupIp = '198.51.100.71';
+        $body['proof'] = $popupProofValue;
+        $body['token'] = $tokens->issueModel($popup['id'], 'contact', $path, 'site', $popupIp, time() - 4);
+        self::assertSame(201, $this->formRequest($app, 'POST', '/api/prime-builder/v1/forms/models/' . $popup['id'] . '/submit', $body, $popupIp)->status());
+        $header['enabled'] = false;
+        self::assertTrue($models->save($header));
+        self::assertSame(404, $this->formRequest($app, 'GET', $start($header['id'], $headerProof, $path))->status());
+        $header['enabled'] = true;
+        $header['exclude'] = [['type' => 'entry', 'value' => (string) $entry->id]];
+        self::assertTrue($models->save($header));
+        self::assertSame(404, $this->formRequest($app, 'GET', $start($header['id'], $headerProof, $path))->status());
+        $header['exclude'] = [];
+        $header['elements'][0]['conditions'] = ['auth' => 'authenticated'];
+        self::assertTrue($models->save($header));
+        self::assertSame(404, $this->formRequest($app, 'GET', $start($header['id'], $headerProof, $path))->status(), 'A formerly public node cannot be submitted after becoming private');
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 1));
+        $authenticatedStart = $this->formRequest($app, 'GET', $start($header['id'], $headerProof, $path));
+        self::assertSame(200, $authenticatedStart->status(), $authenticatedStart->body());
+        $csrf = json_decode($authenticatedStart->body(), true)['data']['csrf'] ?? null;
+        self::assertIsString($csrf);
+        $authenticatedIp = '198.51.100.72';
+        $body['proof'] = $headerProof;
+        $body['token'] = $tokens->issueModel($header['id'], 'contact', $path, 'site', $authenticatedIp, time() - 4);
+        self::assertSame(403, $this->formRequest($app, 'POST', $submit, $body, $authenticatedIp)->status(), 'The CMS still requires CSRF for session-authenticated writes');
+        $authenticatedPost = Request::create('POST', $submit, headers: ['Accept' => 'application/json', 'Content-Type' => 'application/json', 'X-Prime-CSRF' => $csrf], server: ['REMOTE_ADDR' => $authenticatedIp], rawBody: (string) json_encode($body));
+        self::assertSame(201, $app->get(Kernel::class)->handle($authenticatedPost)->status());
+        $popup['popup']['hide_logged_in'] = true;
+        self::assertTrue($models->save($popup));
+        self::assertSame(404, $this->formRequest($app, 'GET', $start($popup['id'], $popupProofValue, $path))->status());
+        $app->get(\Prime\Auth\Auth::class)->logout();
+        $header['elements'][0]['conditions'] = [];
+        self::assertTrue($models->save($header));
+        $winner = $models->create('Superseding header', 'header', [['id' => 'heading', 'type' => 'heading', 'settings' => ['text' => 'New', 'level' => 2], 'styles' => [], 'children' => []]]);
+        self::assertNotNull($winner);
+        $winner['priority'] = 100;
+        $winner['enabled'] = true;
+        self::assertTrue($models->save($winner));
+        self::assertSame(404, $this->formRequest($app, 'GET', $start($header['id'], $headerProof, $path))->status(), 'A superseded model is no longer available');
+        self::assertTrue($models->delete($winner['id']));
+        $header['elements'][0]['hidden'] = true;
+        self::assertTrue($models->save($header));
+        self::assertSame(404, $this->formRequest($app, 'GET', $start($header['id'], $headerProof, $path))->status());
+    }
+
+    public function testModelFormsResolveArchiveNotFoundAndPreviouslyRenderedPluginContexts(): void
+    {
+        $app = $this->activated(null);
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        $models = new \PrimeBuilder\Theme\Models($plugin->settings(), $app->get(Settings::class), $plugin);
+        $model = $models->create('Context form', 'header', [['id' => 'contact', 'type' => 'form', 'settings' => [], 'styles' => [], 'children' => []]]);
+        self::assertNotNull($model);
+        $model['enabled'] = true;
+        self::assertTrue($models->save($model));
+        $resolver = $app->get(UrlResolver::class);
+        $archive = $resolver->resolve(Request::create('GET', '/blog'));
+        self::assertSame(PageContext::TYPE_BLOG, $archive->type);
+        $missing = $resolver->resolve(Request::create('GET', '/form-missing-page'));
+        self::assertTrue($missing->isNotFound());
+        // The CMS has no resolver API for a plugin's own route; its signed proof
+        // attests only that this path was rendered previously, not its current existence.
+        $pluginPage = PageContext::plugin('/third-party-page', 'Third party', '');
+        $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
+        self::assertNotNull($tokens);
+        foreach ([[$archive, 'site'], [$missing, 'site'], [$pluginPage, 'plugin']] as $i => [$page, $pageType]) {
+            $html = $app->get(Hooks::class)->apply('site.partial', null, 'header', $page);
+            self::assertIsString($html);
+            self::assertSame(1, preg_match('/data-pb-proof="([a-f0-9]{64})"/', $html, $matches));
+            $proof = $matches[1] ?? '';
+            self::assertNotSame('', $proof);
+            $query = http_build_query(['node' => 'contact', 'page' => $page->path, 'page_type' => $pageType, 'proof' => $proof]);
+            $route = '/api/prime-builder/v1/forms/models/' . $model['id'];
+            $ip = '198.51.100.' . (80 + $i);
+            self::assertSame(200, $this->formRequest($app, 'GET', $route . '/start?' . $query, ip: $ip)->status());
+            $body = ['node' => 'contact', 'page' => $page->path, 'page_type' => $pageType, 'proof' => $proof,
+                'name' => 'Context', 'email' => 'context@example.test', 'message' => 'Bonjour', 'website' => '',
+                'token' => $tokens->issueModel($model['id'], 'contact', $page->path, $pageType, $ip, time() - 4)];
+            self::assertSame(201, $this->formRequest($app, 'POST', $route . '/submit', $body, $ip)->status());
+            $body['page_type'] = $pageType === 'site' ? 'plugin' : 'site';
+            self::assertSame(404, $this->formRequest($app, 'POST', $route . '/submit', $body, $ip)->status());
+        }
+        self::assertSame(3, $this->db($app)->table('prime_builder_submissions')->where('entry_id', '=', 0)->count());
+    }
+
     public function testContactFormRendersAndOnlyStartsForVisiblePublishedWidgets(): void
     {
         $app = $this->activated(null);
@@ -5203,7 +5343,7 @@ final class IntegrationTest extends TestCase
         self::assertSame('Historique', $db->table('prime_builder_submissions')->first()['message'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('1.0.1', $after->installedVersion);
+        self::assertSame('1.0.2', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000002_create_prime_builder_form_files')->count());
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000003_create_prime_builder_form_notifications')->count());
@@ -5228,7 +5368,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(base64_encode('test'), $db->table('prime_builder_form_files')->where('submission_id', '=', $id)->first()['content_base64'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('1.0.1', $after->installedVersion);
+        self::assertSame('1.0.2', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
     }
 
@@ -5247,6 +5387,7 @@ final class IntegrationTest extends TestCase
         $db->table('prime_builder_form_files')->insert(['submission_id' => $id, 'field_id' => 'f_file', 'field_label' => 'Fichier', 'filename' => 'test.txt', 'mime' => 'text/plain', 'bytes' => 4, 'content_base64' => base64_encode('test')]);
         // Simulate the 0.1.2 ledger before the new derived-directory migration.
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000004_prepare_theme_model_index')->delete());
+        self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000005_extend_prime_builder_submissions')->delete());
         $db->table('settings')->where('name', '=', 'plugin.prime-builder.theme_model_index')->delete();
         $migrationCount = $db->table('migrations')->where('source', '=', 'prime-builder')->count();
         self::assertSame(3, $migrationCount);
@@ -5260,8 +5401,8 @@ final class IntegrationTest extends TestCase
         self::assertNotNull($after);
         self::assertTrue($after->isActive());
         self::assertFalse($after->needsUpdate);
-        self::assertSame('1.0.1', $after->installedVersion);
-        self::assertSame($migrationCount + 1, $db->table('migrations')->where('source', '=', 'prime-builder')->count());
+        self::assertSame('1.0.2', $after->installedVersion);
+        self::assertSame($migrationCount + 2, $db->table('migrations')->where('source', '=', 'prime-builder')->count());
         $manager->syncUpgradedPlugin('prime-builder', '0.1.2');
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000004_prepare_theme_model_index')->count());
         self::assertSame($entry->content, $app->get(EntryRepository::class)->find(1)?->content);
@@ -5464,7 +5605,7 @@ final class IntegrationTest extends TestCase
         self::assertNotFalse($file);
         fwrite($file, substr($csv->body(), 3));
         rewind($file);
-        self::assertSame(['id', 'entry_id', 'node_id', 'created_at_utc', 'name', 'email', 'message'], fgetcsv($file, 0, ',', '"', ''));
+        self::assertSame(['id', 'entry_id', 'node_id', 'created_at_utc', 'name', 'email', 'message', 'model_id'], fgetcsv($file, 0, ',', '"', ''));
         $rows = [];
         while (($row = fgetcsv($file, 0, ',', '"', '')) !== false) {
             $rows[] = $row;
@@ -5767,7 +5908,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, preg_match('/<textarea hidden data-pb-config>(.*?)<\/textarea>/s', $editor->body(), $configMatch));
         $config = json_decode(html_entity_decode($configMatch[1] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8'), true);
         self::assertSame('popup', $config['themeKind']);
-        self::assertTrue($config['widgets']['form']['hidden']);
+        self::assertFalse($config['widgets']['form']['hidden']);
         $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => [[
             'id' => 'title', 'type' => 'heading', 'settings' => ['text' => 'Contenu & sûr', 'level' => 2], 'styles' => ['desktop' => ['color' => '#123456']], 'children' => [],
         ]]]]]];
@@ -5856,7 +5997,7 @@ final class IntegrationTest extends TestCase
         $plugin->settings()->set('theme_model.' . $id, $corrupt, false);
         self::assertStringNotContainsString('data-pb-popup="' . $id . '"', (string) $hooks->apply('site.foot', '', $page), 'Malformed persisted options fail closed');
         $corrupt = $original;
-        $corrupt['elements'] = [['id' => 'form', 'type' => 'form', 'settings' => [], 'styles' => [], 'children' => []]];
+        $corrupt['elements'] = [['id' => 'fragment', 'type' => 'original_content', 'settings' => [], 'styles' => [], 'children' => []]];
         $plugin->settings()->set('theme_model.' . $id, $corrupt, false);
         self::assertStringNotContainsString('data-pb-popup="' . $id . '"', (string) $hooks->apply('site.foot', '', $page), 'Unsupported persisted widgets are revalidated');
         $plugin->settings()->set('theme_model.' . $id, $original, false);
@@ -6744,7 +6885,9 @@ final class IntegrationTest extends TestCase
         self::assertSame(403, $this->send($app, 'PATCH', $base, ['content' => $wrap($html), 'source_hash' => $hash], $token)->status());
         self::assertSame(403, $this->send($app, 'POST', $base . '/render', ['data' => ['version' => 1, 'elements' => $html]], $token)->status());
         $form = [['id' => 'form', 'type' => 'form', 'settings' => [], 'styles' => [], 'children' => []]];
-        self::assertSame(422, $this->send($app, 'PATCH', $base, ['content' => $wrap($form), 'source_hash' => $hash], $token)->status());
+        self::assertSame(200, $this->send($app, 'POST', $base . '/render', ['data' => ['version' => 1, 'elements' => $form]], $token)->status());
+        $fragment = [['id' => 'original', 'type' => 'original_content', 'settings' => [], 'styles' => [], 'children' => []]];
+        self::assertSame(422, $this->send($app, 'PATCH', $base, ['content' => $wrap($fragment), 'source_hash' => $hash], $token)->status());
         $anchors = [
             ['id' => 'a', 'type' => 'anchor', 'settings' => ['anchor' => 'duplicate'], 'styles' => [], 'children' => []],
             ['id' => 'b', 'type' => 'anchor', 'settings' => ['anchor' => 'duplicate'], 'styles' => [], 'children' => []],
@@ -6760,7 +6903,7 @@ final class IntegrationTest extends TestCase
         $imported = $this->send($app, 'POST', $base . '/import', ['data' => $validImport], $admin);
         self::assertSame(200, $imported->status(), $imported->body());
         self::assertStringContainsString('Imported', $imported->body());
-        self::assertSame(422, $this->send($app, 'POST', $base . '/import', ['data' => ['version' => 1, 'elements' => $form]], $admin)->status());
+        self::assertSame(200, $this->send($app, 'POST', $base . '/import', ['data' => ['version' => 1, 'elements' => $form]], $admin)->status());
         self::assertSame(200, $this->send($app, 'PATCH', $base, ['content' => $wrap($html), 'source_hash' => $hash], $admin)->status());
         $fields['priority'] = '0';
         $fields['enabled'] = '1';

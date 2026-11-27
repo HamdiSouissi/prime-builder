@@ -25,7 +25,7 @@ final class Models
     public const PREFIX = 'theme_model.';
     private const INDEX_VERSION = 1;
     // Bump when validation or sanitization rules change in a future release.
-    private const VALIDATION_VERSION = 1;
+    private const VALIDATION_VERSION = 2;
     private static int $maintaining = 0;
     /** @var list<array<string, mixed>>|null */
     private ?array $cached = null;

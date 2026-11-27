@@ -259,9 +259,7 @@ final class Documents
                 'style' => Assets::safeUrl($definition['style'] ?? null, 'css'),
                 'fields' => $fields,
                 'container' => ($definition['container'] ?? false) === true,
-                // The contact widget's endpoints currently require a persisted entry.
                 'hidden' => ($definition['hidden'] ?? false) === true || ($name === 'html' && !$user->can('prime_builder.unfiltered_html'))
-                    || ($themeModel !== null && $name === 'form')
                     || (($themeModel['kind'] ?? null) === 'global' && !in_array($name, GlobalWidgets::ALLOWED, true)),
                 'readOnly' => ($definition['read_only'] ?? false) === true || ($name === 'html' && !$user->can('prime_builder.unfiltered_html')),
             ];

@@ -70,7 +70,9 @@ final class Popups
             }
             $layout = $this->models->validatedLayout($model);
             if ($layout !== null) {
-                $result[] = ['model' => $model, 'layout' => $this->plugin->app()->get(GlobalWidgets::class)->expand(Partials::namespaceLayout($layout, Partials::modelSlot($model)))];
+                $layout = $this->plugin->app()->get(GlobalWidgets::class)->expand(Partials::namespaceLayout($layout, Partials::modelSlot($model)));
+                $layout['_pb_form_model'] = $model['id'];
+                $result[] = ['model' => $model, 'layout' => $layout];
             }
         }
         return $result;

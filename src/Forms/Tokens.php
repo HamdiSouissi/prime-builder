@@ -52,6 +52,27 @@ final class Tokens
         return hash_equals($this->signature($entryId, $node, $ip, $timestamp, $nonce), $parts[3]);
     }
 
+    /** A cache-safe proof that this model form was rendered for this page. */
+    public function modelProof(string $modelId, string $node, string $path, string $pageType): string
+    {
+        return hash_hmac('sha256', "model-form\0" . $modelId . "\0" . $node . "\0" . $path . "\0" . $pageType, $this->key);
+    }
+
+    public function issueModel(string $modelId, string $node, string $path, string $pageType, string $ip, int $now): string
+    {
+        return $this->issue(0, self::modelIdentity($modelId, $node, $path, $pageType), $ip, $now);
+    }
+
+    public function validModel(string $token, string $modelId, string $node, string $path, string $pageType, string $ip, int $now): bool
+    {
+        return $this->valid($token, 0, self::modelIdentity($modelId, $node, $path, $pageType), $ip, $now);
+    }
+
+    private static function modelIdentity(string $modelId, string $node, string $path, string $pageType): string
+    {
+        return 'model:' . $modelId . "\0" . $node . "\0" . $path . "\0" . $pageType;
+    }
+
     public function usedHash(string $token): string
     {
         return hash_hmac('sha256', 'used:' . $token, $this->key);

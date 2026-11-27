@@ -5,7 +5,7 @@ declare(strict_types=1);
 /** @var \Prime\View\TemplateContext $this */
 /** @var string $pageHeading */
 /** @var list<array{label: string, url: ?string}> $breadcrumbs */
-/** @var list<array{id: int, entry_id: int, node_id: string, name: string, email: string, message: string, created_at: string}> $submissions */
+/** @var list<array{id: int, entry_id: int, node_id: string, model_id: ?string, name: string, email: string, message: string, created_at: string}> $submissions */
 /** @var array<int, list<array{id: int, field_label: string, filename: string, bytes: int}>> $files */
 /** @var string $search */
 /** @var int $page */
@@ -45,7 +45,7 @@ $exportPageUrl = '/admin/prime-builder/submissions/export?' . http_build_query([
                 <header class="pc-card__header"><h2 class="pc-card__title"><?= $this->e(t('plugin::prime-builder.forms.submission')) ?> #<?= $this->e((string) $submission['id']) ?></h2></header>
                 <div class="pc-card__body pb-submission-content">
                     <dl>
-                        <dt><?= $this->e(t('plugin::prime-builder.forms.content')) ?></dt><dd><?= $this->e((string) $submission['entry_id']) ?> / <?= $this->e($submission['node_id']) ?></dd>
+                        <dt><?= $this->e(t('plugin::prime-builder.forms.content')) ?></dt><dd><?php if ($submission['model_id'] !== null): ?><?= $this->e(t('plugin::prime-builder.forms.model')) ?> <?= $this->e($submission['model_id']) ?> / <?php else: ?><?= $this->e((string) $submission['entry_id']) ?> / <?php endif; ?><?= $this->e($submission['node_id']) ?></dd>
                         <dt><?= $this->e(t('plugin::prime-builder.forms.received')) ?></dt><dd><?= $this->e($submission['created_at']) ?> UTC</dd>
                         <dt><?= $this->e(t('plugin::prime-builder.forms.name')) ?></dt><dd><?= $this->e($submission['name']) ?></dd>
                         <dt><?= $this->e(t('plugin::prime-builder.forms.email')) ?></dt><dd><?= $this->e($submission['email']) ?></dd>
