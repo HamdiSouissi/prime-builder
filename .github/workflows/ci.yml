@@ -17,7 +17,8 @@ jobs:
           path: builder
       - name: Report length
         working-directory: builder
-        run: awk 'END { if (NR > 150) { print "RETOUR.md exceeds 150 lines: " NR > "/dev/stderr"; exit 1 } }' RETOUR.md
+        run: |
+          awk 'END { if (NR > 150) { print "RETOUR.md exceeds 150 lines: " NR > "/dev/stderr"; exit 1 } }' RETOUR.md
       - uses: ./builder/.github/actions/setup-cms
         with:
           install-dependencies: 'true'
