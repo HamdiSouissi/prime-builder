@@ -5,7 +5,7 @@ declare(strict_types=1);
 /** @var \Prime\View\TemplateContext $this */
 /** @var string $pageHeading */
 /** @var list<array{label: string, url: ?string}> $breadcrumbs */
-/** @var list<array{id: int, entry_id: int, node_id: string, model_id: ?string, name: string, email: string, message: string, created_at: string}> $submissions */
+/** @var list<array{id: int, entry_id: int, node_id: string, model_id: ?string, fields_json: ?string, name: string, email: string, message: string, created_at: string}> $submissions */
 /** @var array<int, list<array{id: int, field_label: string, filename: string, bytes: int}>> $files */
 /** @var string $search */
 /** @var int $page */

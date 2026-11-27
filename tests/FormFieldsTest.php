@@ -127,6 +127,23 @@ final class FormFieldsTest extends TestCase
         }
     }
 
+    public function testStructuredSnapshotKeepsDuplicateLabelsArraysAndLiteralFormulaLikeValues(): void
+    {
+        $definitions = [
+            ['id' => 'f_choices', 'type' => 'checkbox', 'label' => 'Même libellé', 'required' => false, 'step' => 1, 'options' => ['A, B', '+SUM(1,1)'], 'value' => ''],
+            ['id' => 'f_text', 'type' => 'text', 'label' => 'Même libellé', 'required' => false, 'step' => 1, 'options' => [], 'value' => ''],
+        ];
+        $fields = Fields::parse((string) json_encode($definitions));
+        self::assertNotNull($fields);
+        $result = Fields::submitted($fields, ['f_choices' => ['A, B', '+SUM(1,1)'], 'f_text' => '=1+1']);
+        self::assertNotNull($result);
+        $snapshot = json_decode($result['fields_json'], true, 32, JSON_THROW_ON_ERROR);
+        self::assertSame([
+            ['id' => 'f_choices', 'type' => 'checkbox', 'label' => 'Même libellé', 'value' => ['A, B', '+SUM(1,1)']],
+            ['id' => 'f_text', 'type' => 'text', 'label' => 'Même libellé', 'value' => '=1+1'],
+        ], $snapshot['fields']);
+    }
+
     public function testSubmissionChecksEveryPublishedTypeAndRejectsUnexpectedData(): void
     {
         $fields = Fields::parse((string) json_encode($this->definition(), JSON_UNESCAPED_UNICODE));
@@ -139,6 +156,15 @@ final class FormFieldsTest extends TestCase
         self::assertStringContainsString("Notes: Ligne 1\nLigne 2", $result['message']);
         self::assertStringContainsString('Cases: Un, Deux', $result['message']);
         self::assertStringContainsString('Source: site', $result['message']);
+        $snapshot = json_decode($result['fields_json'], true, 32, JSON_THROW_ON_ERROR);
+        self::assertSame(1, $snapshot['version']);
+        $byId = array_column($snapshot['fields'], null, 'id');
+        self::assertSame('Zoé <admin>', $byId['f_name']['value']);
+        self::assertSame('text', $byId['f_name']['type']);
+        self::assertSame("Ligne 1\nLigne 2", $byId['f_notes']['value']);
+        self::assertSame(['Un', 'Deux'], $byId['f_check']['value']);
+        self::assertTrue($byId['f_accept']['value']);
+        self::assertSame('-123.4567', $byId['f_number']['value'], 'Numbers retain the exact validated decimal string');
         $cases = [];
         $bad = $values;
         unset($bad['f_name']);

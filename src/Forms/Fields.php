@@ -101,7 +101,7 @@ final class Fields
      * Validate exactly the published schema; unknown/missing fields are rejected.
      *
      * @param list<array{id: string, type: string, label: string, required: bool, step: int, options: list<string>, value: string}> $fields
-     * @return array{name: string, email: string, message: string, files: list<array{field_id: string, field_label: string, filename: string, mime: string, bytes: int, content_base64: string}>}|null
+     * @return array{name: string, email: string, message: string, fields_json: string, files: list<array{field_id: string, field_label: string, filename: string, mime: string, bytes: int, content_base64: string}>}|null
      */
     public static function submitted(array $fields, mixed $input): ?array
     {
@@ -111,6 +111,7 @@ final class Fields
         $name = '';
         $email = '';
         $lines = [];
+        $structured = [];
         $files = [];
         $fileBytes = 0;
         foreach ($fields as $field) {
@@ -122,6 +123,7 @@ final class Fields
             if ($type === 'file') {
                 if ($raw === null && !$field['required']) {
                     $display = '';
+                    $value = null;
                 } else {
                     $file = FileInput::validate($raw);
                     if ($file === null || count($files) >= FileInput::MAX_FILES || ($fileBytes += $file['bytes']) > FileInput::MAX_BYTES) {
@@ -129,6 +131,8 @@ final class Fields
                     }
                     $files[] = ['field_id' => $field['id'], 'field_label' => $field['label']] + $file;
                     $display = $file['filename'];
+                    // Only metadata belongs in the snapshot; never duplicate file bytes.
+                    $value = ['filename' => $file['filename'], 'mime' => $file['mime'], 'bytes' => $file['bytes']];
                 }
             } elseif ($type === 'checkbox') {
                 if (!is_array($raw) || !array_is_list($raw) || count($raw) > count($field['options'])) {
@@ -145,11 +149,13 @@ final class Fields
                     return null;
                 }
                 $display = implode(', ', $selected);
+                $value = $selected;
             } elseif ($type === 'acceptance') {
                 if (!is_bool($raw) || ($field['required'] && !$raw)) {
                     return null;
                 }
                 $display = $raw ? 'yes' : 'no';
+                $value = $raw;
             } else {
                 if (!is_string($raw) || !mb_check_encoding($raw, 'UTF-8')) {
                     return null;
@@ -171,14 +177,18 @@ final class Fields
                 } elseif ($type === 'email' && $email === '') {
                     $email = $display;
                 }
+                $value = $display;
             }
             $lines[] = $field['label'] . ': ' . $display;
+            $structured[] = ['id' => $field['id'], 'type' => $type, 'label' => $field['label'], 'value' => $value];
         }
         $message = implode("\n\n", $lines);
-        if (mb_strlen($message, 'UTF-8') > 5000 || strlen($message) > 20000) {
+        $snapshot = json_encode(['version' => 1, 'fields' => $structured], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        // TEXT is limited to 65,535 bytes on MySQL. Fail rather than truncating.
+        if (mb_strlen($message, 'UTF-8') > 5000 || strlen($message) > 20000 || !is_string($snapshot) || strlen($snapshot) > 60000) {
             return null;
         }
-        return ['name' => $name, 'email' => $email, 'message' => $message, 'files' => $files];
+        return ['name' => $name, 'email' => $email, 'message' => $message, 'fields_json' => $snapshot, 'files' => $files];
     }
 
     /** @param list<string> $options */

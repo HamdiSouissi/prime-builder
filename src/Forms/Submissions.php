@@ -25,7 +25,7 @@ final class Submissions
     }
 
     /**
-     * @param array{name: string, email: string, message: string, files?: list<array{field_id: string, field_label: string, filename: string, mime: string, bytes: int, content_base64: string}>} $values
+     * @param array{name: string, email: string, message: string, fields_json?: string, files?: list<array{field_id: string, field_label: string, filename: string, mime: string, bytes: int, content_base64: string}>} $values
      * @param (callable(int): void)|null $enqueue Called inside the same transaction as the submission and token.
      * @return bool False when the same start token has already been used.
      */
@@ -43,6 +43,7 @@ final class Submissions
                     'entry_id' => $entryId,
                     'node_id' => $node,
                     'model_id' => $modelId,
+                    'fields_json' => $values['fields_json'] ?? null,
                     'sender_name' => $values['name'],
                     'sender_email' => $values['email'],
                     'message' => $values['message'],
@@ -66,7 +67,7 @@ final class Submissions
     }
 
     /**
-     * @return list<array{id: int, entry_id: int, node_id: string, model_id: ?string, name: string, email: string, message: string, created_at: string}>
+     * @return list<array{id: int, entry_id: int, node_id: string, model_id: ?string, fields_json: ?string, name: string, email: string, message: string, created_at: string}>
      */
     public function latest(): array
     {
@@ -77,7 +78,7 @@ final class Submissions
      * Search all historical messages, not just the first page. The same literal
      * search is used for the inbox and export, with a keyset cursor for export.
      *
-     * @return list<array{id: int, entry_id: int, node_id: string, model_id: ?string, name: string, email: string, message: string, created_at: string}>
+     * @return list<array{id: int, entry_id: int, node_id: string, model_id: ?string, fields_json: ?string, name: string, email: string, message: string, created_at: string}>
      */
     public function search(string $search, int $limit, int $offset = 0, ?int $beforeId = null): array
     {
@@ -96,7 +97,7 @@ final class Submissions
             $where[] = 'id < ?';
             $bindings[] = $beforeId;
         }
-        $sql = 'SELECT id, entry_id, node_id, model_id, sender_name, sender_email, message, created_at FROM `'
+        $sql = 'SELECT id, entry_id, node_id, model_id, fields_json, sender_name, sender_email, message, created_at FROM `'
             . $this->db->prefixed(self::TABLE) . '`'
             . ($where === [] ? '' : ' WHERE ' . implode(' AND ', $where))
             . ' ORDER BY id DESC LIMIT ' . max(1, min(self::PAGE_SIZE + 1, $limit))
@@ -107,6 +108,7 @@ final class Submissions
             'entry_id' => (int) $row['entry_id'],
             'node_id' => (string) $row['node_id'],
             'model_id' => is_string($row['model_id'] ?? null) ? $row['model_id'] : null,
+            'fields_json' => is_string($row['fields_json'] ?? null) ? $row['fields_json'] : null,
             'name' => (string) $row['sender_name'],
             'email' => (string) $row['sender_email'],
             'message' => (string) $row['message'],

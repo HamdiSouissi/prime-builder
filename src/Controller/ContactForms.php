@@ -172,10 +172,15 @@ final class ContactForms
         $pageType = $request->query('page_type');
         $proof = $request->query('proof');
         $entryId = self::positiveId($id);
-        $form = $model
-            ? $this->publicModelForm($request, $id, $node, $page, $pageType, $proof)
-            : ($entryId !== null && is_string($node) && $this->publicForm($request, $entryId, $node) !== null ? ['entry_id' => $entryId] : null);
-        if ($form === null || !is_string($node)) {
+        if (!is_string($node)) {
+            return $this->error($request, 'not_found', 404);
+        }
+        if ($model) {
+            $form = $this->publicModelForm($request, $id, $node, $page, $pageType, $proof);
+        } else {
+            $form = $entryId !== null && $this->publicForm($request, $entryId, $node) !== null ? ['entry_id' => $entryId] : null;
+        }
+        if ($form === null) {
             return $this->error($request, 'not_found', 404);
         }
         $tokens = Tokens::fromAppKey($this->plugin->app()->config()->get('app.key'));
@@ -186,8 +191,9 @@ final class ContactForms
         if (!(new RateLimit($this->plugin->db(), $tokens))->allow('start', $request->ip(), 30, 60, $now)) {
             return $this->error($request, 'rate_limited', 429)->withHeader('Retry-After', (string) (60 - $now % 60));
         }
-        $token = $model && is_string($page) && is_string($pageType)
-            ? $tokens->issueModel($id, $node, $page, $pageType, $request->ip(), $now)
+        // A non-null model form has already validated both context strings.
+        $token = $model
+            ? $tokens->issueModel($id, $node, (string) $page, (string) $pageType, $request->ip(), $now)
             : $tokens->issue((int) $form['entry_id'], $node, $request->ip(), $now);
         $data = ['token' => $token];
         if ($request->attribute('api.user') instanceof User && $request->attribute('api.token_id') === null) {

@@ -5119,6 +5119,14 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('Thèmes: Alpha', (string) $stored['message']);
         self::assertStringContainsString('Source: newsletter', (string) $stored['message']);
         self::assertStringNotContainsString('198.51.100.149', (string) json_encode($stored));
+        $snapshot = json_decode((string) $stored['fields_json'], true, 32, JSON_THROW_ON_ERROR);
+        self::assertSame(1, $snapshot['version']);
+        $byId = array_column($snapshot['fields'], null, 'id');
+        self::assertSame('<script>danger()</script>', $byId['f_name']['value']);
+        self::assertSame(['Alpha'], $byId['f_choice']['value']);
+        self::assertSame('checkbox', $byId['f_choice']['type']);
+        self::assertTrue($byId['f_accept']['value']);
+        self::assertSame('3.5', $byId['f_number']['value']);
         // A token issued before editing must be checked against the current schema.
         $stale = $payload('198.51.100.150');
         $fields[3]['options'] = ['Gamma'];
@@ -5135,6 +5143,18 @@ final class IntegrationTest extends TestCase
         $csv = $this->send($app, 'GET', '/admin/prime-builder/submissions/export?q=newsletter');
         self::assertSame(200, $csv->status());
         self::assertStringContainsString('Thèmes: Alpha', $csv->body());
+        $stream = fopen('php://memory', 'w+b');
+        self::assertNotFalse($stream);
+        fwrite($stream, substr($csv->body(), 3));
+        rewind($stream);
+        $columns = fgetcsv($stream, 0, ',', '"', '');
+        $row = fgetcsv($stream, 0, ',', '"', '');
+        fclose($stream);
+        self::assertIsArray($columns);
+        self::assertIsArray($row);
+        self::assertSame('fields_json', $columns[8]);
+        self::assertSame($stored['fields_json'], $row[8]);
+        self::assertSame(['Alpha'], array_column(json_decode((string) $row[8], true, 32, JSON_THROW_ON_ERROR)['fields'], null, 'id')['f_choice']['value']);
     }
 
     public function testFormSuccessUsesCurrentPublishedSettingsAndRejectsUnsafeRedirects(): void
@@ -5605,7 +5625,7 @@ final class IntegrationTest extends TestCase
         self::assertNotFalse($file);
         fwrite($file, substr($csv->body(), 3));
         rewind($file);
-        self::assertSame(['id', 'entry_id', 'node_id', 'created_at_utc', 'name', 'email', 'message', 'model_id'], fgetcsv($file, 0, ',', '"', ''));
+        self::assertSame(['id', 'entry_id', 'node_id', 'created_at_utc', 'name', 'email', 'message', 'model_id', 'fields_json'], fgetcsv($file, 0, ',', '"', ''));
         $rows = [];
         while (($row = fgetcsv($file, 0, ',', '"', '')) !== false) {
             $rows[] = $row;
@@ -5613,6 +5633,7 @@ final class IntegrationTest extends TestCase
         fclose($file);
         self::assertCount(106, $rows);
         self::assertSame(["'-contact", "'=HYPERLINK(\"https://example.test\", \"go\")", "'+sender@example.test", "' \t@SUM(1,1)\nquoted \"text\""], [$rows[105][2], $rows[105][4], $rows[105][5], $rows[105][6]]);
+        self::assertSame('', $rows[105][8], 'Historical rows do not pretend to contain structured values');
         $filtered = $this->send($app, 'GET', '/admin/prime-builder/submissions/export?q=%25');
         self::assertSame(200, $filtered->status());
         self::assertStringContainsString('100%_! marker', $filtered->body());

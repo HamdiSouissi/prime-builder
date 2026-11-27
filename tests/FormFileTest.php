@@ -61,6 +61,11 @@ final class FormFileTest extends TestCase
         self::assertSame('Pièce f_one: notes.txt', explode("\n", $values['message'])[0]);
         self::assertCount(1, $values['files']);
         self::assertSame('f_one', $values['files'][0]['field_id']);
+        $snapshot = json_decode($values['fields_json'], true, 32, JSON_THROW_ON_ERROR);
+        $byId = array_column($snapshot['fields'], null, 'id');
+        self::assertSame(['filename' => 'notes.txt', 'mime' => 'text/plain', 'bytes' => strlen('A private message.')], $byId['f_one']['value']);
+        self::assertNull($byId['f_two']['value']);
+        self::assertStringNotContainsString(base64_encode('A private message.'), $values['fields_json']);
         self::assertNull(Fields::submitted($fields, ['f_one' => null, 'f_two' => null]));
         self::assertNull(Fields::submitted($fields, ['f_one' => $file]));
         self::assertNull(Fields::submitted($fields, ['f_one' => $file, 'f_two' => 'notes.txt']));
