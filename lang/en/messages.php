@@ -125,8 +125,9 @@ return [
     'popup' => [
         'settings' => 'Popup trigger',
         'conditions_help' => 'Inclusions are alternatives; a matching exclusion wins. All matching popups are available.',
-        'priority_help' => 'From −1000 to 1000: invitations are ordered by specificity, then by descending priority.',
-        'consent_help' => 'Automatic triggers offer a non-modal invitation. Visitors can permit automatic opening for this tab and withdraw their choice in the dialog.',
+        'priority_help' => 'From −1000 to 1000: popups are ordered by specificity, then by descending priority.',
+        'automatic_help' => 'Automatic triggers open a modal dialog directly. Avoid interrupting visitors too often.',
+        'hide_logged_in' => 'Do not show to logged-in visitors',
         'trigger' => 'Trigger',
         'trigger_click' => 'Click a link or button',
         'trigger_load' => 'After page load',
@@ -142,11 +143,7 @@ return [
         'frequency_days' => 'Once per period',
         'days' => 'Period length (days, 1 to 365)',
         'link_help' => 'To open on click, use this anchor in a button link. The frequency also limits this link:',
-        'available' => 'A popup is available',
         'frequency_blocked' => 'Already shown during this period.',
-        'auto_opt_in' => 'Allow suggested popups to open automatically in this tab',
-        'open' => 'Open',
-        'dismiss' => 'Dismiss',
         'close' => 'Close',
     ],
     'mail' => [

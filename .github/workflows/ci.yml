@@ -223,16 +223,18 @@ jobs:
           php -r '$db = new PDO("mysql:host=127.0.0.1;dbname=prime_builder", "root", "prime_ci_secret"); echo "MySQL ", $db->query("SELECT VERSION()")->fetchColumn(), PHP_EOL;'
           state="$GITHUB_WORKSPACE/theme-benchmark-state.json"
           php builder/tools/benchmark-theme.php prepare "$GITHUB_WORKSPACE/cms" "$state"
-          echo 'Before: ce7dc7264ae229a4377fbca10382cd3dec31712c'
+          echo 'Before: ce7dc7264ae229a4377fbca10382cd3dec31712c' | tee /tmp/theme-benchmark-results.log
           php builder/tools/benchmark-theme.php measure "$GITHUB_WORKSPACE/cms" "$state" > /dev/null
-          for i in {1..5}; do php builder/tools/benchmark-theme.php measure "$GITHUB_WORKSPACE/cms" "$state"; done
+          for i in {1..5}; do php builder/tools/benchmark-theme.php measure "$GITHUB_WORKSPACE/cms" "$state" | tee -a /tmp/theme-benchmark-results.log; done
           (cd cms && php bin/prime plugin:deactivate prime-builder)
           rsync -a --delete --exclude='.git' builder/ cms/content/plugins/prime-builder/
           (cd cms && php bin/prime plugin:activate prime-builder)
-          echo "After: $(git -C builder rev-parse HEAD)"
+          echo "After: $(git -C builder rev-parse HEAD)" | tee -a /tmp/theme-benchmark-results.log
           php builder/tools/benchmark-theme.php measure "$GITHUB_WORKSPACE/cms" "$state" > /dev/null
-          for i in {1..5}; do php builder/tools/benchmark-theme.php measure "$GITHUB_WORKSPACE/cms" "$state"; done
+          for i in {1..5}; do php builder/tools/benchmark-theme.php measure "$GITHUB_WORKSPACE/cms" "$state" | tee -a /tmp/theme-benchmark-results.log; done
           php builder/tools/benchmark-theme.php cleanup "$GITHUB_WORKSPACE/cms" "$state"
+          while IFS= read -r line; do echo "::notice title=Theme benchmark::$line"; done < /tmp/theme-benchmark-results.log
+          cat /tmp/theme-benchmark-results.log >> "$GITHUB_STEP_SUMMARY"
 
   e2e:
     name: e2e

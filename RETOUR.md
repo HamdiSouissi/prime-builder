@@ -8,7 +8,7 @@ Branche `arena/2d5ecf33-prime-builder`. **A terminé ; B clos pour la V1 par dé
 
 ## Dernière révision observée avant F2
 
-`ce7dc7264ae229a4377fbca10382cd3dec31712c` — [CI 46005332417](https://github.com/HamdiSouissi/prime-builder/actions/runs/46005332417), `completed/success`. Elle précède les changements de la suite n° 5. Un fichier ne peut pas contenir son propre SHA ni les résultats de sa future CI ; vérifier la tête et le run après le dernier push.
+`ce7dc7264ae229a4377fbca10382cd3dec31712c` — [CI 46005332417](https://github.com/HamdiSouissi/prime-builder/actions/runs/46005332417), `completed/success`. Elle précède les changements de la suite n° 5. Le point d’étape de préparation `117882034caab5213a60bd7c34750bb7b040342b` a ensuite passé ses neuf jobs, dont la mesure MySQL 8 : [CI 46050598616](https://github.com/HamdiSouissi/prime-builder/actions/runs/46050598616). Les valeurs chiffrées n’ont pas pu être lues dans ce run ; leur publication en annotations est ajoutée pour les runs suivants. Un fichier ne peut pas contenir son propre SHA ni les résultats de sa future CI ; vérifier la tête et le run après le dernier push.
 
 | Job | État et sortie finale observée |
 |---|---|
@@ -29,7 +29,7 @@ GitHub avertit que des actions Node 20 sont forcées sous Node 24. La CI teste u
 |---|---|---|
 | Cache | Modèle actif et widgets contextuels contournent le cache ; sauvegardes de modèles purgent le cache interne. | Mise en cache des modèles non sensibles, invalidations et test MISS/HIT puis modification. Préserver la confidentialité des données dépendant du visiteur et le contournement des zones sans événement de sauvegarde. |
 | Modèles | Les données complètes des modèles sont lues ensemble et les mises en page sont revalidées au rendu. | Index autoload léger, chargement du gagnant, validation à l’enregistrement, migration et mesure avant/après. |
-| Popups | Déclencheurs, fréquence et dialogue existent ; les déclencheurs automatiques affichent une invitation ; les formulaires sont interdits. | Ouverture directe avec file d’attente, exclusion des visiteurs connectés et formulaires identifiés par modèle/nœud. |
+| Popups | Déclencheurs automatiques directs, file d’attente et option d’exclusion des visiteurs connectés implémentés ; CI de ces changements non encore observée. | Formulaires identifiés par modèle/nœud, protections et envois ; revérifier après modification du cache. |
 | Formulaires | Pièces jointes ≤ 512 Kio en JSON/base64 et base de données ; valeurs personnalisées concaténées en texte. | Multipart, stockage privé disque, limites configurables, DOCX, avertissements PHP, migration des fichiers et champs JSON/CSV structurés. |
 | Rapport | Historique précédent conservé dans [`docs/HISTORIQUE-CI.md`](docs/HISTORIQUE-CI.md). | Maintenir ce rapport à 150 lignes maximum et faire échouer le job `lint` au-delà. |
 
@@ -39,7 +39,7 @@ Les mesures SQL et temps demandées avant/après n’ont pas encore été effect
 
 - **Theme Builder :** six types, conditions et exclusions, priorité, recherche de contenus ; l’intégration dépend des hooks du thème. Les sauvegardes concurrentes ne sont pas atomiques.
 - **Formulaires :** champs et étapes, envois, CSV neutralisé, conservation et notifications par file ; les sauvegardes et journaux externes restent à protéger. Aucune livraison SMTP externe n’a été vérifiée.
-- **Popups :** dialogue natif, clavier et fréquence testés dans le périmètre actuel ; aucun test avec lecteur d’écran réel.
+- **Popups :** dialogue natif, clavier et fréquence ; les modifications F2 ont été parcourues en Chromium avec axe et vues à 1 440/375 px, mais leur CI reste à observer ; aucun test avec lecteur d’écran réel.
 - **Widgets globaux et dynamique :** références partagées bornées, balises et conditions côté serveur ; les aperçus CMS/Customizer et les zones natives utilisent un repli statique. La condition d’appareil par CSS ne protège pas les données.
 - **Cache :** les caches externes et CDN ne sont pas purgés par le plugin. Le noyau ne publie pas d’événement de sauvegarde des zones ; le contournement reste nécessaire. Les pages sensibles doivent continuer à refuser tout cache partagé.
 - **Administration :** menu, capacités, diagnostic, bienvenue, kit et réglages ; CSS de l’éditeur limité à une palette et choix de police limité au thème ou à Inter locale.

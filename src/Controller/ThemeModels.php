@@ -128,6 +128,7 @@ final class ThemeModels
                 'trigger' => $request->body('popup_trigger'), 'delay' => $request->body('popup_delay'),
                 'scroll' => $request->body('popup_scroll'), 'idle' => $request->body('popup_idle'),
                 'frequency' => $request->body('popup_frequency'), 'days' => $request->body('popup_days'),
+                'hide_logged_in' => $request->body('popup_hide_logged_in'),
             ]);
         }
         $priorityValid = is_string($priority) && preg_match('/^-?(0|[1-9][0-9]{0,3})$/D', $priority) === 1 && (int) $priority >= -1000 && (int) $priority <= 1000;

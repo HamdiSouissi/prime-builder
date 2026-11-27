@@ -125,8 +125,9 @@ return [
     'popup' => [
         'settings' => 'Déclenchement de la fenêtre',
         'conditions_help' => 'Les inclusions sont alternatives ; une exclusion correspondante l’emporte. Toutes les fenêtres correspondantes sont disponibles.',
-        'priority_help' => 'De −1000 à 1000 : les invitations sont ordonnées par spécificité, puis par priorité décroissante.',
-        'consent_help' => 'Les déclencheurs automatiques proposent une invitation non modale. Le visiteur peut autoriser l’ouverture automatique pour cet onglet et retirer ce choix dans la fenêtre.',
+        'priority_help' => 'De −1000 à 1000 : les fenêtres sont ordonnées par spécificité, puis par priorité décroissante.',
+        'automatic_help' => 'Les déclencheurs automatiques ouvrent directement une fenêtre modale. Évitez de multiplier les interruptions.',
+        'hide_logged_in' => 'Ne pas afficher aux visiteurs connectés',
         'trigger' => 'Déclencheur',
         'trigger_click' => 'Clic sur un lien ou bouton',
         'trigger_load' => 'Après chargement',
@@ -142,11 +143,7 @@ return [
         'frequency_days' => 'Une fois par période',
         'days' => 'Durée de la période (jours, 1 à 365)',
         'link_help' => 'Pour ouvrir par clic, utilisez cette ancre dans le lien d’un bouton. La fréquence limite aussi ce lien :',
-        'available' => 'Une fenêtre est disponible',
         'frequency_blocked' => 'Déjà affichée pour cette période.',
-        'auto_opt_in' => 'Autoriser l’ouverture automatique des fenêtres proposées dans cet onglet',
-        'open' => 'Ouvrir',
-        'dismiss' => 'Masquer',
         'close' => 'Fermer',
     ],
     'mail' => [

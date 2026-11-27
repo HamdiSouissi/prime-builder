@@ -51,7 +51,8 @@ $renderRule = function (string $group, string $type, string $value): void {
                 <?php if ($model['kind'] === 'popup' && is_array($model['popup'] ?? null)): $popup = $model['popup']; ?>
                     <fieldset class="pb-theme-rules pc-stack pc-stack--md">
                         <legend><?= $this->e(t('plugin::prime-builder.popup.settings')) ?></legend>
-                        <p><?= $this->e(t('plugin::prime-builder.popup.consent_help')) ?></p>
+                        <p><?= $this->e(t('plugin::prime-builder.popup.automatic_help')) ?></p>
+                        <label><input type="checkbox" name="popup_hide_logged_in" value="1"<?= $popup['hide_logged_in'] ? ' checked' : '' ?>> <?= $this->e(t('plugin::prime-builder.popup.hide_logged_in')) ?></label>
                         <div class="pc-field"><label class="pc-label" for="pb-popup-trigger"><?= $this->e(t('plugin::prime-builder.popup.trigger')) ?></label><select class="pc-input" id="pb-popup-trigger" name="popup_trigger"><?php foreach (\PrimeBuilder\Popup\Options::TRIGGERS as $trigger): ?><option value="<?= $this->e($trigger) ?>"<?= $popup['trigger'] === $trigger ? ' selected' : '' ?>><?= $this->e(t('plugin::prime-builder.popup.trigger_' . $trigger)) ?></option><?php endforeach; ?></select></div>
                         <div class="pc-field"><label class="pc-label" for="pb-popup-delay"><?= $this->e(t('plugin::prime-builder.popup.delay')) ?></label><input class="pc-input" id="pb-popup-delay" name="popup_delay" type="number" min="0" max="120" required value="<?= $this->e((string) $popup['delay']) ?>"></div>
                         <div class="pc-field"><label class="pc-label" for="pb-popup-scroll"><?= $this->e(t('plugin::prime-builder.popup.scroll')) ?></label><input class="pc-input" id="pb-popup-scroll" name="popup_scroll" type="number" min="1" max="100" required value="<?= $this->e((string) $popup['scroll']) ?>"></div>

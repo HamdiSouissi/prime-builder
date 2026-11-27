@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace PrimeBuilder\Popup;
 
+use Prime\Auth\Auth;
 use Prime\Plugins\PluginContext;
 use Prime\Settings\Settings;
 use Prime\Site\PageContext;
 use PrimeBuilder\Theme\GlobalWidgets;
 use PrimeBuilder\Theme\Models;
+use PrimeBuilder\Theme\PageRequest;
 use PrimeBuilder\Theme\Partials;
 use PrimeBuilder\Widgets\Renderer;
 
@@ -42,6 +44,17 @@ final class Popups
         }
         $result = [];
         foreach ($this->models->matching('popup', $page) as $model) {
+            $options = Options::normalize($model['popup'] ?? null);
+            if ($options === null) {
+                continue;
+            }
+            if ($options['hide_logged_in']) {
+                $request = $this->plugin->app()->get(PageRequest::class)->request($page);
+                $user = $this->plugin->app()->get(Auth::class)->user($request);
+                if ($user !== null && $user->isActive()) {
+                    continue;
+                }
+            }
             $elements = $model['elements'] ?? null;
             if (!is_array($elements)) {
                 continue;
@@ -55,8 +68,8 @@ final class Popups
     }
 
     /**
-     * A dialog is closed in the HTML. Automatic triggers offer a non-modal,
-     * dismissible invitation unless the visitor explicitly opted in for the tab.
+     * Dialogs are initially closed; the browser script opens automatic triggers
+     * directly using the native modal API.
      *
      * @param array{model: array<string, mixed>, layout: array<string, mixed>} $popup
      */
@@ -71,26 +84,18 @@ final class Popups
         }
         $title = 'pb-popup-title-' . $id;
         $dialog = 'pb-popup-' . $id;
-        $notice = t('plugin::prime-builder.popup.available') . ' : ' . $name;
         $blocked = t('plugin::prime-builder.popup.frequency_blocked');
         $html = '<div class="pb-popup-root" data-pb-popup="' . $id . '"'
             . ' data-pb-trigger="' . self::escape($options['trigger']) . '" data-pb-delay="' . $options['delay'] . '"'
             . ' data-pb-scroll="' . $options['scroll'] . '" data-pb-idle="' . $options['idle'] . '"'
             . ' data-pb-frequency="' . self::escape($options['frequency']) . '" data-pb-days="' . $options['days'] . '"'
-            . ' data-pb-available="' . self::escape($notice) . '" data-pb-blocked="' . self::escape($blocked) . '">'
-            . '<span class="pb-popup-sr" id="pb-popup-blocked-' . $id . '">' . self::escape($blocked) . '</span>';
-        $automaticChoice = '<label class="pb-popup-consent"><input type="checkbox" data-pb-popup-auto> ' . self::escape(t('plugin::prime-builder.popup.auto_opt_in')) . '</label>';
-        if ($options['trigger'] !== 'click') {
-            $html .= '<p class="pb-popup-sr" role="status" aria-live="polite" data-pb-popup-status></p>'
-                . '<aside class="pb-popup-offer" aria-label="' . self::escape($notice) . '" data-pb-popup-offer hidden>'
-                . '<p>' . self::escape($notice) . '</p>' . $automaticChoice . '<div class="pb-popup-offer__actions">'
-                . '<button type="button" data-pb-popup-launch aria-haspopup="dialog" aria-controls="' . $dialog . '" aria-label="' . self::escape(t('plugin::prime-builder.popup.open') . ' : ' . $name) . '">' . self::escape(t('plugin::prime-builder.popup.open')) . '</button>'
-                . '<button type="button" data-pb-popup-dismiss aria-label="' . self::escape(t('plugin::prime-builder.popup.dismiss') . ' : ' . $name) . '">' . self::escape(t('plugin::prime-builder.popup.dismiss')) . '</button></div></aside>';
-        }
+            . ' data-pb-blocked="' . self::escape($blocked) . '">'
+            . '<span class="pb-popup-sr" id="pb-popup-blocked-' . $id . '">' . self::escape($blocked) . '</span>'
+            . '<p class="pb-popup-sr" role="status" aria-live="polite" data-pb-popup-status></p>';
         $html .= '<dialog class="pb-popup-dialog" id="' . $dialog . '" aria-modal="true" aria-labelledby="' . $title . '">'
             . '<div class="pb-popup-dialog__header"><h2 id="' . $title . '">' . self::escape($name) . '</h2>'
             . '<button type="button" data-pb-popup-close aria-label="' . self::escape(t('plugin::prime-builder.popup.close') . ' : ' . $name) . '">' . self::escape(t('plugin::prime-builder.popup.close')) . '</button></div>'
-            . $renderer->render($popup['layout']) . ($options['trigger'] !== 'click' ? $automaticChoice : '') . '</dialog></div>';
+            . $renderer->render($popup['layout']) . '</dialog></div>';
         return $html;
     }
 

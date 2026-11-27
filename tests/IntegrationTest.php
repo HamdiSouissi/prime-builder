@@ -5774,7 +5774,7 @@ final class IntegrationTest extends TestCase
             'include_type' => ['all'], 'include_value' => [''], 'exclude_type' => ['entry'], 'exclude_value' => ['3'],
             'popup_trigger' => 'load', 'popup_delay' => '0', 'popup_scroll' => '25', 'popup_idle' => '5', 'popup_frequency' => 'days', 'popup_days' => '2',
         ];
-        foreach ([['popup_trigger', 'forged'], ['popup_delay', '-1'], ['popup_scroll', '101'], ['popup_idle', '0'], ['popup_frequency', 'once'], ['popup_days', '1e2'], ['popup_days', ['2']]] as [$field, $invalid]) {
+        foreach ([['popup_trigger', 'forged'], ['popup_delay', '-1'], ['popup_scroll', '101'], ['popup_idle', '0'], ['popup_frequency', 'once'], ['popup_days', '1e2'], ['popup_days', ['2']], ['popup_hide_logged_in', ['1']]] as [$field, $invalid]) {
             $bad = $fields;
             $bad[$field] = $invalid;
             self::assertSame(422, $post('/admin/prime-builder/theme/' . $id, $bad)->status(), (string) $field);
@@ -5787,7 +5787,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(302, $post('/admin/prime-builder/theme/' . $id, $fields)->status());
         $after = $models->find($id);
         self::assertNotNull($after);
-        self::assertSame(['trigger' => 'load', 'delay' => 0, 'scroll' => 25, 'idle' => 5, 'frequency' => 'days', 'days' => 2], $after['popup']);
+        self::assertSame(['trigger' => 'load', 'delay' => 0, 'scroll' => 25, 'idle' => 5, 'frequency' => 'days', 'days' => 2, 'hide_logged_in' => false], $after['popup']);
         $second = $create('Deuxième fenêtre');
         self::assertSame(200, $saveLayout($second)->status());
         $fields['name'] = 'Deuxième fenêtre';
@@ -5810,7 +5810,8 @@ final class IntegrationTest extends TestCase
         self::assertLessThan((int) strpos($markup, 'data-pb-popup="' . $second . '"'), (int) strpos($markup, 'data-pb-popup="' . $id . '"'), 'Priority orders equally specific popup invitations');
         self::assertStringContainsString('aria-modal="true"', $markup);
         self::assertStringContainsString('data-pb-trigger="load"', $markup);
-        self::assertStringContainsString('data-pb-popup-offer hidden', $markup);
+        self::assertStringNotContainsString('data-pb-popup-offer', $markup);
+        self::assertStringNotContainsString('data-pb-popup-auto', $markup);
         self::assertStringContainsString('Contenu &amp; sûr', $markup);
         self::assertStringNotContainsString('<script>', $markup);
         self::assertSame(2, preg_match_all('/data-pb-id="(pbt_popup_[a-zA-Z0-9_]+)"/', $markup, $widgetIds));
@@ -5856,7 +5857,15 @@ final class IntegrationTest extends TestCase
         self::assertStringNotContainsString('data-pb-popup="' . $id . '"', (string) $hooks->apply('site.foot', '', $page), 'Unsupported persisted widgets are revalidated');
         $plugin->settings()->set('theme_model.' . $id, $original, false);
         self::assertStringContainsString('data-pb-popup="' . $id . '"', (string) $hooks->apply('site.foot', '', $page));
-        self::assertSame(302, $post('/admin/prime-builder/theme/' . $second . '/delete', [])->status());
+        $fields['name'] = 'Fenêtre de test';
+        $fields['popup_hide_logged_in'] = '1';
+        self::assertSame(302, $post('/admin/prime-builder/theme/' . $id, $fields)->status());
+        self::assertStringNotContainsString('data-pb-popup="' . $id . '"', (string) $hooks->apply('site.foot', '', $page));
+        $app->get(\Prime\Auth\Auth::class)->logout();
+        self::assertStringContainsString('data-pb-popup="' . $id . '"', (string) $hooks->apply('site.foot', '', $page));
+        $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 1));
+        $delete = Request::create('POST', '/admin/prime-builder/theme/' . $second . '/delete', body: ['_csrf_token' => $app->get(Csrf::class)->token()]);
+        self::assertSame(302, $kernel->handle($delete)->status());
         self::assertStringNotContainsString('data-pb-popup="' . $second . '"', (string) $hooks->apply('site.foot', '', $page));
         $app->get(\Prime\Auth\Auth::class)->login($this->user($app, 2));
         self::assertSame(403, $this->send($app, 'GET', '/admin/prime-builder/theme/' . $id)->status());

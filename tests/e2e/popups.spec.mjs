@@ -6,7 +6,7 @@ async function audit(page) {
   expect(result.violations.filter(v => ['serious', 'critical'].includes(v.impact)).map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([]);
 }
 
-test('popup models use explicit, accessible activation, conditions, all triggers and frequency caps', async ({ page, browser }) => {
+test('popup models open accessible dialogs directly, respect triggers, frequency and queues', async ({ page, browser }) => {
   test.setTimeout(240_000);
   const suffix = Date.now().toString(36);
   const title = `Fenêtre ${suffix}`;
@@ -50,7 +50,7 @@ test('popup models use explicit, accessible activation, conditions, all triggers
   await page.goto('/admin/login');
   await page.locator('input[name=email]').fill(process.env.E2E_ADMIN_EMAIL || 'builder@prime.test');
   await page.locator('input[name=password]').fill(process.env.E2E_ADMIN_PASSWORD || 'Cascade-Corail-900!Orbit');
-  await Promise.all([page.waitForURL(/\/admin\/?$/), page.locator('form button[type=submit]').click()]);
+  await Promise.all([page.waitForURL(/\/admin\/?$/, { timeout: 15_000 }), page.locator('form button[type=submit]').click()]);
   try {
     await page.goto('/admin/prime-builder/theme');
     const create = page.locator('form[action="/admin/prime-builder/theme/create"]');
@@ -152,37 +152,24 @@ test('popup models use explicit, accessible activation, conditions, all triggers
     await opener.press('Enter');
     await expect(dialog).toBeHidden();
 
-    // A time trigger offers a button but cannot interrupt a screen reader or move focus.
-    await configure('load', 'always', '1');
+    // Load opens the modal without any visitor action, then respects the tab cap.
+    await visitor.evaluate(popupId => sessionStorage.removeItem(`prime-builder:popup:v1:${popupId}`), id);
+    await configure('load', 'session', '1');
     await visitor.setViewportSize({ width: 1440, height: 900 });
     await visitor.goto(`${includedPath}?popup=load`);
-    const offer = visitor.locator('[data-pb-popup-offer]');
-    await expect(offer).toBeHidden();
-    await expect(offer).toBeVisible({ timeout: 5000 });
     await expect(dialog).toBeHidden();
-    expect(await visitor.evaluate(() => document.activeElement === document.body)).toBe(true);
-    const launch = offer.getByRole('button', { name: `Ouvrir : ${title}` });
-    await launch.focus();
-    await visitor.keyboard.press('Enter');
-    await expect(dialog).toBeVisible();
-    await visitor.keyboard.press('Escape');
-    await expect(launch).toBeFocused();
-    const autoLabel = 'Autoriser l’ouverture automatique des fenêtres proposées dans cet onglet';
-    await offer.getByLabel(autoLabel).check();
-    await offer.getByRole('button', { name: `Masquer : ${title}` }).click();
-    await expect(offer).toBeHidden();
-    await visitor.reload();
     await expect(dialog).toBeVisible({ timeout: 5000 });
     await expect(close).toBeFocused();
-    await expect(dialog.getByLabel(autoLabel)).toBeChecked();
-    await dialog.getByLabel(autoLabel).uncheck();
+    await expect(visitor.locator('[data-pb-popup-offer], [data-pb-popup-auto]')).toHaveCount(0);
+    await audit(visitor);
     await visitor.keyboard.press('Escape');
-    await visitor.reload();
-    await expect(offer).toBeVisible({ timeout: 5000 });
     await expect(dialog).toBeHidden();
-    await offer.getByRole('button', { name: `Masquer : ${title}` }).click();
+    await visitor.reload();
+    await visitor.waitForTimeout(1500);
+    await expect(dialog).toBeHidden();
+    await expect(opener).toHaveAttribute('aria-disabled', 'true');
 
-    // A separately opened native dialog is not covered by an automatic offer.
+    // A different native dialog is never covered; the queued popup follows it.
     await configure('load', 'always', '2');
     await visitor.goto(`${includedPath}?popup=other-dialog`);
     await visitor.evaluate(() => {
@@ -194,56 +181,84 @@ test('popup models use explicit, accessible activation, conditions, all triggers
       other.showModal();
     });
     await visitor.waitForTimeout(2500);
-    await expect(offer).toBeHidden();
     await expect(dialog).toBeHidden();
     await visitor.evaluate(() => document.getElementById('pb-e2e-other-dialog').close());
-    await expect(offer).toBeVisible();
-    await visitor.evaluate(() => document.getElementById('pb-e2e-other-dialog').remove());
-    await offer.getByRole('button', { name: `Masquer : ${title}` }).click();
-
-    await configure('scroll', 'always');
-    await visitor.goto(`${includedPath}?popup=scroll`);
-    await expect(offer).toBeHidden();
-    await visitor.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-    await expect(offer).toBeVisible();
-    await expect(dialog).toBeHidden();
-    await offer.getByRole('button', { name: `Ouvrir : ${title}` }).click();
     await expect(dialog).toBeVisible();
+    await visitor.evaluate(() => document.getElementById('pb-e2e-other-dialog').remove());
     await visitor.keyboard.press('Escape');
+
+    // A trigger in a hidden tab waits until that tab becomes visible.
+    await configure('load', 'always', '0');
+    const hiddenContext = await browser.newContext({ baseURL: test.info().project.use.baseURL });
+    try {
+      await hiddenContext.addInitScript(() => {
+        window.pbHidden = true;
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => window.pbHidden });
+      });
+      const hiddenPage = await hiddenContext.newPage();
+      await hiddenPage.goto(`${includedPath}?popup=hidden`);
+      await hiddenPage.waitForTimeout(500);
+      await expect(hiddenPage.locator(`#pb-popup-${id}`)).toBeHidden();
+      await hiddenPage.evaluate(() => { window.pbHidden = false; document.dispatchEvent(new Event('visibilitychange')); });
+      await expect(hiddenPage.locator(`#pb-popup-${id}`)).toBeVisible();
+      await hiddenPage.keyboard.press('Escape');
+    } finally {
+      await hiddenContext.close();
+    }
+
+    // Scrolling opens directly and is also capped once per session.
+    await visitor.evaluate(popupId => sessionStorage.removeItem(`prime-builder:popup:v1:${popupId}`), id);
+    await configure('scroll', 'session');
+    await visitor.goto(`${includedPath}?popup=scroll`);
+    await expect(dialog).toBeHidden();
+    await visitor.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await expect(dialog).toBeVisible();
+    await audit(visitor);
+    await visitor.keyboard.press('Escape');
+    await visitor.reload();
+    await visitor.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await expect(dialog).toBeHidden();
 
     await configure('exit', 'always');
     await visitor.goto(`${includedPath}?popup=exit`);
-    await expect(offer).toBeHidden();
+    await expect(dialog).toBeHidden();
+    expect(await visitor.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(true);
     await visitor.mouse.move(400, 300);
     await visitor.mouse.move(400, -1);
-    await expect(offer).toBeVisible();
-    await expect(dialog).toBeHidden();
-    await offer.getByRole('button', { name: `Ouvrir : ${title}` }).click();
     await expect(dialog).toBeVisible();
     await visitor.keyboard.press('Escape');
+    const touchContext = await browser.newContext({ baseURL: test.info().project.use.baseURL, hasTouch: true, isMobile: true, viewport: { width: 375, height: 812 } });
+    try {
+      const touch = await touchContext.newPage();
+      await touch.goto(`${includedPath}?popup=coarse`);
+      expect(await touch.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(false);
+      await touch.evaluate(() => document.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, clientY: -1 })));
+      await touch.waitForTimeout(300);
+      await expect(touch.locator(`#pb-popup-${id}`)).toBeHidden();
+    } finally {
+      await touchContext.close();
+    }
 
     await configure('idle', 'always');
     await visitor.goto(`${includedPath}?popup=idle`);
-    await expect(offer).toBeHidden();
-    await visitor.keyboard.press('Tab');
-    await expect(offer).toBeVisible({ timeout: 8000 });
     await expect(dialog).toBeHidden();
-    await offer.getByRole('button', { name: `Ouvrir : ${title}` }).click();
-    await expect(dialog).toBeVisible();
+    await visitor.keyboard.press('Tab');
+    await expect(dialog).toBeVisible({ timeout: 8000 });
     await visitor.keyboard.press('Escape');
 
     await configure('load', 'days');
     await visitor.goto(`${includedPath}?popup=days`);
-    await expect(offer).toBeVisible();
-    await offer.getByRole('button', { name: `Masquer : ${title}` }).click();
+    await expect(dialog).toBeVisible();
+    await visitor.keyboard.press('Escape');
     await visitor.reload();
-    await expect(offer).toBeHidden();
+    await expect(dialog).toBeHidden();
     await expect(opener).toHaveAttribute('aria-disabled', 'true');
     const key = `prime-builder:popup:v1:${id}`;
     expect(Number(await visitor.evaluate(key => localStorage.getItem(key), key))).toBeGreaterThan(Date.now());
     await visitor.evaluate(key => localStorage.setItem(key, String(Date.now() - 1)), key);
     await visitor.reload();
-    await expect(offer).toBeVisible();
+    await expect(dialog).toBeVisible();
+    await visitor.keyboard.press('Escape');
 
     const noStorage = await browser.newContext({ baseURL: test.info().project.use.baseURL });
     try {
@@ -252,18 +267,31 @@ test('popup models use explicit, accessible activation, conditions, all triggers
       const restrictedErrors = [];
       restricted.on('pageerror', error => restrictedErrors.push(error.message));
       await restricted.goto(`${includedPath}?popup=storage-blocked`);
-      const restrictedOffer = restricted.locator('[data-pb-popup-offer]');
-      await expect(restrictedOffer).toBeVisible();
-      await restrictedOffer.getByRole('button', { name: `Masquer : ${title}` }).click();
+      const restrictedDialog = restricted.locator(`#pb-popup-${id}`);
+      await expect(restrictedDialog).toBeVisible();
+      await restricted.keyboard.press('Escape');
       await expect(restricted.getByRole('link', { name: 'Ouvrir la fenêtre' })).toHaveAttribute('aria-disabled', 'true');
       await restricted.reload();
-      await expect(restrictedOffer).toBeVisible();
+      await expect(restrictedDialog).toBeVisible();
       expect(restrictedErrors).toEqual([]);
     } finally {
       await noStorage.close();
     }
 
-    // Simultaneous offers are queued by priority instead of covering each other.
+    // Authenticated visitors do not receive a popup marked as guest-only.
+    await configure('load', 'always');
+    await page.getByLabel('Ne pas afficher aux visiteurs connectés').check();
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await page.goto(`${includedPath}?popup=logged-in`);
+    await expect(page.locator(`#pb-popup-${id}`)).toHaveCount(0);
+    await visitor.goto(`${includedPath}?popup=guest-only`);
+    await expect(dialog).toBeVisible();
+    await visitor.keyboard.press('Escape');
+    await page.goto(`/admin/prime-builder/theme/${id}`);
+    await page.getByLabel('Ne pas afficher aux visiteurs connectés').uncheck();
+    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+
+    // Simultaneous dialogs are queued by priority, not layered over each other.
     await configure('load', 'always');
     await page.goto('/admin/prime-builder/theme');
     await create.getByLabel('Nom du modèle').fill(`Autre fenêtre ${suffix}`);
@@ -289,21 +317,13 @@ test('popup models use explicit, accessible activation, conditions, all triggers
     try {
       const queued = await queueContext.newPage();
       await queued.goto(`${includedPath}?popup=queue`);
-      const firstOffer = queued.locator(`[data-pb-popup="${id}"] [data-pb-popup-offer]`);
-      const secondOffer = queued.locator(`[data-pb-popup="${otherId}"] [data-pb-popup-offer]`);
-      await expect(firstOffer).toBeVisible();
-      await expect(secondOffer).toBeHidden();
-      await firstOffer.getByRole('button', { name: `Ouvrir : ${title}` }).click();
-      await expect(queued.locator(`#pb-popup-${id}`)).toBeVisible();
-      await expect(secondOffer).toBeHidden();
-      await queued.keyboard.press('Escape');
-      await firstOffer.getByLabel(autoLabel).check();
-      await firstOffer.getByRole('button', { name: `Masquer : ${title}` }).click();
+      const firstDialog = queued.locator(`#pb-popup-${id}`);
       const secondDialog = queued.locator(`#pb-popup-${otherId}`);
+      await expect(firstDialog).toBeVisible();
+      await expect(secondDialog).toBeHidden();
+      await queued.keyboard.press('Escape');
+      await expect(firstDialog).toBeHidden();
       await expect(secondDialog).toBeVisible();
-      await expect(secondOffer).toBeHidden();
-      await expect(secondDialog.getByLabel(autoLabel)).toBeChecked();
-      await secondDialog.getByLabel(autoLabel).uncheck();
       await queued.keyboard.press('Escape');
       await expect(secondDialog).toBeHidden();
     } finally {
