@@ -61,6 +61,21 @@ jobs:
                           messages = [row.get('message', '') for row in library if row.get('type') == 'log' and row.get('callId') == call.get('callId')]
                           for message in messages[-12:]:
                               print(message[:220])
+              print('\nModel-form submit network records (response headers and synthetic JSON only):')
+              for name in archive.namelist():
+                  if not name.endswith('.network'):
+                      continue
+                  for line in archive.read(name).splitlines():
+                      row = json.loads(line).get('snapshot', {})
+                      req, res = row.get('request', {}), row.get('response', {})
+                      if req.get('method') != 'POST' or '/api/prime-builder/v1/forms/models/' not in req.get('url', ''):
+                          continue
+                      headers = {h['name'].lower(): h['value'] for h in res.get('headers', []) if h['name'].lower() in ('content-length', 'content-type', 'connection', 'transfer-encoding')}
+                      content = res.get('content', {})
+                      print(f"{name} endpoint={req['url'].rsplit('/', 1)[-1]} status={res.get('status')} time_ms={row.get('time')} bytes={res.get('bodySize')} content={content.get('size')} headers={headers}")
+                      body = content.get('_file')
+                      if body and body in archive.namelist() and content.get('size', 99999) < 1024:
+                          print('response body:', archive.read(body).decode('utf-8', 'replace'))
           PY
           split -b 2700 /tmp/model-form-summary /tmp/model-form-summary-
           for part in /tmp/model-form-summary-??; do

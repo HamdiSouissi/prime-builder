@@ -3,10 +3,15 @@ import { readFileSync } from 'node:fs';
 
 test('model and popup forms submit independently for visitors and signed-in users', async ({ page, browser }) => {
   test.setTimeout(180_000);
+  // Do not let an individual locator or navigation consume the entire test
+  // budget: a failure must leave time for cleanup and report its real cause.
+  page.setDefaultTimeout(20_000);
+  page.setDefaultNavigationTimeout(30_000);
   const suffix = Date.now().toString(36);
   const models = [];
   let entryId = null;
   let visitorContext;
+  let primaryError = null;
   const modelForm = { id: 'contact', type: 'form', settings: {}, styles: {}, children: [] };
   const docx = readFileSync(new URL('./fixtures/contact-sample.docx', import.meta.url));
   const field = (id, type, label) => ({ id, type, label, required: true, step: 1, options: [], value: '' });
@@ -18,7 +23,7 @@ test('model and popup forms submit independently for visitors and signed-in user
   async function api(url, method, body) {
     return page.evaluate(async ({ url, method, body }) => {
       const csrf = document.querySelector('meta[name="csrf-token"]').content;
-      const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      const response = await fetch(url, { method, signal: AbortSignal.timeout(20_000), headers: { 'Content-Type': 'application/json', 'X-Prime-CSRF': csrf, Accept: 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
       return { status: response.status, body: await response.text() };
     }, { url, method, body });
   }
@@ -70,11 +75,14 @@ test('model and popup forms submit independently for visitors and signed-in user
       await upload.setInputFiles({ name: 'demande.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: docx });
     }
     const endpoint = hasFile ? 'submit-multipart' : 'submit';
-    const sent = currentPage.waitForResponse(response => response.url().endsWith(`/api/prime-builder/v1/forms/${routeId}/${endpoint}`) && response.request().method() === 'POST', { timeout: 30_000 });
-    await button.click();
-    const response = await sent;
-    expect(response.status(), await response.text()).toBe(201);
+    const [response] = await Promise.all([
+      currentPage.waitForResponse(response => response.url().endsWith(`/api/prime-builder/v1/forms/${routeId}/${endpoint}`) && response.request().method() === 'POST', { timeout: 30_000 }),
+      button.click(),
+    ]);
+    expect(response.status(), `Unexpected ${endpoint} status for ${routeId}`).toBe(201);
     if (hasFile) expect((await response.request().allHeaders())['content-type']).toMatch(/^multipart\/form-data; boundary=/);
+    // The UI only announces success after parsing accepted=true. Reading the
+    // same body again through Playwright can hang even after response headers.
     await expect(form.locator('[data-pb-form-status]')).toHaveText('Votre message a été enregistré.');
     return response;
   }
@@ -92,6 +100,8 @@ test('model and popup forms submit independently for visitors and signed-in user
     const popup = await createModel('popup');
     const path = `/pb-model-form-${suffix}`;
     visitorContext = await browser.newContext({ baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    visitorContext.setDefaultTimeout(20_000);
+    visitorContext.setDefaultNavigationTimeout(30_000);
     const visitor = await visitorContext.newPage();
     await visitor.goto(path);
     const popupForm = visitor.locator(`[data-pb-popup="${popup}"] [data-pb-form]`);
@@ -126,31 +136,48 @@ test('model and popup forms submit independently for visitors and signed-in user
     await expect(submissions.filter({ hasText: `header-${suffix}@example.test` })).toContainText(`${header} / contact`);
     const popupSubmission = submissions.filter({ hasText: `popup-${suffix}@example.test` });
     await expect(popupSubmission).toContainText(`${popup} / contact`);
-    const downloaded = page.waitForEvent('download');
-    await popupSubmission.getByRole('link', { name: 'demande.docx' }).click();
-    const download = await downloaded;
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 20_000 }),
+      popupSubmission.getByRole('link', { name: 'demande.docx' }).click(),
+    ]);
     expect(download.suggestedFilename()).toBe('demande.docx');
     expect(readFileSync(await download.path())).toEqual(docx);
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    if (visitorContext) await visitorContext.close();
-    await page.goto('/admin/prime-builder/submissions');
-    await page.getByLabel('Rechercher dans les envois').fill(suffix);
-    await page.locator('form[role="search"]').getByRole('button', { name: 'Rechercher', exact: true }).click();
-    while (await page.locator('[data-pb-submission-id]').count()) {
-      await page.locator('[data-pb-submission-id]').first().getByRole('button', { name: /Supprimer l’envoi/ }).click();
-      await page.getByLabel('Rechercher dans les envois').fill(suffix);
-      await page.locator('form[role="search"]').getByRole('button', { name: 'Rechercher', exact: true }).click();
-    }
-    await page.goto('/admin/prime-builder/theme');
-    for (const id of models) {
-      const form = page.locator(`form[action="/admin/prime-builder/theme/${id}/delete"]`);
-      if (await form.count()) { await form.locator('button').click(); await page.goto('/admin/prime-builder/theme'); }
-    }
-    if (entryId !== null) {
-      const trashed = await api(`/api/v1/content/page/${entryId}`, 'DELETE');
-      expect(trashed.status, trashed.body).toBe(200);
-      const deleted = await api(`/api/v1/content/page/${entryId}?force=1`, 'DELETE');
-      expect(deleted.status, deleted.body).toBe(204);
+    try {
+      if (visitorContext) await visitorContext.close();
+      const search = `/admin/prime-builder/submissions?q=${encodeURIComponent(suffix)}`;
+      await page.goto(search);
+      let rows = page.locator('[data-pb-submission-id]').filter({ hasText: suffix });
+      // This scenario creates at most four submissions. Bound cleanup, and
+      // prove each selected row disappears before attempting the next one.
+      for (let attempt = 0; attempt < 4 && await rows.count(); attempt++) {
+        const id = await rows.first().getAttribute('data-pb-submission-id');
+        expect(id).toMatch(/^[1-9][0-9]*$/);
+        await rows.first().getByRole('button', { name: /Supprimer l’envoi/ }).click();
+        await page.goto(search);
+        await expect(page.locator(`[data-pb-submission-id="${id}"]`)).toHaveCount(0);
+        rows = page.locator('[data-pb-submission-id]').filter({ hasText: suffix });
+      }
+      await expect(rows).toHaveCount(0);
+      await page.goto('/admin/prime-builder/theme');
+      for (const id of models) {
+        const form = page.locator(`form[action="/admin/prime-builder/theme/${id}/delete"]`);
+        if (await form.count()) { await form.locator('button').click(); await page.goto('/admin/prime-builder/theme'); }
+      }
+      if (entryId !== null) {
+        const trashed = await api(`/api/v1/content/page/${entryId}`, 'DELETE');
+        expect(trashed.status, trashed.body).toBe(200);
+        const deleted = await api(`/api/v1/content/page/${entryId}?force=1`, 'DELETE');
+        expect(deleted.status, deleted.body).toBe(204);
+      }
+    } catch (cleanupError) {
+      // Keep the original assertion/timeout visible instead of replacing it
+      // with a secondary error after Playwright closes the browser.
+      if (primaryError) console.error('Model form cleanup failed after the primary error:', cleanupError);
+      else throw cleanupError;
     }
   }
 });
