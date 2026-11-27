@@ -4,13 +4,13 @@
 
 Branche `arena/2d5ecf33-prime-builder`. **A terminé ; B clos pour la V1 par décision du demandeur ; D, E et F acceptés.** B n’a pas été rouvert. La suite n° 5 a été traitée dans l’ordre F2, puis vérification de C et G. La version du manifeste est **1.0.3** ; le produit reste partiel et n’est pas garanti prêt pour la production.
 
-**F2 : implémenté et vérifié localement ; CI de la version 1.0.3 encore à observer.** C et G ont été revérifiés localement sur les deux CMS après F2. La suite n° 4 citée par le demandeur n’est pas présente dans ce dépôt ; sa structure de rapport exacte ne peut pas être vérifiée ici. L’ancien tableau détaillé et les runs historiques sont archivés dans [`docs/HISTORIQUE-CI.md`](docs/HISTORIQUE-CI.md) : leurs états ne constituent pas la preuve de cette version.
+**F2 : implémenté et vérifié localement ; première CI 1.0.3 échouée, diagnostic en cours.** C et G ont été revérifiés localement sur les deux CMS après F2. La suite n° 4 citée par le demandeur n’est pas présente dans ce dépôt ; sa structure de rapport exacte ne peut pas être vérifiée ici. L’ancien tableau détaillé et les runs historiques sont archivés dans [`docs/HISTORIQUE-CI.md`](docs/HISTORIQUE-CI.md) : leurs états ne constituent pas la preuve de cette version.
 
 ## Dernière CI verte observée
 
 [`fdfe49c0363cddd00be8ce7f4ce8150dfa9b2d2a` — CI 46068809758](https://github.com/HamdiSouissi/prime-builder/actions/runs/46068809758) : neuf jobs `success`, avant le stockage sur disque et les derniers correctifs de concurrence/cache. PHPUnit/MySQL 8 : `268 tests, 7888 assertions` sur CMS `main` et `268 tests, 7892 assertions` sur CMS 1.0.1 ; Node `61/61` ; Playwright `122 passed`. Le ZIP neuf et le cycle de vie sont testés par la CLI, pas par le téléversement ZIP de l’interface. Un fichier ne peut pas contenir son propre SHA ni les résultats de sa future CI ; vérifier la tête et son run après le dernier push.
 
-L’étape précédente [CI 46067299434](https://github.com/HamdiSouissi/prime-builder/actions/runs/46067299434) a eu huit jobs verts et un délai dépassé dans le parcours modèle (121 tests navigateur réussis) ; la cause exacte n’a pas été établie. La CI suivante ci-dessus est verte.
+[CI 46077033490](https://github.com/HamdiSouissi/prime-builder/actions/runs/46077033490), SHA `04ea4a14d5aa022ed99b450b39499112cf97e7ed` : huit jobs verts, mais parcours modèle en délai dépassé, avec 123 autres tests navigateur réussis, dont le nouveau test HTTP. Les courses et la désinstallation CI ont été sautées ; diagnostic en cours. L’étape précédente [CI 46067299434](https://github.com/HamdiSouissi/prime-builder/actions/runs/46067299434) avait rencontré le même symptôme (121 tests navigateur réussis), sans cause établie ; la CI suivante ci-dessus est verte.
 
 ## Suite n° 5 — F2
 
