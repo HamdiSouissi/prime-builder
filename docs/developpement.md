@@ -209,6 +209,12 @@ php bin/prime lang:check --strict
 npm test
 # Mesure indicative sur la fixture SQLite du CMS (copie du plugin à jour requise)
 php tools/benchmark.php /chemin/vers/prime-cms
+# Comparaison Theme Builder avant/après sur MySQL 8 dans le job « benchmark ».
+# Outil destructif : ne viser qu’un CMS jetable sans modèle existant ; état hors du CMS.
+export PB_BENCH_DISPOSABLE=1 PB_BENCH_ADMIN_EMAIL=builder@prime.test
+php tools/benchmark-theme.php prepare /chemin/vers/cms-jetable /chemin/vers/etat.json
+php tools/benchmark-theme.php measure /chemin/vers/cms-jetable /chemin/vers/etat.json
+php tools/benchmark-theme.php cleanup /chemin/vers/cms-jetable /chemin/vers/etat.json
 cd tests/e2e
 npm ci --no-audit --no-fund
 npx playwright install --with-deps chromium
