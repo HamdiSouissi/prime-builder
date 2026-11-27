@@ -22,12 +22,21 @@ runs:
       env:
         CMS_REF: ${{ inputs.cms-ref }}
       run: |
-        git clone --depth 1 --branch main https://github.com/HamdiSouissi/prime-cms.git cms
-        if [[ "$CMS_REF" != main ]]; then
-          git -C cms fetch --depth 1 origin "$CMS_REF"
-          git -C cms checkout --detach FETCH_HEAD
-        fi
-        git -C cms rev-parse HEAD
+        set -o pipefail
+        clone_cms() {
+          git clone --depth 1 --branch main https://github.com/HamdiSouissi/prime-cms.git cms || return
+          if [[ "$CMS_REF" != main ]]; then
+            git -C cms fetch --depth 1 origin "$CMS_REF" || return
+            git -C cms checkout --detach FETCH_HEAD || return
+          fi
+          git -C cms rev-parse HEAD
+        }
+        log="$RUNNER_TEMP/prime-builder-cms-clone.log"
+        clone_cms 2>&1 | tee "$log" || {
+          status=$?
+          echo "::error title=CMS clone log (base64)::$(tail -80 "$log" | base64 -w0)"
+          exit "$status"
+        }
     - name: Copy plugin
       if: inputs.copy-plugin == 'true'
       shell: bash
