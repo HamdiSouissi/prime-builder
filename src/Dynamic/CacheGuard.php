@@ -55,6 +55,10 @@ final class CacheGuard
     public function sensitive(): bool
     {
         try {
+            // Settings memoizes autoloaded values within the application. A
+            // separate process may have committed a sensitive model since the
+            // previous check, so refresh both before lookup and before storage.
+            $this->models->refresh();
             if ($this->zones->hasSavedDeclaredZone()) {
                 return true;
             }
@@ -67,7 +71,6 @@ final class CacheGuard
             }
             // Includes globals: a definition can be embedded on arbitrary pages.
             // The signed directory records sensitivity without loading layouts.
-            $this->models->invalidate();
             foreach ($this->models->index() as $model) {
                 if (($model['dynamic'] ?? null) !== false) {
                     return true;

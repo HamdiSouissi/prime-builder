@@ -104,8 +104,11 @@ final class FormFileTest extends TestCase
         self::assertContains('post_max', $warnings);
         self::assertContains('api_max', $warnings);
         self::assertContains('file_count', $warnings);
+        $legacyOnly = UploadLimits::warnings($limits, 2200, '2M', '4M', '4', 'On');
+        self::assertNotContains('api_max', $legacyOnly);
+        self::assertContains('api_json_max', $legacyOnly);
         $ok = UploadLimits::warnings($limits, 4096, '2M', '4M', '4', 'On');
-        foreach (['disabled', 'upload_max', 'post_max', 'api_max', 'file_count'] as $warning) {
+        foreach (['disabled', 'upload_max', 'post_max', 'api_max', 'api_json_max', 'file_count'] as $warning) {
             self::assertNotContains($warning, $ok);
         }
     }

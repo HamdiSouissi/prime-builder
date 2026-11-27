@@ -6,6 +6,8 @@ namespace PrimeBuilder\Forms;
 
 use Prime\Database\Connection;
 use Prime\Database\Exception\QueryException;
+use RuntimeException;
+use Throwable;
 
 /** Fixed contact-form submissions, independent of public files and never storing an IP address. */
 final class Submissions
@@ -13,6 +15,7 @@ final class Submissions
     public const TABLE = 'prime_builder_submissions';
     public const TOKEN_TABLE = 'prime_builder_form_tokens';
     public const FILE_TABLE = 'prime_builder_form_files';
+    public const FILE_GC_TABLE = 'prime_builder_form_file_gc';
     public const NOTIFICATION_TABLE = 'prime_builder_form_notifications';
     public const RETENTION_DAYS = 30;
     public const MAX_RETENTION_DAYS = 3650;
@@ -20,7 +23,7 @@ final class Submissions
     public const EXPORT_MAX_ROWS = 5000;
     public const EXPORT_MAX_BYTES = 8 * 1024 * 1024;
 
-    public function __construct(private readonly Connection $db)
+    public function __construct(private readonly Connection $db, private readonly ?PrivateFiles $storage = null)
     {
     }
 
@@ -31,39 +34,60 @@ final class Submissions
      */
     public function create(int $entryId, string $node, array $values, string $tokenHash, int $now, ?callable $enqueue = null, ?string $modelId = null): bool
     {
-        try {
-            $this->db->transaction(function () use ($entryId, $node, $values, $tokenHash, $now, $enqueue, $modelId): void {
-                // Keep a short-lived digest separately, so deleting a message does not
-                // make its still-valid token reusable. Both inserts succeed or neither does.
-                $this->db->table(self::TOKEN_TABLE)->insert([
-                    'token_hash' => $tokenHash,
-                    'expires_at' => gmdate('Y-m-d H:i:s', $now + Tokens::MAX_SECONDS),
-                ]);
-                $submissionId = $this->db->table(self::TABLE)->insertGetId([
-                    'entry_id' => $entryId,
-                    'node_id' => $node,
-                    'model_id' => $modelId,
-                    'fields_json' => $values['fields_json'] ?? null,
-                    'sender_name' => $values['name'],
-                    'sender_email' => $values['email'],
-                    'message' => $values['message'],
-                    'created_at' => gmdate('Y-m-d H:i:s', $now),
-                ]);
-                foreach ($values['files'] ?? [] as $file) {
-                    $this->db->table(self::FILE_TABLE)->insert(['submission_id' => $submissionId] + $file);
-                }
-                if ($enqueue !== null) {
-                    $enqueue($submissionId);
-                }
-            });
-            return true;
-        } catch (QueryException $exception) {
-            // The unique digest also prevents concurrent duplicate submissions.
-            if ($this->db->table(self::TOKEN_TABLE)->where('token_hash', '=', $tokenHash)->exists()) {
-                return false;
-            }
-            throw $exception;
+        $hasFiles = ($values['files'] ?? []) !== [];
+        if ($hasFiles && ($this->storage === null || $this->db->transactionLevel() !== 0 || $this->db->pdo()->inTransaction())) {
+            // The lock must span the actual database commit, not just a nested
+            // savepoint, or another process could collect an uncommitted file.
+            throw new RuntimeException('Private file writes require storage and an outermost transaction.');
         }
+        $create = function () use ($entryId, $node, $values, $tokenHash, $now, $enqueue, $modelId): bool {
+            $written = [];
+            try {
+                $this->db->transaction(function () use ($entryId, $node, $values, $tokenHash, $now, $enqueue, $modelId, &$written): void {
+                    // A used token, the submission, file references and queued jobs
+                    // commit together; file contents themselves never enter SQL.
+                    $this->db->table(self::TOKEN_TABLE)->insert([
+                        'token_hash' => $tokenHash,
+                        'expires_at' => gmdate('Y-m-d H:i:s', $now + Tokens::MAX_SECONDS),
+                    ]);
+                    $submissionId = $this->db->table(self::TABLE)->insertGetId([
+                        'entry_id' => $entryId,
+                        'node_id' => $node,
+                        'model_id' => $modelId,
+                        'fields_json' => $values['fields_json'] ?? null,
+                        'sender_name' => $values['name'],
+                        'sender_email' => $values['email'],
+                        'message' => $values['message'],
+                        'created_at' => gmdate('Y-m-d H:i:s', $now),
+                    ]);
+                    foreach ($values['files'] ?? [] as $file) {
+                        $bytes = base64_decode($file['content_base64'], true);
+                        if (!is_string($bytes) || strlen($bytes) !== $file['bytes'] || $this->storage === null) {
+                            throw new RuntimeException('Invalid private file data.');
+                        }
+                        $saved = $this->storage->write($bytes);
+                        $written[] = $saved['key'];
+                        $this->db->table(self::FILE_TABLE)->insert([
+                            'submission_id' => $submissionId, 'field_id' => $file['field_id'], 'field_label' => $file['field_label'],
+                            'filename' => $file['filename'], 'mime' => $file['mime'], 'bytes' => $file['bytes'],
+                            'content_base64' => '', 'storage_key' => $saved['key'], 'content_sha256' => $saved['sha256'],
+                        ]);
+                    }
+                    if ($enqueue !== null) {
+                        $enqueue($submissionId);
+                    }
+                });
+                return true;
+            } catch (Throwable $exception) {
+                $this->discardUnreferenced($written);
+                // The unique digest also prevents concurrent duplicate submissions.
+                if ($exception instanceof QueryException && $this->db->table(self::TOKEN_TABLE)->where('token_hash', '=', $tokenHash)->exists()) {
+                    return false;
+                }
+                throw $exception;
+            }
+        };
+        return $hasFiles ? $this->storage->locked($create) : $create();
     }
 
     /**
@@ -156,35 +180,75 @@ final class Submissions
         return $this->db->table(self::FILE_TABLE)->where('submission_id', '=', $submissionId)->where('id', '=', $fileId)->first();
     }
 
+    /**
+     * @param array<string, mixed> $row
+     * @return array{filename: string, bytes: int, content: string}|null
+     */
+    public function fileContents(array $row): ?array
+    {
+        $key = $row['storage_key'] ?? null;
+        if (is_string($key) && $key !== '') {
+            if ($this->storage === null || !is_string($row['content_sha256'] ?? null)
+                || preg_match('/^[a-f0-9]{64}$/D', $row['content_sha256']) !== 1) {
+                return null;
+            }
+            $contents = $this->storage->read($key);
+            if ($contents === null || !hash_equals($row['content_sha256'], hash('sha256', $contents))) {
+                return null;
+            }
+            $encoded = base64_encode($contents);
+        } else {
+            // A failed or pending migration never removes the legacy copy.
+            $encoded = $row['content_base64'] ?? null;
+        }
+        $checked = FileInput::validate(['name' => $row['filename'] ?? null, 'content' => $encoded], UploadLimits::MAX_KB * 1024);
+        if ($checked === null || $checked['bytes'] !== (int) ($row['bytes'] ?? 0) || $checked['mime'] !== ($row['mime'] ?? null)) {
+            return null;
+        }
+        $contents = base64_decode($checked['content_base64'], true);
+        return is_string($contents) ? ['filename' => $checked['filename'], 'bytes' => $checked['bytes'], 'content' => $contents] : null;
+    }
+
     public function delete(int $id): bool
     {
         if ($id <= 0) {
             return false;
         }
-        return $this->db->transaction(function () use ($id): bool {
+        $nested = $this->db->transactionLevel() !== 0 || $this->db->pdo()->inTransaction();
+        $deleted = $this->db->transaction(function () use ($id): bool {
             // The worker takes this same row lock until delivery is complete. A
             // successful deletion cannot be followed by a previously reserved job.
             $this->lock($id);
+            $this->queueFileGarbage('WHERE f.`submission_id` = ?', [$id]);
             $this->deleteJobs('WHERE `submission_id` = ?', [$id]);
             $this->db->table(self::NOTIFICATION_TABLE)->where('submission_id', '=', $id)->delete();
             $this->db->table(self::FILE_TABLE)->where('submission_id', '=', $id)->delete();
             return $this->db->table(self::TABLE)->where('id', '=', $id)->delete() > 0;
         });
+        if (!$nested) {
+            $this->drainAfterCommit();
+        }
+        return $deleted;
     }
 
     public function purge(int $now, int $retentionDays = self::RETENTION_DAYS): int
     {
         $days = self::retentionDays($retentionDays);
         $cutoff = gmdate('Y-m-d H:i:s', $now - $days * 86400);
+        $nested = $this->db->transactionLevel() !== 0 || $this->db->pdo()->inTransaction();
         $messages = $this->db->transaction(function () use ($cutoff): int {
             // Serialize with a worker already sending one of these submissions.
             $this->db->update('UPDATE `' . $this->db->prefixed(self::TABLE) . '` SET `id` = `id` WHERE `created_at` < ?', [$cutoff]);
             $old = 'SELECT `id` FROM `' . $this->db->prefixed(self::TABLE) . '` WHERE `created_at` < ?';
+            $this->queueFileGarbage('WHERE f.`submission_id` IN (' . $old . ')', [$cutoff]);
             $this->deleteJobs('WHERE `submission_id` IN (' . $old . ')', [$cutoff]);
             $this->db->delete('DELETE FROM `' . $this->db->prefixed(self::NOTIFICATION_TABLE) . '` WHERE `submission_id` IN (' . $old . ')', [$cutoff]);
             $this->db->delete('DELETE FROM `' . $this->db->prefixed(self::FILE_TABLE) . '` WHERE `submission_id` IN (' . $old . ')', [$cutoff]);
             return $this->db->table(self::TABLE)->where('created_at', '<', $cutoff)->delete();
         });
+        if (!$nested) {
+            $this->drainAfterCommit();
+        }
         $tokens = $this->db->table(self::TOKEN_TABLE)->where('expires_at', '<=', gmdate('Y-m-d H:i:s', $now))->delete();
         return $messages + $tokens;
     }
@@ -192,19 +256,61 @@ final class Submissions
     /** Cancel pending and reserved notifications before the CMS drops the tables on uninstall. */
     public function deleteAll(): void
     {
-        $this->db->transaction(function (): void {
+        $nested = $this->db->transactionLevel() !== 0 || $this->db->pdo()->inTransaction();
+        $schema = $this->db->schema();
+        $hasStorage = $schema->hasTable(self::FILE_GC_TABLE) && $schema->hasColumn(self::FILE_TABLE, 'storage_key');
+        $this->db->transaction(function () use ($hasStorage): void {
             $this->db->update('UPDATE `' . $this->db->prefixed(self::TABLE) . '` SET `id` = `id`');
+            if ($hasStorage) {
+                $this->queueFileGarbage('WHERE 1 = 1', []);
+            }
             $this->deleteJobs('', []);
             $this->db->delete('DELETE FROM `' . $this->db->prefixed(self::NOTIFICATION_TABLE) . '`');
             $this->db->delete('DELETE FROM `' . $this->db->prefixed(self::FILE_TABLE) . '`');
             $this->db->delete('DELETE FROM `' . $this->db->prefixed(self::TABLE) . '`');
         });
+        if (!$nested && $hasStorage) {
+            $this->drainAfterCommit();
+        }
     }
 
     /** Take an exclusive row lock without altering the stored submission. Must be called inside a transaction. */
     public function lock(int $id): void
     {
         $this->db->update('UPDATE `' . $this->db->prefixed(self::TABLE) . '` SET `id` = `id` WHERE `id` = ?', [$id]);
+    }
+
+    /** @param list<int|string> $bindings */
+    private function queueFileGarbage(string $where, array $bindings): void
+    {
+        FileMaintenance::queue($this->db, $where, $bindings);
+    }
+
+    /** @param list<string> $keys */
+    private function discardUnreferenced(array $keys): void
+    {
+        if ($this->storage !== null && $keys !== []) {
+            (new FileMaintenance($this->db, $this->storage))->discardUnreferenced($keys);
+        }
+    }
+
+    private function drainAfterCommit(): void
+    {
+        if ($this->storage === null) {
+            return;
+        }
+        try {
+            if (!$this->db->table(self::FILE_GC_TABLE)->exists()) {
+                return;
+            }
+            // The periodic job handles the directory sweep; deleting one
+            // submission should only process committed queue entries.
+            (new FileMaintenance($this->db, $this->storage))->collect(time(), sweep: false);
+        } catch (Throwable) {
+            // The durable queue remains for the scheduler. Do not imply that a
+            // committed database deletion was rolled back by an I/O failure.
+            error_log('Prime Builder: private file cleanup is pending.');
+        }
     }
 
     /** @param list<int|string> $bindings */

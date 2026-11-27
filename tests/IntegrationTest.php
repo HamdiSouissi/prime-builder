@@ -5258,11 +5258,43 @@ final class IntegrationTest extends TestCase
         $fakeUpload = ['name' => 'private.txt', 'type' => 'text/plain', 'tmp_name' => __FILE__, 'error' => UPLOAD_ERR_OK, 'size' => 4];
         self::assertSame(422, $multipart('198.51.100.168', $mp, ['upload_f_file' => $fakeUpload])->status());
         self::assertSame(422, $multipart('198.51.100.168', $mp, ['upload_f_unknown' => $fakeUpload])->status());
+        // PHP converts a numeric multipart field name to an integer array key.
+        $numericUpload = json_decode('{"0":' . json_encode($fakeUpload) . '}', true);
+        self::assertSame(422, $multipart('198.51.100.168', $mp, $numericUpload)->status());
         self::assertSame(422, $multipart('198.51.100.168', $mp, [], ['unexpected' => '1'])->status());
         $forged = $mp;
         $forged['fields']['f_file'] = ['name' => 'x.txt', 'content' => base64_encode('test')];
         self::assertSame(422, $multipart('198.51.100.168', $forged)->status());
         self::assertSame(415, $this->formRequest($app, 'POST', $path . '/submit-multipart', $mp, '198.51.100.169')->status());
+
+        // With an optional file, PHP can discard an excess part and leave an
+        // otherwise valid payload. Declared counts reject that partial success;
+        // older multipart clients that omit the count remain compatible.
+        $optional = $document;
+        $fields[1]['required'] = false;
+        $optional['blocks'][0]['data']['elements'][0]['settings']['form_fields'] = (string) json_encode($fields);
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $optional], $editorToken)->status());
+        $countIp = '198.51.100.170';
+        $countPayload = $payload($countIp);
+        $countPayload['fields']['f_file'] = null;
+        $countPayload['upload_count'] = 1;
+        self::assertSame(422, $multipart($countIp, $countPayload)->status());
+        $countPayload['upload_count'] = '0';
+        self::assertSame(422, $multipart($countIp, $countPayload)->status());
+        $countPayload['upload_count'] = 0;
+        self::assertSame(201, $multipart($countIp, $countPayload)->status());
+        $optionalSubmission = $this->db($app)->table('prime_builder_submissions')->first();
+        self::assertNotNull($optionalSubmission);
+        $optionalRepository = new \PrimeBuilder\Forms\Submissions($this->db($app), \PrimeBuilder\Forms\PrivateFiles::forApp($app));
+        self::assertTrue($optionalRepository->delete((int) $optionalSubmission['id']));
+        $oldMultipartIp = '198.51.100.171';
+        $oldMultipart = $payload($oldMultipartIp);
+        $oldMultipart['fields']['f_file'] = null;
+        self::assertSame(201, $multipart($oldMultipartIp, $oldMultipart)->status());
+        $oldSubmission = $this->db($app)->table('prime_builder_submissions')->first();
+        self::assertNotNull($oldSubmission);
+        self::assertTrue($optionalRepository->delete((int) $oldSubmission['id']));
+        self::assertSame(200, $this->send($app, 'PATCH', '/api/prime-builder/v1/documents/1', ['content' => $document], $editorToken)->status());
 
         $early = $payload('198.51.100.160', 0);
         self::assertSame(422, $this->formRequest($app, 'POST', $path . '/submit', $early, '198.51.100.160')->status());
@@ -5294,7 +5326,7 @@ final class IntegrationTest extends TestCase
         $largeFile = $this->db($app)->table('prime_builder_form_files')->first();
         self::assertNotNull($largeFile);
         self::assertSame(\PrimeBuilder\Forms\FileInput::MAX_BYTES, (int) $largeFile['bytes']);
-        self::assertTrue((new \PrimeBuilder\Forms\Submissions($this->db($app)))->delete((int) $largeFile['submission_id']));
+        self::assertTrue((new \PrimeBuilder\Forms\Submissions($this->db($app), \PrimeBuilder\Forms\PrivateFiles::forApp($app)))->delete((int) $largeFile['submission_id']));
         self::assertSame(0, $this->db($app)->table('prime_builder_form_files')->count());
 
         // Larger configured limits also apply to legacy JSON clients, subject to
@@ -5308,9 +5340,11 @@ final class IntegrationTest extends TestCase
         $biggerFile = $this->db($app)->table('prime_builder_form_files')->first();
         self::assertNotNull($biggerFile);
         self::assertSame(600000, (int) $biggerFile['bytes']);
-        self::assertTrue((new \PrimeBuilder\Forms\Submissions($this->db($app)))->delete((int) $biggerFile['submission_id']));
         $app->get(Settings::class)->set('plugin.prime-builder.upload_file_kb', 1);
         $app->get(Settings::class)->set('plugin.prime-builder.upload_total_kb', 1);
+        $repository = new \PrimeBuilder\Forms\Submissions($this->db($app), \PrimeBuilder\Forms\PrivateFiles::forApp($app));
+        self::assertSame(str_repeat('x', 600000), $repository->fileContents($biggerFile)['content'] ?? null, 'Lowering the limit does not hide an older file');
+        self::assertTrue($repository->delete((int) $biggerFile['submission_id']));
         $smallIp = '198.51.100.167';
         $tooBig = $payload($smallIp);
         $tooBig['fields']['f_file'] = ['name' => 'too-big.txt', 'content' => base64_encode(str_repeat('x', 1025))];
@@ -5326,7 +5360,14 @@ final class IntegrationTest extends TestCase
         self::assertSame(1, $this->db($app)->table('prime_builder_form_files')->count());
         $row = $this->db($app)->table('prime_builder_form_files')->first();
         self::assertNotNull($row);
-        self::assertSame(base64_encode($bytes), $row['content_base64']);
+        self::assertSame('', $row['content_base64'], 'New file contents are never written to the database');
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', (string) $row['storage_key']);
+        self::assertSame(hash('sha256', $bytes), $row['content_sha256']);
+        $privatePath = $app->storagePath('prime-builder/form-files/' . $row['storage_key']);
+        self::assertFileExists($privatePath);
+        self::assertSame($bytes, file_get_contents($privatePath));
+        self::assertSame(0, fileperms($privatePath) & 0077);
+        self::assertSame(0, fileperms(dirname($privatePath)) & 0077);
         $id = (int) $row['submission_id'];
         $fileId = (int) $row['id'];
         $downloadUrl = '/admin/prime-builder/submissions/' . $id . '/files/' . $fileId;
@@ -5350,18 +5391,27 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('rapport%20%3Cimportant%3E.txt', (string) $download->header('Content-Disposition'));
         self::assertSame('nosniff', $download->header('X-Content-Type-Options'));
         self::assertStringContainsString('no-store', (string) $download->header('Cache-Control'));
+        file_put_contents($privatePath, 'altered');
+        self::assertSame(404, $this->send($app, 'GET', $downloadUrl)->status(), 'Corrupted files are not served');
+        unlink($privatePath);
+        self::assertSame(404, $this->send($app, 'GET', $downloadUrl)->status(), 'Missing files are not served');
+        file_put_contents($privatePath, $bytes);
+        chmod($privatePath, 0600);
+        self::assertSame(200, $this->send($app, 'GET', $downloadUrl)->status());
         self::assertSame(404, $this->send($app, 'GET', '/admin/prime-builder/submissions/' . ($id + 1) . '/files/' . $fileId)->status());
         self::assertSame(419, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/submissions/' . $id . '/delete'))->status());
         $csrf = $app->get(Csrf::class)->token();
         self::assertSame(302, $app->get(Kernel::class)->handle(Request::create('POST', '/admin/prime-builder/submissions/' . $id . '/delete', body: ['_csrf_token' => $csrf]))->status());
         self::assertSame(0, $this->db($app)->table('prime_builder_form_files')->count());
+        self::assertFileDoesNotExist($privatePath);
+        self::assertSame(0, $this->db($app)->table('prime_builder_form_file_gc')->count());
         self::assertSame(404, $this->send($app, 'GET', $downloadUrl)->status());
     }
 
     public function testScheduledPurgeDeletesOldFilesWithoutTouchingRecentFiles(): void
     {
         $app = $this->activated(null);
-        $repository = new \PrimeBuilder\Forms\Submissions($this->db($app));
+        $repository = new \PrimeBuilder\Forms\Submissions($this->db($app), \PrimeBuilder\Forms\PrivateFiles::forApp($app));
         $file = \PrimeBuilder\Forms\FileInput::validate(['name' => 'notes.txt', 'content' => base64_encode('A private document.')]);
         self::assertNotNull($file);
         $values = ['name' => 'Nom', 'email' => 'a@example.test', 'message' => 'Notes', 'files' => [['field_id' => 'f_one', 'field_label' => 'Notes'] + $file]];
@@ -5369,17 +5419,237 @@ final class IntegrationTest extends TestCase
         self::assertTrue($repository->create(1, 'old', $values, hash('sha256', 'old-file'), $now - 31 * 86400));
         self::assertTrue($repository->create(1, 'new', $values, hash('sha256', 'new-file'), $now));
         self::assertSame(2, $this->db($app)->table('prime_builder_form_files')->count());
+        $beforeFiles = $this->db($app)->select('SELECT `storage_key` FROM `' . $this->db($app)->prefixed('prime_builder_form_files') . '` ORDER BY `id`');
+        $oldPath = $app->storagePath('prime-builder/form-files/' . $beforeFiles[0]['storage_key']);
+        $newPath = $app->storagePath('prime-builder/form-files/' . $beforeFiles[1]['storage_key']);
+        self::assertFileExists($oldPath);
+        self::assertFileExists($newPath);
         $schedule = $app->get(Hooks::class)->apply('scheduler.register', new \Prime\Scheduler\Schedule());
         $purge = $schedule->get('prime-builder.purge-submissions')->closure();
         self::assertNotNull($purge);
         $purge();
         self::assertSame(1, $this->db($app)->table('prime_builder_submissions')->count());
         self::assertSame(1, $this->db($app)->table('prime_builder_form_files')->count());
+        self::assertFileDoesNotExist($oldPath);
+        self::assertFileExists($newPath);
         $remaining = $this->db($app)->table('prime_builder_form_files')->first();
         self::assertNotNull($remaining);
         $message = $this->db($app)->table('prime_builder_submissions')->where('id', '=', (int) $remaining['submission_id'])->first();
         self::assertNotNull($message);
         self::assertSame('new', $message['node_id']);
+        self::assertTrue($repository->delete((int) $remaining['submission_id']));
+        self::assertFileDoesNotExist($newPath);
+    }
+
+    public function testPrivateFileMigrationRetainsInvalidDataAndRetriesStorageFailures(): void
+    {
+        $app = $this->activated(null);
+        $db = $this->db($app);
+        $id = $db->table('prime_builder_submissions')->insertGetId(['entry_id' => 1, 'node_id' => 'legacy_file', 'sender_name' => 'Nom', 'sender_email' => 'a@example.test', 'message' => 'Historique', 'created_at' => gmdate('Y-m-d H:i:s')]);
+        $legacy = static fn (string $name, string $content): array => ['submission_id' => $id, 'field_id' => 'f_file', 'field_label' => 'Pièce', 'filename' => $name, 'mime' => 'text/plain', 'bytes' => 4, 'content_base64' => $content];
+        $goodId = $db->table('prime_builder_form_files')->insertGetId($legacy('good.txt', base64_encode('test')));
+        $badId = $db->table('prime_builder_form_files')->insertGetId($legacy('bad.txt', 'not-base64!'));
+        $storage = \PrimeBuilder\Forms\PrivateFiles::forApp($app);
+        $maintenance = new \PrimeBuilder\Forms\FileMaintenance($db, $storage);
+        self::assertSame(1, $maintenance->migrate(1));
+        $good = $db->table('prime_builder_form_files')->find($goodId);
+        self::assertNotNull($good);
+        self::assertSame('', $good['content_base64']);
+        self::assertSame(hash('sha256', 'test'), $good['content_sha256']);
+        $path = $app->storagePath('prime-builder/form-files/' . $good['storage_key']);
+        self::assertSame('test', file_get_contents($path));
+        self::assertSame(0, $maintenance->migrate());
+        $bad = $db->table('prime_builder_form_files')->find($badId);
+        self::assertNotNull($bad);
+        self::assertSame('invalid', $bad['migration_error']);
+        self::assertSame('not-base64!', $bad['content_base64']);
+        self::assertNull($bad['storage_key']);
+        $checks = $app->get(Hooks::class)->apply('system.checks', []);
+        $status = array_values(array_filter($checks, static fn (array $check): bool => ($check['id'] ?? '') === 'prime-builder.form-files'));
+        self::assertSame('warning', $status[0]['status'] ?? null);
+        self::assertStringContainsString('1 invalides', (string) ($status[0]['value'] ?? ''));
+
+        $pendingId = $db->table('prime_builder_form_files')->insertGetId($legacy('retry.txt', base64_encode('test')));
+        // A public storage path must be rejected before any private bytes are written.
+        $unsafe = new \PrimeBuilder\Forms\PrivateFiles($app->publicPath(), [$app->publicPath()]);
+        try {
+            (new \PrimeBuilder\Forms\FileMaintenance($db, $unsafe))->migrate();
+            self::fail('Public storage should be refused');
+        } catch (\RuntimeException) {
+            self::assertSame(base64_encode('test'), $db->table('prime_builder_form_files')->find($pendingId)['content_base64'] ?? null);
+        }
+        // Also fail after creating and fsyncing a file, but before publishing a
+        // reference: a bad sync root simulates an unavailable durability step.
+        $failedPath = $app->storagePath('prime-builder/sync-failure');
+        $failedSync = new \PrimeBuilder\Forms\PrivateFiles($failedPath, [], $app->publicPath());
+        try {
+            (new \PrimeBuilder\Forms\FileMaintenance($db, $failedSync))->migrate();
+            self::fail('An invalid synchronization root must fail closed');
+        } catch (\RuntimeException) {
+            $afterFailure = $db->selectOne('SELECT `content_base64`, `storage_key` FROM `' . $db->prefixed('prime_builder_form_files') . '` WHERE `id` = ?', [$pendingId]);
+            self::assertSame(base64_encode('test'), $afterFailure['content_base64'] ?? null);
+            self::assertNull($afterFailure['storage_key'] ?? null);
+            self::assertSame([], glob($failedPath . '/*') ?: [], 'A failed migration must not retain a partial upload');
+        }
+        $failedSync->clear();
+        self::assertSame(1, $maintenance->migrate());
+        $pending = $db->table('prime_builder_form_files')->find($pendingId);
+        self::assertSame('', $pending['content_base64']);
+        self::assertSame('test', $storage->read((string) $pending['storage_key']));
+        $repository = new \PrimeBuilder\Forms\Submissions($db, $storage);
+        self::assertSame('test', $repository->fileContents($good)['content'] ?? null);
+        self::assertNull($repository->fileContents($bad));
+        self::assertTrue($repository->delete($id));
+        self::assertFileDoesNotExist($path);
+        self::assertNull($storage->read((string) $pending['storage_key']));
+    }
+
+    public function testPrivateFileTransactionsCleanupAndOrphanRecovery(): void
+    {
+        $app = $this->activated(null);
+        $db = $this->db($app);
+        $storage = \PrimeBuilder\Forms\PrivateFiles::forApp($app);
+        $repository = new \PrimeBuilder\Forms\Submissions($db, $storage);
+        $maintenance = new \PrimeBuilder\Forms\FileMaintenance($db, $storage);
+        $file = \PrimeBuilder\Forms\FileInput::validate(['name' => 'safe.txt', 'content' => base64_encode('private')]);
+        self::assertNotNull($file);
+        $values = ['name' => 'Nom', 'email' => 'a@example.test', 'message' => 'Message', 'files' => [['field_id' => 'f_one', 'field_label' => 'Fichier'] + $file]];
+        $before = glob($app->storagePath('prime-builder/form-files/*')) ?: [];
+        try {
+            $repository->create(1, 'rollback', $values, hash('sha256', 'rollback-file'), time(), static function (): void {
+                throw new \RuntimeException('enqueue failed');
+            });
+            self::fail('Enqueue failure must roll everything back');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('enqueue failed', $exception->getMessage());
+        }
+        self::assertSame(0, $db->table('prime_builder_submissions')->count());
+        self::assertSame(0, $db->table('prime_builder_form_tokens')->count());
+        self::assertSame(0, $db->table('prime_builder_form_files')->count());
+        self::assertSame($before, glob($app->storagePath('prime-builder/form-files/*')) ?: []);
+        $nestedWriteRejected = false;
+        $db->transaction(function () use ($repository, $values, &$nestedWriteRejected): void {
+            try {
+                $repository->create(1, 'nested', $values, hash('sha256', 'nested-file'), time());
+            } catch (\RuntimeException) {
+                $nestedWriteRejected = true;
+            }
+        });
+        self::assertTrue($nestedWriteRejected);
+        self::assertTrue($repository->create(1, 'saved', $values, hash('sha256', 'saved-file'), time()));
+        self::assertFalse($repository->create(1, 'saved', $values, hash('sha256', 'saved-file'), time()));
+        $row = $db->table('prime_builder_form_files')->first();
+        self::assertNotNull($row);
+        $id = (int) $row['submission_id'];
+        $path = $app->storagePath('prime-builder/form-files/' . $row['storage_key']);
+        self::assertSame('private', $repository->fileContents($row)['content'] ?? null);
+        file_put_contents($path, 'tampered');
+        self::assertNull($repository->fileContents($row), 'Changed disk contents fail integrity checks');
+        file_put_contents($path, 'private');
+        try {
+            $db->transaction(function () use ($repository, $id, $path): void {
+                self::assertTrue($repository->delete($id));
+                self::assertFileExists($path, 'Deletion is deferred until the outer commit');
+                throw new \RuntimeException('roll back deletion');
+            });
+        } catch (\RuntimeException $exception) {
+            self::assertSame('roll back deletion', $exception->getMessage());
+        }
+        self::assertFileExists($path);
+        self::assertNotNull($db->table('prime_builder_submissions')->find($id));
+        self::assertSame(0, $db->table('prime_builder_form_file_gc')->count());
+        $db->transaction(function () use ($repository, $id, $path): void {
+            self::assertTrue($repository->delete($id));
+            self::assertFileExists($path);
+        });
+        self::assertFileExists($path);
+        self::assertSame(1, $db->table('prime_builder_form_file_gc')->count());
+        self::assertSame(1, $maintenance->collect(time()));
+        self::assertFileDoesNotExist($path);
+        self::assertSame(0, $db->table('prime_builder_form_file_gc')->count());
+
+        $orphan = $storage->locked(static fn (): array => $storage->write('orphan'));
+        $orphanPath = $app->storagePath('prime-builder/form-files/' . $orphan['key']);
+        touch($orphanPath, time() - 7200);
+        self::assertSame(1, $maintenance->collect(time()));
+        self::assertFileDoesNotExist($orphanPath);
+
+        self::assertTrue($repository->create(1, 'blocked', $values, hash('sha256', 'blocked-file'), time()));
+        $blocked = $db->table('prime_builder_form_files')->first();
+        self::assertNotNull($blocked);
+        $blockedPath = $app->storagePath('prime-builder/form-files/' . $blocked['storage_key']);
+        unlink($blockedPath);
+        mkdir($blockedPath, 0700); // Simulate a path that cannot be unlinked as a file.
+        self::assertTrue($repository->delete((int) $blocked['submission_id']));
+        self::assertSame(1, $db->table('prime_builder_form_file_gc')->count(), 'Failed physical removal stays queued');
+        rmdir($blockedPath);
+        self::assertSame(1, $maintenance->collect(time()));
+        self::assertSame(0, $db->table('prime_builder_form_file_gc')->count());
+
+        // A failed queue item must not starve later entries when the batch is small.
+        $firstKey = str_repeat('1', 64);
+        $secondKey = str_repeat('2', 64);
+        $firstPath = $app->storagePath('prime-builder/form-files/' . $firstKey);
+        $secondPath = $app->storagePath('prime-builder/form-files/' . $secondKey);
+        mkdir($firstPath, 0700);
+        file_put_contents($secondPath, 'delete me');
+        $db->table('prime_builder_form_file_gc')->insert(['storage_key' => $firstKey]);
+        $db->table('prime_builder_form_file_gc')->insert(['storage_key' => $secondKey]);
+        $storage->locked(static fn () => $storage->setQueueCursor(''));
+        self::assertSame(0, $maintenance->collect(time(), 1, false));
+        self::assertFileExists($secondPath);
+        self::assertSame(1, $maintenance->collect(time(), 1, false));
+        self::assertFileDoesNotExist($secondPath);
+        self::assertSame(1, $db->table('prime_builder_form_file_gc')->count());
+        rmdir($firstPath);
+        self::assertSame(1, $maintenance->collect(time(), 1, false));
+
+        // Bounded directory passes must eventually find old crash leftovers,
+        // even when deleting entries shifts the iterator offsets.
+        $orphans = $storage->locked(static function () use ($storage): array {
+            $keys = [];
+            for ($i = 0; $i < 12; $i++) {
+                $keys[] = $storage->write('orphan ' . $i)['key'];
+            }
+            return $keys;
+        });
+        foreach ($orphans as $key) {
+            touch($app->storagePath('prime-builder/form-files/' . $key), time() - 7200);
+        }
+        for ($i = 0; $i < 60; $i++) {
+            self::assertLessThanOrEqual(2, $maintenance->collect(time(), 2));
+        }
+        foreach ($orphans as $key) {
+            self::assertFileDoesNotExist($app->storagePath('prime-builder/form-files/' . $key));
+        }
+    }
+
+    public function testPrivateFileCollectorFillsBatchAcrossQueueCursor(): void
+    {
+        $app = $this->activated(null);
+        $db = $this->db($app);
+        $storage = \PrimeBuilder\Forms\PrivateFiles::forApp($app);
+        $maintenance = new \PrimeBuilder\Forms\FileMaintenance($db, $storage);
+        $keys = [str_repeat('1', 64), str_repeat('2', 64), str_repeat('3', 64)];
+        $storage->locked(static function () use ($storage, $app, $db, $keys): void {
+            foreach ($keys as $key) {
+                file_put_contents($app->storagePath('prime-builder/form-files/' . $key), 'queued');
+                $db->table('prime_builder_form_file_gc')->insert(['storage_key' => $key]);
+            }
+            $storage->setQueueCursor($keys[1]);
+        });
+
+        // Only one row is after the cursor; the second budgeted row must come
+        // from the beginning without selecting the first one twice.
+        self::assertSame(2, $maintenance->collect(time(), 2, false));
+        self::assertFileDoesNotExist($app->storagePath('prime-builder/form-files/' . $keys[2]));
+        self::assertFileDoesNotExist($app->storagePath('prime-builder/form-files/' . $keys[0]));
+        self::assertFileExists($app->storagePath('prime-builder/form-files/' . $keys[1]));
+        self::assertSame($keys[0], $storage->locked(static fn (): string => $storage->queueCursor()));
+        self::assertSame(1, $db->table('prime_builder_form_file_gc')->count());
+        self::assertSame(1, $maintenance->collect(time(), 2, false));
+        self::assertFileDoesNotExist($app->storagePath('prime-builder/form-files/' . $keys[1]));
+        self::assertSame(0, $db->table('prime_builder_form_file_gc')->count());
     }
 
     public function testFileMigrationUpgradesAnActiveLegacyInstallationWithoutLosingSubmissions(): void
@@ -5391,8 +5661,10 @@ final class IntegrationTest extends TestCase
         // the CMS's public synchronization API, the same one used by ZIP upgrades.
         $db->schema()->dropIfExists('prime_builder_form_files');
         $db->schema()->dropIfExists('prime_builder_form_notifications');
+        $db->schema()->dropIfExists('prime_builder_form_file_gc');
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000002_create_prime_builder_form_files')->delete());
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000003_create_prime_builder_form_notifications')->delete());
+        self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000006_prepare_private_form_files')->delete());
         $db->table('plugins')->where('slug', '=', 'prime-builder')->update(['version' => '0.1.0']);
         $manager = $app->get(PluginManager::class);
         $before = $manager->get('prime-builder', fresh: true);
@@ -5404,11 +5676,13 @@ final class IntegrationTest extends TestCase
         $manager->syncUpgradedPlugin('prime-builder', '0.1.0');
         self::assertTrue($db->schema()->hasTable('prime_builder_form_files'));
         self::assertTrue($db->schema()->hasTable('prime_builder_form_notifications'));
+        self::assertTrue($db->schema()->hasTable('prime_builder_form_file_gc'));
+        self::assertTrue($db->schema()->hasColumn('prime_builder_form_files', 'storage_key'));
         self::assertSame(1, $db->table('prime_builder_submissions')->count());
         self::assertSame('Historique', $db->table('prime_builder_submissions')->first()['message'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('1.0.2', $after->installedVersion);
+        self::assertSame('1.0.3', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000002_create_prime_builder_form_files')->count());
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000003_create_prime_builder_form_notifications')->count());
@@ -5433,7 +5707,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(base64_encode('test'), $db->table('prime_builder_form_files')->where('submission_id', '=', $id)->first()['content_base64'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('1.0.2', $after->installedVersion);
+        self::assertSame('1.0.3', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
     }
 
@@ -5453,6 +5727,7 @@ final class IntegrationTest extends TestCase
         // Simulate the 0.1.2 ledger before the new derived-directory migration.
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000004_prepare_theme_model_index')->delete());
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000005_extend_prime_builder_submissions')->delete());
+        self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000006_prepare_private_form_files')->delete());
         $db->table('settings')->where('name', '=', 'plugin.prime-builder.theme_model_index')->delete();
         $migrationCount = $db->table('migrations')->where('source', '=', 'prime-builder')->count();
         self::assertSame(3, $migrationCount);
@@ -5466,8 +5741,8 @@ final class IntegrationTest extends TestCase
         self::assertNotNull($after);
         self::assertTrue($after->isActive());
         self::assertFalse($after->needsUpdate);
-        self::assertSame('1.0.2', $after->installedVersion);
-        self::assertSame($migrationCount + 2, $db->table('migrations')->where('source', '=', 'prime-builder')->count());
+        self::assertSame('1.0.3', $after->installedVersion);
+        self::assertSame($migrationCount + 3, $db->table('migrations')->where('source', '=', 'prime-builder')->count());
         $manager->syncUpgradedPlugin('prime-builder', '0.1.2');
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000004_prepare_theme_model_index')->count());
         self::assertSame($entry->content, $app->get(EntryRepository::class)->find(1)?->content);
@@ -6641,6 +6916,170 @@ final class IntegrationTest extends TestCase
         self::assertFalse($cache->isCacheableRequest(Request::create('GET', '/legacy-index')));
     }
 
+    public function testThemeCacheRechecksOtherInstanceAndRejectsMismatchedGlobalSource(): void
+    {
+        $app = $this->activated('admin');
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        $settings = $app->get(Settings::class);
+        $models = new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin);
+        $global = $models->create('Shared widget', 'global', [['id' => 'title', 'type' => 'heading', 'settings' => ['text' => 'Static'], 'styles' => [], 'children' => []]]);
+        self::assertNotNull($global);
+        $global['enabled'] = true;
+        self::assertTrue($models->save($global));
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $request = Request::create('GET', '/other-instance-cache-check');
+        self::assertTrue($cache->isCacheableRequest($request));
+
+        // This instance keeps the old index, but reads the source later. The
+        // writer has independent Settings and emits no local settings event.
+        $stale = new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin);
+        self::assertFalse($stale->index()[0]['dynamic']);
+        $settings->flushCache();
+        $otherSettings = new Settings($this->db($app));
+        $writer = new \PrimeBuilder\Theme\Models(new \Prime\Plugins\PluginSettings($otherSettings, 'prime-builder'), $otherSettings, $plugin);
+        $changed = $writer->find($global['id']);
+        self::assertNotNull($changed);
+        $changed['elements'][0]['settings']['text'] = 'Bonjour {{user.name}}';
+        self::assertTrue($writer->save($changed));
+        self::assertNull($stale->findIndexed($global['id']), 'A global widget cannot use a newer dynamic source with an older static index');
+        self::assertFalse(
+            $cache->isCacheableResponse($request, Response::html('rendered')),
+            'The cache must recheck the current index after a different process changes it',
+        );
+        $response = $app->get(Hooks::class)->apply('http.response', Response::html('rendered'), $request);
+        self::assertInstanceOf(Response::class, $response);
+        self::assertStringContainsString('private, no-store', (string) $response->header('Cache-Control'));
+        $changed['elements'][0]['settings']['text'] = 'Static again';
+        self::assertTrue($writer->save($changed));
+        self::assertTrue($cache->isCacheableRequest($request));
+    }
+
+    public function testThemeModelCompareAndSaveRefreshesOtherInstanceAndPreservesMetadata(): void
+    {
+        $app = $this->activated('admin');
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        $settings = $app->get(Settings::class);
+        $models = new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin);
+        $otherSettings = new Settings($this->db($app));
+        $other = new \PrimeBuilder\Theme\Models(new \Prime\Plugins\PluginSettings($otherSettings, 'prime-builder'), $otherSettings, $plugin);
+        $created = $models->create('Initial', 'header', [['id' => 'title', 'type' => 'heading', 'settings' => ['text' => 'Initial'], 'styles' => [], 'children' => []]]);
+        self::assertNotNull($created);
+        $id = $created['id'];
+        $stale = $other->find($id);
+        self::assertNotNull($stale);
+        $originalHash = \PrimeBuilder\Theme\Models::sourceHash($stale['elements']);
+
+        $latest = $models->find($id);
+        self::assertNotNull($latest);
+        $latest['name'] = 'Metadata changed elsewhere';
+        $latest['priority'] = 17;
+        self::assertTrue($models->save($latest));
+        $stale['elements'][0]['settings']['text'] = 'Editor content';
+        self::assertSame('saved', $other->saveIfSourceUnchanged($stale, $originalHash, keepCurrentMetadata: true));
+        $settings->flushCache();
+        $models->invalidate();
+        $latest = $models->find($id);
+        self::assertNotNull($latest);
+        self::assertSame('Metadata changed elsewhere', $latest['name']);
+        self::assertSame(17, $latest['priority']);
+        self::assertSame('Editor content', $latest['elements'][0]['settings']['text']);
+
+        // Both the metadata form and editor use a source comparison after the
+        // lock, even if their Settings instance had cached an earlier value.
+        $stale = $other->find($id);
+        self::assertNotNull($stale);
+        $staleHash = \PrimeBuilder\Theme\Models::sourceHash($stale['elements']);
+        $latest['elements'][0]['settings']['text'] = 'Newer content';
+        self::assertTrue($models->save($latest));
+        $stale['name'] = 'Stale metadata';
+        self::assertSame('conflict', $other->saveIfSourceUnchanged($stale, $staleHash));
+        $stale['elements'][0]['settings']['text'] = 'Stale editor';
+        self::assertSame('conflict', $other->saveIfSourceUnchanged($stale, $staleHash, keepCurrentMetadata: true));
+        $settings->flushCache();
+        $models->invalidate();
+        self::assertSame('Newer content', $models->find($id)['elements'][0]['settings']['text'] ?? null);
+        self::assertSame('Metadata changed elsewhere', $models->find($id)['name'] ?? null);
+        self::assertTrue($models->delete($id));
+        self::assertSame('conflict', $other->saveIfSourceUnchanged($stale, $staleHash, keepCurrentMetadata: true));
+        $settings->flushCache();
+        $models->invalidate();
+        self::assertNull($models->find($id));
+        self::assertSame([], $models->index());
+    }
+
+    public function testThemeModelIndexHandlesMissingAndRotatedKeysAndFailedRebuilds(): void
+    {
+        $app = $this->activated('admin');
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        $settings = $app->get(Settings::class);
+        $db = $this->db($app);
+        $models = new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin);
+        $model = $models->create('Dynamic legacy', 'header', [['id' => 'title', 'type' => 'heading', 'settings' => ['text' => 'Bonjour {{user.name}}'], 'styles' => [], 'children' => []]]);
+        self::assertNotNull($model);
+        $model['enabled'] = true;
+        self::assertTrue($models->save($model));
+        $original = $plugin->settings()->get(\PrimeBuilder\Theme\Models::INDEX);
+        self::assertIsArray($original);
+        self::assertSame(true, $models->index()[0]['dynamic']);
+
+        // An unavailable key cannot authenticate the directory or seals: read
+        // original records and revalidate instead of trusting old signatures.
+        $app->config()->set('app.key', '');
+        $settings->flushCache();
+        $withoutKey = new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin);
+        self::assertSame($model['id'], $withoutKey->index()[0]['id']);
+        self::assertTrue($withoutKey->index()[0]['dynamic']);
+        $source = $withoutKey->find($model['id']);
+        self::assertNotNull($source);
+        self::assertNotNull($withoutKey->validatedLayout($source));
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        self::assertFalse($cache->isCacheableRequest(Request::create('GET', '/missing-index-key')));
+
+        // Rotating the key invalidates the old directory and rebuilds it from
+        // the exact source records; the new signature must differ.
+        $app->config()->set('app.key', 'base64:' . base64_encode(str_repeat('z', 32)));
+        $settings->flushCache();
+        $rotated = new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin);
+        self::assertSame($model['id'], $rotated->index()[0]['id']);
+        $newIndex = $plugin->settings()->get(\PrimeBuilder\Theme\Models::INDEX);
+        self::assertIsArray($newIndex);
+        self::assertNotSame($original['signature'], $newIndex['signature']);
+        $model['elements'][0]['settings']['text'] = 'Static heading';
+        self::assertTrue($rotated->save($model));
+        $request = Request::create('GET', '/index-rebuild-failure');
+        self::assertTrue($cache->isCacheableRequest($request));
+        $sourceBefore = $plugin->settings()->get('theme_model.' . $model['id']);
+        $plugin->settings()->set(\PrimeBuilder\Theme\Models::INDEX, ['items' => [], 'signature' => 'invalid'], true);
+
+        // Simulate a database rejecting the rebuild while reads remain possible.
+        // The cache guard must bypass sharing and the source must not be lost.
+        $pdo = $db->pdo();
+        if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+            $pdo->exec("CREATE TRIGGER pb_block_index BEFORE UPDATE ON pc_settings BEGIN SELECT RAISE(ABORT, 'blocked'); END");
+        } else {
+            $pdo->exec("CREATE TRIGGER pb_block_index BEFORE UPDATE ON pc_settings FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'blocked'");
+        }
+        try {
+            self::assertFalse($cache->isCacheableRequest($request), 'Failed index reconstruction must bypass the shared cache');
+            $failed = false;
+            try {
+                (new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin))->index();
+            } catch (\Throwable) {
+                $failed = true;
+            }
+            self::assertTrue($failed);
+        } finally {
+            $pdo->exec('DROP TRIGGER pb_block_index');
+        }
+        $settings->flushCache();
+        self::assertSame($sourceBefore, $plugin->settings()->get('theme_model.' . $model['id']));
+        $recovered = new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin);
+        self::assertSame($model['id'], $recovered->index()[0]['id']);
+        self::assertTrue($cache->isCacheableRequest($request), 'A later successful reconstruction restores normal caching');
+    }
+
     public function testThemeModelsAreEditableConditionalAndRestoreTheTheme(): void
     {
         $app = $this->activated('admin');
@@ -7323,8 +7762,17 @@ final class IntegrationTest extends TestCase
         self::assertSame(true, $schema->hasTable('prime_builder_form_limits'));
         self::assertSame(true, $schema->hasTable('prime_builder_form_files'));
         self::assertSame(true, $schema->hasTable('prime_builder_form_notifications'));
+        self::assertTrue($schema->hasTable('prime_builder_form_file_gc'));
+        $storage = \PrimeBuilder\Forms\PrivateFiles::forApp($app);
+        $file = \PrimeBuilder\Forms\FileInput::validate(['name' => 'uninstall.txt', 'content' => base64_encode('private')]);
+        self::assertNotNull($file);
+        $repository = new \PrimeBuilder\Forms\Submissions($this->db($app), $storage);
+        self::assertTrue($repository->create(1, 'uninstall', ['name' => 'N', 'email' => 'a@example.test', 'message' => 'M', 'files' => [['field_id' => 'f_file', 'field_label' => 'File'] + $file]], hash('sha256', 'uninstall'), time()));
+        $privateDirectory = $app->storagePath('prime-builder/form-files');
+        self::assertDirectoryExists($privateDirectory);
         $manager = $app->get(PluginManager::class);
         $manager->deactivate('prime-builder');
+        self::assertDirectoryExists($privateDirectory, 'Deactivation keeps private submissions');
         $entry = $app->get(EntryRepository::class)->find(1);
         self::assertNotNull($entry);
         // Use a fresh core-only registry, as on a new request after deactivation.
@@ -7338,6 +7786,8 @@ final class IntegrationTest extends TestCase
         self::assertSame(false, $schema->hasTable('prime_builder_form_limits'));
         self::assertSame(false, $schema->hasTable('prime_builder_form_files'));
         self::assertSame(false, $schema->hasTable('prime_builder_form_notifications'));
+        self::assertFalse($schema->hasTable('prime_builder_form_file_gc'));
+        self::assertDirectoryDoesNotExist($privateDirectory);
         self::assertSame(false, $settings->has('plugin.prime-builder.kit_primary'));
         $capabilities = $pdo->query("SELECT COUNT(*) FROM pc_role_capabilities WHERE capability LIKE 'prime!_builder.%' ESCAPE '!'");
         if ($capabilities === false) {

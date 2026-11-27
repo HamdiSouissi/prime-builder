@@ -177,7 +177,7 @@ final class GlobalWidgets
         if (array_key_exists($id, $this->resolved)) {
             return $this->resolved[$id];
         }
-        $model = $this->models->find($id);
+        $model = $this->models->findIndexed($id);
         if ($model === null || $model['kind'] !== 'global' || $model['enabled'] !== true || !is_array($model['elements'] ?? null)) {
             return $this->resolved[$id] = null;
         }

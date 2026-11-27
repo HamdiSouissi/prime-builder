@@ -430,6 +430,12 @@ jobs:
       - name: Exercise notification races on the installed CMS
         working-directory: cms
         run: php ../builder/tests/e2e/notification-race.php
+      - name: Exercise private file races on the installed CMS
+        working-directory: cms
+        run: php ../builder/tests/e2e/private-file-race.php
+      - name: Exercise concurrent model edits on the installed CMS
+        working-directory: cms
+        run: php ../builder/tests/e2e/theme-model-race.php
       - name: Fresh public requests after deactivation and reactivation
         working-directory: cms
         run: |
@@ -459,11 +465,13 @@ jobs:
           test -d public/assets/plugins/prime-builder
           test -d storage/prime-builder/styles
           find storage/prime-builder/styles -name '*.css' -type f -print -quit | grep -q .
+          test -d storage/prime-builder/form-files
           php bin/prime plugin:deactivate prime-builder
           php bin/prime plugin:uninstall prime-builder
           test ! -e content/plugins/prime-builder
           test ! -e public/assets/plugins/prime-builder
           test ! -e storage/prime-builder/styles
+          test ! -e storage/prime-builder/form-files
           php ../builder/tests/e2e/lifecycle-check.php verify
           curl --fail --silent --show-error 'http://127.0.0.1:8080/test-prime-builder?pb-uninstall-test=1' > /tmp/prime-builder-uninstalled.html
           grep -F '<h2>Contenu conservé</h2>' /tmp/prime-builder-uninstalled.html

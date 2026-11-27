@@ -151,8 +151,11 @@ final class ThemeModels
         if ($popup !== null) {
             $model['popup'] = $popup;
         }
-        if (!$this->models->save($model)) {
-            return $this->metadataForm($request, $user, $model, 'invalid', 422);
+        // Do not overwrite a layout changed between the permission check and
+        // this metadata save, or recreate a model deleted in the meantime.
+        $result = $this->models->saveIfSourceUnchanged($model, Models::sourceHash($model['elements']));
+        if ($result !== 'saved') {
+            return $this->metadataForm($request, $user, $model, $result === 'conflict' ? 'conflict' : 'invalid', $result === 'conflict' ? 409 : 422);
         }
         $this->plugin->app()->get(AdminContext::class)->flashToast(t('plugin::prime-builder.theme.saved'), 'success');
         return Response::redirect('/admin/prime-builder/theme/' . $id);
@@ -257,8 +260,9 @@ final class ThemeModels
             return ApiError::response('forbidden', 403, $request);
         }
         $model['elements'] = $layout['elements'];
-        if (!$this->models->save($model)) {
-            return ApiError::response('validation_failed', 422, $request);
+        $result = $this->models->saveIfSourceUnchanged($model, $body['source_hash'], keepCurrentMetadata: true);
+        if ($result !== 'saved') {
+            return ApiError::response($result === 'conflict' ? 'conflict' : 'validation_failed', $result === 'conflict' ? 409 : 422, $request);
         }
         $document = ['version' => 1, 'blocks' => [['id' => 'pb_layout', 'type' => 'prime-builder/layout', 'data' => $layout]]];
         return Response::json(['data' => [

@@ -134,6 +134,11 @@ final class Models
                 $db->statement($insert, [$name, 'null', 0, $now, $now]);
                 // Works as a row lock on MySQL and as a write lock on SQLite.
                 $db->update('UPDATE ' . $table . ' SET `name` = `name` WHERE `name` = ?', [$name]);
+                // A second application instance may have changed or deleted a
+                // record while we waited. Settings caches missing and deleted
+                // keys as well as values, so refresh after acquiring the lock.
+                $this->settings->flushCache();
+                $this->invalidate();
                 self::$maintaining++;
                 try {
                     $result = $operation();
@@ -393,7 +398,7 @@ final class Models
      */
     public function create(string $name, string $kind, array $elements = []): ?array
     {
-        if (count($this->all()) >= self::MAX_MODELS || !in_array($kind, self::KINDS, true)) {
+        if (!in_array($kind, self::KINDS, true)) {
             return null;
         }
         do {
@@ -413,15 +418,65 @@ final class Models
     public function save(array $model): bool
     {
         $id = is_string($model['id'] ?? null) ? $model['id'] : '';
+        $parsed = $this->prepare($model);
+        if ($parsed === null) {
+            return false;
+        }
+        return $this->withIndexLock(function () use ($id, $parsed): bool {
+            if (!$this->pluginSettings->has(self::PREFIX . $id) && count($this->all()) >= self::MAX_MODELS) {
+                return false;
+            }
+            $this->pluginSettings->set(self::PREFIX . $id, $parsed, false);
+            return true;
+        });
+    }
+
+    /**
+     * Compare the layout under the same lock as its write. For an editor save,
+     * retain the latest metadata rather than overwriting a simultaneous change.
+     * A deleted or changed model must never be silently resurrected.
+     *
+     * @param array<string, mixed> $model
+     * @return 'saved'|'conflict'|'invalid'
+     */
+    public function saveIfSourceUnchanged(array $model, string $expectedSource, bool $keepCurrentMetadata = false): string
+    {
+        $id = is_string($model['id'] ?? null) ? $model['id'] : '';
+        return $this->withIndexLock(function () use ($id, $model, $expectedSource, $keepCurrentMetadata): string {
+            $current = $this->find($id);
+            if ($current === null || !is_array($current['elements'] ?? null) || ($current['kind'] ?? null) !== ($model['kind'] ?? null)
+                || !hash_equals(self::sourceHash($current['elements']), $expectedSource)) {
+                return 'conflict';
+            }
+            if ($keepCurrentMetadata) {
+                $current['elements'] = $model['elements'] ?? null;
+                $model = $current;
+            }
+            $parsed = $this->prepare($model);
+            if ($parsed === null) {
+                return 'invalid';
+            }
+            $this->pluginSettings->set(self::PREFIX . $id, $parsed, false);
+            return 'saved';
+        });
+    }
+
+    /**
+     * @param array<string, mixed> $model
+     * @return array<string, mixed>|null
+     */
+    private function prepare(array $model): ?array
+    {
+        $id = is_string($model['id'] ?? null) ? $model['id'] : '';
         unset($model['id']);
         $parsed = $this->parse($id, $model);
         if ($parsed === null) {
-            return false;
+            return null;
         }
         if ($this->plugin !== null) {
             $layout = (new Partials($this->plugin))->normalize($parsed['elements'], allowEmpty: true, contextual: true);
             if ($layout === null || ($parsed['kind'] === 'global' && !GlobalWidgets::allowed($layout))) {
-                return false;
+                return null;
             }
             $parsed['elements'] = $layout['elements'];
             unset($parsed['_validation']);
@@ -432,17 +487,7 @@ final class Models
         }
         unset($parsed['id']);
         $json = json_encode($parsed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        if (!is_string($json) || strlen($json) > SavedTemplates::MAX_BYTES + 32768) {
-            return false;
-        }
-        return $this->withIndexLock(function () use ($id, $parsed): bool {
-            $this->cached = null;
-            if (!$this->pluginSettings->has(self::PREFIX . $id) && count($this->all()) >= self::MAX_MODELS) {
-                return false;
-            }
-            $this->pluginSettings->set(self::PREFIX . $id, $parsed, false);
-            return true;
-        });
+        return is_string($json) && strlen($json) <= SavedTemplates::MAX_BYTES + 32768 ? $parsed : null;
     }
 
     public function delete(string $id): bool
@@ -457,6 +502,32 @@ final class Models
     {
         $this->cached = null;
         $this->cachedIndex = null;
+    }
+
+    /** Refresh even when another process changed the autoloaded index. */
+    public function refresh(): void
+    {
+        $this->settings->flushCache();
+        $this->invalidate();
+    }
+
+    /**
+     * Resolve a global definition only against the same authenticated directory
+     * used for cache-sensitivity decisions. A source changed since that snapshot
+     * must not be rendered under its previous, potentially static classification.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findIndexed(string $id): ?array
+    {
+        foreach ($this->index() as $metadata) {
+            if ($metadata['id'] !== $id) {
+                continue;
+            }
+            $model = $this->find($id);
+            return $model !== null && self::metadata($model) === $metadata ? $model : null;
+        }
+        return null;
     }
 
     /**

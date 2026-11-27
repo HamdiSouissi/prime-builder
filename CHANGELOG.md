@@ -1,11 +1,20 @@
 # Journal des changements
 
-## En cours — suite n° 5, non livrée
+## 1.0.3 — suite n° 5, périmètre partiel
 
-- Les modèles statiques peuvent utiliser le cache anonyme du CMS ; invalidation conservatrice lors des changements pris en charge, avec contournement maintenu pour les zones enregistrées et les contenus dynamiques. Les limites des mutations directes, des requêtes concurrentes et des caches externes sont documentées.
-- Un test navigateur vérifie les vrais MISS/HIT, les modifications de modèle, widget global et menu, ainsi que l’isolation des visiteurs.
-- Version 1.0.2 en cours : formulaires d’en-tête, pied, modèle de page et popup identifiés par modèle et nœud, avec protections et revérification du contexte ; migration additive. Les nouveaux champs personnalisés conservent un JSON versionné également exporté en CSV ; les fichiers utilisent le multipart avec repli JSON historique, des limites configurables et DOCX. Le stockage privé sur disque reste à faire.
-- Version 1.0.1 : index autoloadé des conditions, lecture sélective des candidats et validation authentifiée des mises en page ; migration différée des modèles existants. Les blocs Prime et données invérifiables restent revalidés.
+- Pièces de formulaire sur disque privé, par clé aléatoire et empreinte ; migration progressive des anciennes pièces en base, conservation des valeurs invalides et diagnostic. Verrouillage, synchronisation des fichiers/répertoires et collecte différée ; sauvegarde cohérente base + fichiers et planificateur indispensables.
+- Refus d’une troncature multipart déclarée par les clients récents et d’une réponse de succès illisible ; les anciens clients restent compatibles. Avertissement distinct lorsque la limite API suffit au multipart mais pas à l’ancien JSON/base64.
+- Comparaison `source_hash` et sauvegarde visuelle des modèles sous le même verrou ; les dernières métadonnées sont conservées. Rafraîchissement de l’index avant les décisions de cache et contrôle de cohérence des widgets globaux entre instances. Les modifications concurrentes des seules métadonnées, les écritures directes et les caches externes gardent leurs limites.
+
+## 1.0.2 — formulaires de modèles
+
+- Formulaires d’en-tête, pied, modèle de page et popup identifiés par modèle et nœud, avec protections et revérification du contexte ; migration additive. Les nouveaux champs personnalisés conservent un JSON versionné également exporté en CSV.
+- Multipart avec repli JSON historique, limites configurables et DOCX ; validation des pièces sans analyse antivirus.
+
+## 1.0.1 — index et cache des modèles
+
+- Index autoloadé des conditions, lecture sélective des candidats et validation authentifiée des mises en page ; migration différée des modèles existants. Les blocs Prime et données invérifiables restent revalidés.
+- Les modèles statiques peuvent utiliser le cache anonyme du CMS ; invalidation conservatrice lors des changements pris en charge, avec contournement maintenu pour les zones enregistrées et les contenus dynamiques. Un test navigateur vérifie les MISS/HIT réels, les modifications et l’isolation des visiteurs. Les limites des mutations directes, des requêtes concurrentes et des caches externes sont documentées.
 
 ## 1.0.0 — widgets partagés, contenu dynamique et administration
 

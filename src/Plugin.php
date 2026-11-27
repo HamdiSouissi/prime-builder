@@ -52,7 +52,9 @@ use PrimeBuilder\Document\MediaReferences;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Dynamic\CacheGuard;
 use PrimeBuilder\Dynamic\RenderScope;
+use PrimeBuilder\Forms\FileMaintenance;
 use PrimeBuilder\Forms\Notifications;
+use PrimeBuilder\Forms\PrivateFiles;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
 use PrimeBuilder\Popup\Popups;
@@ -482,10 +484,20 @@ final class Plugin extends AbstractPlugin
                     action: static function () use ($context): int {
                         $now = time();
                         $days = Submissions::retentionDays(Configuration::get($context->settings(), 'submission_retention_days', Submissions::RETENTION_DAYS));
-                        return (new Submissions($context->db()))->purge($now, $days) + RateLimit::purge($context->db(), $now);
+                        return (new Submissions($context->db(), PrivateFiles::forApp($context->app())))->purge($now, $days) + RateLimit::purge($context->db(), $now);
                     },
                     expression: '15 4 * * *',
                     description: t('plugin::prime-builder.scheduler.purge_submissions'),
+                    owner: 'prime-builder',
+                );
+                $schedule->call(
+                    name: 'prime-builder.maintain-form-files',
+                    action: static function () use ($context): int {
+                        $maintenance = new FileMaintenance($context->db(), PrivateFiles::forApp($context->app()));
+                        return $maintenance->migrate() + $maintenance->collect(time());
+                    },
+                    expression: '*/15 * * * *',
+                    description: t('plugin::prime-builder.scheduler.maintain_form_files'),
                     owner: 'prime-builder',
                 );
             }
@@ -697,6 +709,18 @@ final class Plugin extends AbstractPlugin
             $mobile = (int) Configuration::get($context->settings(), 'breakpoint_mobile', 767);
             $breakpointsValid = $tablet >= 600 && $tablet <= 2000 && $mobile >= 320 && $mobile < $tablet;
             $checks[] = ['id' => 'prime-builder.breakpoints', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.breakpoints'), 'status' => $breakpointsValid ? 'ok' : 'warning', 'value' => t($breakpointsValid ? 'plugin::prime-builder.system.valid' : 'plugin::prime-builder.system.adjusted')];
+            try {
+                $db = $context->db();
+                $files = '`' . $db->prefixed(Submissions::FILE_TABLE) . '`';
+                $pending = (int) $db->scalar('SELECT COUNT(*) FROM ' . $files . ' WHERE `storage_key` IS NULL AND `migration_error` IS NULL');
+                $invalid = (int) $db->scalar('SELECT COUNT(*) FROM ' . $files . ' WHERE `migration_error` IS NOT NULL');
+                $garbage = (int) $db->table(Submissions::FILE_GC_TABLE)->count();
+                $healthy = $pending === 0 && $invalid === 0 && $garbage === 0;
+                $value = $healthy ? t('plugin::prime-builder.system.form_files_ok') : t('plugin::prime-builder.system.form_files_pending', ['pending' => $pending, 'invalid' => $invalid, 'garbage' => $garbage]);
+                $checks[] = ['id' => 'prime-builder.form-files', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.form_files'), 'status' => $healthy ? 'ok' : 'warning', 'value' => $value];
+            } catch (\Throwable) {
+                $checks[] = ['id' => 'prime-builder.form-files', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.form_files'), 'status' => 'warning', 'value' => t('plugin::prime-builder.system.form_files_unavailable')];
+            }
             if (version_compare($context->app()->version(), '1.0.2', '<')) {
                 $checks[] = ['id' => 'prime-builder.legacy-auth', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.legacy_auth'), 'status' => 'warning', 'value' => t('plugin::prime-builder.system.legacy_auth_warning')];
                 $checks[] = ['id' => 'prime-builder.legacy-loader', 'group' => 'plugins', 'label' => t('plugin::prime-builder.system.legacy_loader'), 'status' => 'warning', 'value' => t('plugin::prime-builder.system.legacy_loader_warning')];
@@ -726,10 +750,14 @@ final class Plugin extends AbstractPlugin
         // were created by this version; the CMS still rolls back older tables.
         // Otherwise wait for in-flight delivery and cancel reserved jobs before
         // the CMS drops the tables. Pause public traffic/workers during uninstall.
+        $storage = PrivateFiles::forApp($context->app());
         if ($context->db()->schema()->hasTable(Submissions::NOTIFICATION_TABLE)) {
-            (new Submissions($context->db()))->deleteAll();
+            (new Submissions($context->db(), $storage))->deleteAll();
         }
         $context->notices()->clearAll();
         (new Snapshots($context->app()->storagePath('prime-builder/styles')))->clear();
+        // A hook failure is logged by the CMS, which may still remove tables.
+        // Operators must stop traffic/workers and verify disk cleanup afterwards.
+        $storage->clear();
     }
 }

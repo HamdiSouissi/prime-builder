@@ -175,6 +175,9 @@
             body = { node, token, name: values.get('name'), email: values.get('email'), message: values.get('message'), website: values.get('website') };
           }
           if (model) Object.assign(body, { page, page_type: pageType, proof });
+          // PHP can silently discard parts above max_file_uploads. Let the
+          // server detect that truncation instead of accepting a partial form.
+          if (hasFileField) body.upload_count = files.length;
           let requestBody = JSON.stringify(body);
           const submitUrl = new URL(action.href);
           if (hasFileField) {
@@ -192,7 +195,10 @@
           if (response.ok) {
             // Read the current published action from the non-cacheable response,
             // not a potentially stale copy in the cached page HTML.
-            const json = await response.json().catch(() => null);
+            const json = await response.json();
+            // Do not report success for a proxy error page, malformed response,
+            // or a PHP startup warning that accidentally forced HTTP 200.
+            if (json?.data?.accepted !== true) throw new Error('invalid submission response');
             const message = typeof json?.data?.message === 'string' && json.data.message.length <= 2000 && json.data.message.trim()
               ? json.data.message : form.dataset.pbSent;
             const redirect = safeRedirect(json?.data?.redirect);

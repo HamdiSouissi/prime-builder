@@ -82,8 +82,14 @@ final class UploadLimits
         if ($post !== null && $post < $limits['total_kb'] * 1024 + self::OVERHEAD_BYTES) {
             $warnings[] = 'post_max';
         }
-        if (max(16, $apiMaxKb) * 1024 < $limits['total_kb'] * 1024 + self::OVERHEAD_BYTES) {
+        $apiBytes = max(16, $apiMaxKb) * 1024;
+        $totalBytes = $limits['total_kb'] * 1024;
+        if ($apiBytes < $totalBytes + self::OVERHEAD_BYTES) {
             $warnings[] = 'api_max';
+        } elseif ($apiBytes < (int) (4 * ceil($totalBytes / 3)) + self::OVERHEAD_BYTES) {
+            // JSON/base64 has greater overhead than multipart, even when the
+            // configured API limit is sufficient for the current browser.
+            $warnings[] = 'api_json_max';
         }
         if (ctype_digit($maxUploads) && (int) $maxUploads < $limits['count']) {
             $warnings[] = 'file_count';

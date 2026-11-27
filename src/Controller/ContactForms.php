@@ -26,8 +26,10 @@ use PrimeBuilder\Dynamic\Layout as DynamicLayout;
 use PrimeBuilder\Forms\CsvExport;
 use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Forms\FileInput;
+use PrimeBuilder\Forms\FileMaintenance;
 use PrimeBuilder\Forms\Notifications;
 use PrimeBuilder\Forms\NotificationSettings;
+use PrimeBuilder\Forms\PrivateFiles;
 use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
 use PrimeBuilder\Forms\Success;
@@ -37,15 +39,18 @@ use PrimeBuilder\Popup\Options as PopupOptions;
 use PrimeBuilder\Theme\Models;
 use PrimeBuilder\Widgets\Content;
 use PrimeBuilder\Widgets\Registry;
+use Throwable;
 
 /** Public, cache-compatible forms and their protected submission inbox. */
 final class ContactForms
 {
     private readonly Submissions $submissions;
+    private readonly PrivateFiles $storage;
 
     public function __construct(private readonly PluginContext $plugin)
     {
-        $this->submissions = new Submissions($plugin->db());
+        $this->storage = PrivateFiles::forApp($plugin->app());
+        $this->submissions = new Submissions($plugin->db(), $this->storage);
     }
 
     public function index(Request $request): Response
@@ -59,6 +64,13 @@ final class ContactForms
             return Response::text(t('plugin::prime-builder.forms.search_invalid'), 422)->withHeader('Cache-Control', 'no-store, private');
         }
         $page = (int) $rawPage;
+        try {
+            // Incremental and retryable, without blocking access to legacy rows
+            // when private storage is unavailable. The scheduler also migrates.
+            (new FileMaintenance($this->plugin->db(), $this->storage))->migrate(20);
+        } catch (Throwable) {
+            $this->plugin->logger()->warning('Prime Builder legacy file migration is pending.');
+        }
         $results = $this->submissions->search($search, Submissions::PAGE_SIZE + 1, ($page - 1) * Submissions::PAGE_SIZE);
         $hasNext = count($results) > Submissions::PAGE_SIZE;
         $results = array_slice($results, 0, Submissions::PAGE_SIZE);
@@ -139,15 +151,11 @@ final class ContactForms
         $fileId = self::positiveId($file);
         $stored = $submissionId !== null && $fileId !== null ? $this->submissions->file($submissionId, $fileId) : null;
         // A later reduction of upload limits must not make older files unreadable.
-        $checked = $stored !== null ? FileInput::validate(['name' => $stored['filename'] ?? null, 'content' => $stored['content_base64'] ?? null], UploadLimits::MAX_KB * 1024) : null;
-        if ($checked === null || $checked['bytes'] !== (int) ($stored['bytes'] ?? 0) || $checked['mime'] !== ($stored['mime'] ?? null)) {
+        $checked = $stored !== null ? $this->submissions->fileContents($stored) : null;
+        if ($checked === null) {
             return Response::text('', 404)->withHeader('Cache-Control', 'no-store, private');
         }
-        $contents = base64_decode($checked['content_base64'], true);
-        if (!is_string($contents)) {
-            return Response::text('', 404)->withHeader('Cache-Control', 'no-store, private');
-        }
-        return new Response($contents, 200, [
+        return new Response($checked['content'], 200, [
             'Content-Type' => 'application/octet-stream',
             'Content-Disposition' => 'attachment; filename="attachment"; filename*=UTF-8\'\'' . rawurlencode($checked['filename']),
             'Content-Length' => (string) $checked['bytes'],
@@ -273,6 +281,9 @@ final class ContactForms
             return $this->error($request, 'validation_failed', 422);
         }
         $allowed = $custom ? ['node', 'fields', 'website', 'token'] : ['node', 'name', 'email', 'message', 'website', 'token'];
+        if ($multipart) {
+            $allowed[] = 'upload_count';
+        }
         if ($model) {
             $allowed = [...$allowed, 'page', 'page_type', 'proof'];
         }
@@ -316,11 +327,19 @@ final class ContactForms
                     }
                 }
                 $uploads = $request->files();
-                if (count($uploads) > $limits['count']) {
+                $declaredCount = $body['upload_count'] ?? null;
+                // New clients declare how many files they selected, so PHP's
+                // silent max_file_uploads truncation cannot produce a partial
+                // success. Older multipart clients without this field still work.
+                if (count($uploads) > $limits['count']
+                    || (array_key_exists('upload_count', $body) && (!is_int($declaredCount) || $declaredCount < 0
+                        || $declaredCount > $limits['count'] || $declaredCount !== count($uploads)))) {
                     return $this->error($request, 'validation_failed', 422);
                 }
                 foreach ($uploads as $key => $upload) {
-                    if (preg_match('/^upload_(f_[a-z0-9]{1,24})$/D', $key, $match) !== 1
+                    // PHP can turn a numeric multipart field name into an int
+                    // despite Request::files() being annotated with string keys.
+                    if (preg_match('/^upload_(f_[a-z0-9]{1,24})$/D', (string) $key, $match) !== 1
                         || !in_array($match[1], $fileIds, true)) {
                         return $this->error($request, 'validation_failed', 422);
                     }

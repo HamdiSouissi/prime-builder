@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 
 test('model and popup forms submit independently for visitors and signed-in users', async ({ page, browser }) => {
   test.setTimeout(180_000);
@@ -7,6 +8,12 @@ test('model and popup forms submit independently for visitors and signed-in user
   let entryId = null;
   let visitorContext;
   const modelForm = { id: 'contact', type: 'form', settings: {}, styles: {}, children: [] };
+  const docx = readFileSync(new URL('./fixtures/contact-sample.docx', import.meta.url));
+  const field = (id, type, label) => ({ id, type, label, required: true, step: 1, options: [], value: '' });
+  const popupModelForm = { ...modelForm, settings: { form_fields: JSON.stringify([
+    field('f_name', 'text', 'Nom'), field('f_email', 'email', 'Adresse e-mail'),
+    field('f_message', 'textarea', 'Message'), field('f_file', 'file', 'Pièce jointe'),
+  ]) } };
   const document = elements => ({ version: 1, blocks: [{ id: 'pb_layout', type: 'prime-builder/layout', data: { version: 1, elements } }] });
   async function api(url, method, body) {
     return page.evaluate(async ({ url, method, body }) => {
@@ -27,7 +34,7 @@ test('model and popup forms submit independently for visitors and signed-in user
     await page.goto(`/admin/prime-builder/theme/${id}/edit`);
     const config = JSON.parse(await page.locator('[data-pb-config]').inputValue());
     expect(config.widgets.form.hidden).toBe(false);
-    const saved = await api(`/api/prime-builder/v1/theme-models/${id}`, 'PATCH', { content: document([modelForm]), source_hash: config.sourceHash });
+    const saved = await api(`/api/prime-builder/v1/theme-models/${id}`, 'PATCH', { content: document([kind === 'popup' ? popupModelForm : modelForm]), source_hash: config.sourceHash });
     expect(saved.status, saved.body).toBe(200);
     await page.goto(`/admin/prime-builder/theme/${id}`);
     // Target only this temporary page so unrelated models never affect the run.
@@ -51,13 +58,23 @@ test('model and popup forms submit independently for visitors and signed-in user
     await expect(form).toBeVisible();
     const button = form.getByRole('button', { name: 'Envoyer', exact: true });
     await expect(button).toBeEnabled();
-    await form.getByLabel('Nom', { exact: true }).fill('Test');
-    await form.getByLabel('Adresse e-mail', { exact: true }).fill(email);
-    await form.getByLabel('Message', { exact: true }).fill(`Message ${suffix}`);
-    const sent = currentPage.waitForResponse(response => response.url().endsWith(`/api/prime-builder/v1/forms/${routeId}/submit`) && response.request().method() === 'POST');
+    await form.getByLabel('Nom', { exact: false }).fill('Test');
+    await form.getByLabel('Adresse e-mail', { exact: false }).fill(email);
+    await form.getByLabel('Message', { exact: false }).fill(`Message ${suffix}`);
+    const upload = form.getByLabel('Pièce jointe', { exact: false });
+    const hasFile = await upload.count() > 0;
+    if (hasFile) {
+      await upload.setInputFiles({ name: 'trop-grand.txt', mimeType: 'text/plain', buffer: Buffer.alloc(512 * 1024 + 1, 65) });
+      await button.click();
+      await expect(upload).toBeFocused();
+      await upload.setInputFiles({ name: 'demande.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: docx });
+    }
+    const endpoint = hasFile ? 'submit-multipart' : 'submit';
+    const sent = currentPage.waitForResponse(response => response.url().endsWith(`/api/prime-builder/v1/forms/${routeId}/${endpoint}`) && response.request().method() === 'POST', { timeout: 30_000 });
     await button.click();
     const response = await sent;
     expect(response.status(), await response.text()).toBe(201);
+    if (hasFile) expect((await response.request().allHeaders())['content-type']).toMatch(/^multipart\/form-data; boundary=/);
     await expect(form.locator('[data-pb-form-status]')).toHaveText('Votre message a été enregistré.');
     return response;
   }
@@ -107,7 +124,13 @@ test('model and popup forms submit independently for visitors and signed-in user
     const submissions = page.locator('[data-pb-submission-id]');
     await expect(submissions).toHaveCount(4);
     await expect(submissions.filter({ hasText: `header-${suffix}@example.test` })).toContainText(`${header} / contact`);
-    await expect(submissions.filter({ hasText: `popup-${suffix}@example.test` })).toContainText(`${popup} / contact`);
+    const popupSubmission = submissions.filter({ hasText: `popup-${suffix}@example.test` });
+    await expect(popupSubmission).toContainText(`${popup} / contact`);
+    const downloaded = page.waitForEvent('download');
+    await popupSubmission.getByRole('link', { name: 'demande.docx' }).click();
+    const download = await downloaded;
+    expect(download.suggestedFilename()).toBe('demande.docx');
+    expect(readFileSync(await download.path())).toEqual(docx);
   } finally {
     if (visitorContext) await visitorContext.close();
     await page.goto('/admin/prime-builder/submissions');

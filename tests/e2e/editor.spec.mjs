@@ -3502,6 +3502,33 @@ test('a forged external redirect response never moves the visitor off-site', asy
   await expect(page).toHaveURL(current);
 });
 
+test('malformed HTTP success responses never claim that a form was sent', async ({ page }) => {
+  await page.goto('/');
+  await page.clock.install();
+  await page.setContent(`<form data-pb-form data-pb-node="contact" action="/api/prime-builder/v1/forms/1/submit"
+    data-pb-sent="Enregistré" data-pb-wait="Envoi" data-pb-error="Erreur" data-pb-redirecting="Redirection">
+    <input name="name" value="Nom"><input name="email" value="test@example.test"><textarea name="message">Bonjour</textarea>
+    <input name="website" value=""><button type="submit">Envoyer</button><p data-pb-form-status role="status"></p></form>`);
+  await page.evaluate(() => {
+    let posts = 0;
+    window.fetch = async (url, options = {}) => {
+      if (options.method !== 'POST') return new Response(JSON.stringify({ data: { token: 'token' } }), { status: 200 });
+      posts += 1;
+      return new Response(posts === 1 ? '<br>PHP warning and invalid JSON' : JSON.stringify({ error: { status: 422 } }), { status: 200 });
+    };
+  });
+  await page.addScriptTag({ url: '/assets/plugins/prime-builder/js/forms.js' });
+  const form = page.locator('[data-pb-form]');
+  const submit = form.getByRole('button', { name: 'Envoyer' });
+  for (let i = 0; i < 2; i++) {
+    await expect(submit).toBeEnabled();
+    await page.clock.fastForward(3100);
+    await submit.click();
+    await expect(form.locator('[data-pb-form-status]')).toHaveText('Erreur');
+    await expect(form.locator('input[name="name"]')).toHaveValue('Nom');
+  }
+});
+
 test('departure dialog traps and restores focus and closes on Escape', async ({ page }) => {
   let nativeDialogs = 0;
   page.on('dialog', dialog => { nativeDialogs += 1; dialog.dismiss(); });
