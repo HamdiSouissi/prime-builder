@@ -24,7 +24,7 @@ final class CacheGuard
         private readonly Partials $partials,
         private readonly ZoneLayouts $zones,
     ) {
-        $this->models = new Models($plugin->settings(), $plugin->app()->get(\Prime\Settings\Settings::class));
+        $this->models = new Models($plugin->settings(), $plugin->app()->get(\Prime\Settings\Settings::class), $plugin);
     }
 
     /**
@@ -37,7 +37,7 @@ final class CacheGuard
             return true;
         }
         try {
-            foreach ($this->models->all() as $model) {
+            foreach ($this->models->index() as $model) {
                 if (($model['kind'] ?? null) !== 'popup' || ($model['enabled'] ?? false) !== true) {
                     continue;
                 }
@@ -66,11 +66,10 @@ final class CacheGuard
                 }
             }
             // Includes globals: a definition can be embedded on arbitrary pages.
-            // Read fresh because another request may have updated settings.
+            // The signed directory records sensitivity without loading layouts.
             $this->models->invalidate();
-            foreach ($this->models->all() as $model) {
-                $elements = $model['elements'] ?? [];
-                if (is_array($elements) && Layout::uses($elements)) {
+            foreach ($this->models->index() as $model) {
+                if (($model['dynamic'] ?? null) !== false) {
                     return true;
                 }
             }

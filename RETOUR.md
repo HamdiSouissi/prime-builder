@@ -2,13 +2,13 @@
 
 ## État
 
-Branche `arena/2d5ecf33-prime-builder`. **A terminé ; B clos pour la V1 par décision du demandeur ; D, E et F acceptés.** C et G ont ensuite été réalisés sur cette branche avant réception de la suite n° 5. La version 1.0.0 reste partielle et n’est pas garantie prête pour la production.
+Branche `arena/2d5ecf33-prime-builder`. **A terminé ; B clos pour la V1 par décision du demandeur ; D, E et F acceptés.** C et G ont ensuite été réalisés sur cette branche avant réception de la suite n° 5. La version 1.0.1 reste partielle et n’est pas garantie prête pour la production.
 
-**Suite n° 5 / F2 : en cours, non livré.** Les popups directes ont une CI verte ; le cache a été testé localement mais sa CI reste à observer. L’index des modèles et les formulaires restent à faire. C et G déjà présents doivent être préservés et soumis à leurs tests de non-régression. La suite n° 4 citée par le demandeur n’est pas présente dans ce dépôt ; sa structure de rapport exacte ne peut donc pas être vérifiée ici.
+**Suite n° 5 / F2 : en cours, non livré.** Le cache a une CI verte ; l’index des modèles est testé localement, sa CI reste à observer ; les formulaires restent à faire. C et G déjà présents doivent être préservés et soumis à leurs nouvelles vérifications après F2. La suite n° 4 citée par le demandeur n’est pas présente dans ce dépôt ; sa structure de rapport exacte ne peut donc pas être vérifiée ici.
 
 ## Dernière révision observée avant F2
 
-`ce7dc7264ae229a4377fbca10382cd3dec31712c` — [CI 46005332417](https://github.com/HamdiSouissi/prime-builder/actions/runs/46005332417), `completed/success`. Elle précède la suite n° 5. Le point d’étape popup `9752f2d4c945b597963118e005c3bd41a9cff438` a ensuite passé ses neuf jobs : [CI 46052131826](https://github.com/HamdiSouissi/prime-builder/actions/runs/46052131826). Un fichier ne peut pas contenir son propre SHA ni les résultats de sa future CI ; vérifier la tête et le run après le dernier push.
+`ce7dc7264ae229a4377fbca10382cd3dec31712c` — [CI 46005332417](https://github.com/HamdiSouissi/prime-builder/actions/runs/46005332417), `completed/success`. Elle précède la suite n° 5. Les popups `9752f2d4c945b597963118e005c3bd41a9cff438` ont passé [CI 46052131826](https://github.com/HamdiSouissi/prime-builder/actions/runs/46052131826), et le cache corrigé `af99be4a451e1fee460132926e984bbb80c6aa2e` a passé ses neuf jobs : [CI 46054562556](https://github.com/HamdiSouissi/prime-builder/actions/runs/46054562556). Un fichier ne peut pas contenir son propre SHA ni les résultats de sa future CI ; vérifier la tête et le run après le dernier push.
 
 | Job | État et sortie finale observée |
 |---|---|
@@ -23,19 +23,21 @@ Branche `arena/2d5ecf33-prime-builder`. **A terminé ; B clos pour la V1 par dé
 
 GitHub avertit que des actions Node 20 sont forcées sous Node 24. La CI teste une installation ZIP neuve et le cycle de vie, pas l’installation ZIP par l’interface.
 
-## F2 : état initial et reste demandé
+## F2 : état et reste demandé
 
-| Correction | État avant F2 | Reste |
+| Correction | État observé | Reste |
 |---|---|---|
-| Cache | Les modèles statiques utilisent le cache interne ; invalidations, cookies d’authentification et repli prudent pour les données dynamiques et zones enregistrées. Parcours réel local MISS/HIT puis modifications de modèle, widget global et menu, isolation connecté/visiteur. | CI du changement à observer ; mutations directes sans événement et écritures concurrentes demeurent des limites. |
-| Modèles | Les données complètes des modèles sont lues ensemble et les mises en page sont revalidées au rendu. | Index autoload léger, chargement du gagnant, validation à l’enregistrement, migration et mesure avant/après. |
+| Cache | Modèles statiques cacheables ; invalidations et repli prudent pour les données dynamiques et zones. CI `46054562556` verte, parcours réel local MISS/HIT puis modifications de modèle, widget global et menu, isolation connecté/visiteur. | Mutations directes sans événement et rendus concurrents demeurent des limites. |
+| Modèles | Index autoload signé, lecture sélective, validation à l’enregistrement et migration différée implémentés et testés localement. Sources anciennes conservées ; blocs Prime et données invérifiables revalidés. | Observer la CI du changement et sa mesure MySQL 8 ; le contrôle `source_hash` reste non atomique. |
 | Popups | Déclencheurs automatiques directs, file d’attente et option d’exclusion des visiteurs connectés : [CI 46052131826](https://github.com/HamdiSouissi/prime-builder/actions/runs/46052131826) verte. | Formulaires identifiés par modèle/nœud, protections et envois ; revérifier après modification du cache. |
 | Formulaires | Pièces jointes ≤ 512 Kio en JSON/base64 et base de données ; valeurs personnalisées concaténées en texte. | Multipart, stockage privé disque, limites configurables, DOCX, avertissements PHP, migration des fichiers et champs JSON/CSV structurés. |
 | Rapport | Historique précédent conservé dans [`docs/HISTORIQUE-CI.md`](docs/HISTORIQUE-CI.md). | Maintenir ce rapport à 150 lignes maximum et faire échouer le job `lint` au-delà. |
 
 Le benchmark MySQL 8 du commit cache `62176f17776ebad131b10feedd1f471993941cfe` donne, cache désactivé et cinq mesures : référence `ce7dc72`, 48 requêtes, 19,93–21,14 ms (médiane 20,16) ; après, 51 requêtes, 20,43–21,38 ms (médiane 21,12). Ce point augmente donc les requêtes ; l’index reste à faire et la mesure finale F2 devra être relancée. La CI `46054142317` a échoué à PHPStan sur une assertion redondante ; les deux PHPUnit et le benchmark ont réussi, Playwright était encore en cours lors de la correction. `MenuRepository` n’émet pas les événements auxquels le noyau s’abonne ; l’interception HTTP ne couvre pas les appels directs au dépôt. Le stockage privé est exposé par `Application::storagePath()`.
 
-**Tests locaux du cache en cours :** PHPUnit SQLite `261 tests, 7517 assertions`, PHPUnit ciblé CMS 1.0.1/MySQL local `10 tests, 801 assertions`, PHPStan et fixer ciblés sans erreur, Playwright Chromium `2 passed (41.2s)` sur une installation jetable (modèles puis zones). Le premier parcours a vérifié une actualisation du widget global dans une page et un en-tête via un vrai cache ; il n’est pas la CI du commit suivant.
+**Tests locaux de l’index :** PHPUnit SQLite `263 tests, 7562 assertions` ; PHPUnit ciblé MySQL 5.7 sur CMS 1.0.1 et 1.0.2, `13 tests, 623 assertions` chacun ; PHPStan niveau 8 et fixer ciblé sans erreur ; Chromium `2 passed (45.4s)` sur une installation jetable, modèles puis zones. Deux processus MySQL 5.7 concurrents ont créé 25 modèles chacun : les 50 ID sont présents dans l’index, sans dépassement de la limite. Le parcours navigateur a vérifié l’actualisation du widget global dans une page et un en-tête via un vrai cache. Ces tests ne remplacent pas la CI de l’index.
+
+**Mesure locale de l’index :** même installation jetable MySQL 5.7, trois modèles, cache désactivé, cinq requêtes HTTP simulées par série : `ce7dc72`, 48 SQL, 26,63–68,19 ms (médiane 33,15) ; arbre de travail indexé, 48 SQL, 27,76–68,80 ms (médiane 33,38), HTTP 200, 4 303 octets. Ces temps chargés et variables ne démontrent pas un gain ; le test ciblé vérifie que les modèles non gagnants ne sont pas lus. La CI MySQL 8 comparera à nouveau les séries.
 
 ## Fonctions existantes et limites importantes
 

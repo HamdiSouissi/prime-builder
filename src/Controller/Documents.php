@@ -135,7 +135,7 @@ final class Documents
         if (!$user instanceof User || !$user->can('prime_builder.theme_builder')) {
             return Response::text('', 403);
         }
-        $model = (new Models($this->plugin->settings(), $this->plugin->app()->get(\Prime\Settings\Settings::class)))->find($id);
+        $model = (new Models($this->plugin->settings(), $this->plugin->app()->get(\Prime\Settings\Settings::class), $this->plugin))->find($id);
         if ($model === null || !is_array($model['elements'] ?? null)) {
             return Response::text(t('plugin::prime-builder.ui.not_found'), 404);
         }
@@ -214,7 +214,7 @@ final class Documents
                     $field['type'] = 'enum';
                     $field['values'] = [];
                     $field['option_labels'] = [];
-                    foreach ((new Models($this->plugin->settings(), $this->plugin->app()->get(\Prime\Settings\Settings::class)))->all() as $model) {
+                    foreach ((new Models($this->plugin->settings(), $this->plugin->app()->get(\Prime\Settings\Settings::class), $this->plugin))->all() as $model) {
                         if ($model['kind'] === 'global' && $model['enabled'] === true) {
                             $field['values'][] = $model['id'];
                             $field['option_labels'][$model['id']] = $model['name'];

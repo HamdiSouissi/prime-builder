@@ -18,12 +18,10 @@ use PrimeBuilder\Widgets\Renderer;
 final class Popups
 {
     private readonly Models $models;
-    private readonly Partials $partials;
 
     public function __construct(private readonly PluginContext $plugin)
     {
-        $this->models = new Models($plugin->settings(), $plugin->app()->get(Settings::class));
-        $this->partials = new Partials($plugin);
+        $this->models = new Models($plugin->settings(), $plugin->app()->get(Settings::class), $plugin);
     }
 
     public function invalidate(): void
@@ -70,7 +68,7 @@ final class Popups
             if (!is_array($elements)) {
                 continue;
             }
-            $layout = $this->partials->normalize($elements, contextual: true);
+            $layout = $this->models->validatedLayout($model);
             if ($layout !== null) {
                 $result[] = ['model' => $model, 'layout' => $this->plugin->app()->get(GlobalWidgets::class)->expand(Partials::namespaceLayout($layout, Partials::modelSlot($model)))];
             }

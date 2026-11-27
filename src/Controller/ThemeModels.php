@@ -44,7 +44,7 @@ final class ThemeModels
 
     public function __construct(private readonly PluginContext $plugin)
     {
-        $this->models = new Models($plugin->settings(), $plugin->app()->get(Settings::class));
+        $this->models = new Models($plugin->settings(), $plugin->app()->get(Settings::class), $plugin);
         $this->partials = new Partials($plugin);
     }
 

@@ -21,7 +21,7 @@ final class Partials
 
     public function __construct(private readonly PluginContext $plugin)
     {
-        $this->models = new Models($plugin->settings(), $plugin->app()->get(\Prime\Settings\Settings::class));
+        $this->models = new Models($plugin->settings(), $plugin->app()->get(\Prime\Settings\Settings::class), $plugin);
     }
 
     /**
@@ -112,7 +112,7 @@ final class Partials
             if (!is_array($elements)) {
                 continue;
             }
-            $layout = $this->normalize($elements, contextual: true);
+            $layout = $this->models->validatedLayout($model);
             if ($layout !== null) {
                 return $this->plugin->app()->get(GlobalWidgets::class)->expand(self::namespaceLayout($layout, $kind));
             }
@@ -148,7 +148,7 @@ final class Partials
             if (!is_array($elements) || !is_string($kind)) {
                 continue;
             }
-            $layout = $this->normalize($elements, contextual: true);
+            $layout = $this->models->validatedLayout($model);
             if ($layout !== null && $kind !== 'global') {
                 $layouts[] = $this->plugin->app()->get(GlobalWidgets::class)->expand(self::namespaceLayout($layout, self::modelSlot($model)));
             }

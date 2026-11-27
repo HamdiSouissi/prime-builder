@@ -63,6 +63,7 @@ use PrimeBuilder\Styles\Snapshots;
 use PrimeBuilder\Styles\ZoneLayouts;
 use PrimeBuilder\Theme\GlobalWidgets;
 use PrimeBuilder\Theme\LiveEntry;
+use PrimeBuilder\Theme\Models;
 use PrimeBuilder\Theme\PageRequest;
 use PrimeBuilder\Theme\Partials;
 use PrimeBuilder\Widgets\Assets;
@@ -656,6 +657,16 @@ final class Plugin extends AbstractPlugin
                 $globals->invalidate();
                 $theme->invalidate();
                 $themeModels->invalidate();
+                if (Models::maintainingIndex()) {
+                    // Models atomically updates its directory and purges after commit.
+                    return;
+                }
+                if (str_starts_with($name, $context->settings()->prefix() . Models::PREFIX)) {
+                    // Legacy writers using PluginSettings still emit this event.
+                    // Remove the old directory first so a failed rebuild fails closed.
+                    $context->settings()->delete(Models::INDEX);
+                    (new Models($context->settings(), $context->app()->get(\Prime\Settings\Settings::class), $context))->rebuildIndex();
+                }
                 $context->app()->get(\Prime\Cache\PageCache::class)->purgeAll();
             }
         });

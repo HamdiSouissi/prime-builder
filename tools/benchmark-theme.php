@@ -32,7 +32,7 @@ $context = $app->get(PluginManager::class)->loaded()['prime-builder'] ?? null;
 if (!$context instanceof \Prime\Plugins\PluginContext) {
     throw new RuntimeException('Prime Builder must already be active.');
 }
-$models = new Models($context->settings(), $app->get(Settings::class));
+$models = new Models($context->settings(), $app->get(Settings::class), $context);
 $entries = $app->get(EntryRepository::class);
 $service = $app->get(EntryService::class);
 $email = getenv('PB_BENCH_ADMIN_EMAIL') ?: 'builder@prime.test';

@@ -3,7 +3,8 @@
 ## En cours — suite n° 5, non livrée
 
 - Les modèles statiques peuvent utiliser le cache anonyme du CMS ; invalidation conservatrice lors des changements pris en charge, avec contournement maintenu pour les zones enregistrées et les contenus dynamiques. Les limites des mutations directes, des requêtes concurrentes et des caches externes sont documentées.
-- Un test navigateur vérifie les vrais MISS/HIT, les modifications de modèle, widget global et menu, ainsi que l’isolation des visiteurs. L’index des modèles et les évolutions des formulaires restent à faire.
+- Un test navigateur vérifie les vrais MISS/HIT, les modifications de modèle, widget global et menu, ainsi que l’isolation des visiteurs.
+- Version 1.0.1 : index autoloadé des conditions, lecture sélective des candidats et validation authentifiée des mises en page ; migration différée des modèles existants. Les blocs Prime et données invérifiables restent revalidés. Les évolutions des formulaires restent à faire.
 
 ## 1.0.0 — widgets partagés, contenu dynamique et administration
 

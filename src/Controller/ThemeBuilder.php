@@ -222,7 +222,7 @@ final class ThemeBuilder
         }
         $filter = $request->query('kind', 'all');
         $filter = is_string($filter) && in_array($filter, ['all', ...Models::KINDS], true) ? $filter : 'all';
-        $models = (new Models($this->plugin->settings(), $this->plugin->app()->get(Settings::class)))->all();
+        $models = (new Models($this->plugin->settings(), $this->plugin->app()->get(Settings::class), $this->plugin))->all();
         if ($filter !== 'all') {
             $models = array_values(array_filter($models, static fn (array $model): bool => $model['kind'] === $filter));
         }

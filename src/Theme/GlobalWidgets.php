@@ -4,14 +4,9 @@ declare(strict_types=1);
 
 namespace PrimeBuilder\Theme;
 
-use Prime\Editor\BlockRegistry;
-use Prime\Hooks\Hooks;
 use Prime\Plugins\PluginContext;
-use Prime\Security\HtmlSanitizer;
 use Prime\Settings\Settings;
-use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Styles\Scope;
-use PrimeBuilder\Widgets\Registry;
 
 /** Bounded, revalidated shared widget definitions, expanded only at rendering. */
 final class GlobalWidgets
@@ -35,9 +30,9 @@ final class GlobalWidgets
     /** @var array<string, array<string, mixed>|null> */
     private array $resolved = [];
 
-    public function __construct(private readonly PluginContext $plugin)
+    public function __construct(PluginContext $plugin)
     {
-        $this->models = new Models($plugin->settings(), $plugin->app()->get(Settings::class));
+        $this->models = new Models($plugin->settings(), $plugin->app()->get(Settings::class), $plugin);
     }
 
     public function invalidate(): void
@@ -182,25 +177,14 @@ final class GlobalWidgets
         if (array_key_exists($id, $this->resolved)) {
             return $this->resolved[$id];
         }
-        $model = null;
-        foreach ($this->models->all() as $candidate) {
-            if ($candidate['id'] === $id) {
-                $model = $candidate;
-                break;
-            }
-        }
+        $model = $this->models->find($id);
         if ($model === null || $model['kind'] !== 'global' || $model['enabled'] !== true || !is_array($model['elements'] ?? null)) {
             return $this->resolved[$id] = null;
         }
-        $validator = new Validator(
-            new Registry($this->plugin->app()->get(Hooks::class)),
-            $this->plugin->app()->get(HtmlSanitizer::class),
-            $this->plugin->app()->get(BlockRegistry::class),
-        );
-        $result = $validator->validate(['version' => 1, 'elements' => $model['elements']]);
-        if ($result['errors'] !== [] || !self::allowed($result['data'])) {
+        $layout = $this->models->validatedLayout($model);
+        if ($layout === null || !self::allowed($layout)) {
             return $this->resolved[$id] = null;
         }
-        return $this->resolved[$id] = $result['data'];
+        return $this->resolved[$id] = $layout;
     }
 }

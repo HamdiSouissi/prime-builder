@@ -5203,7 +5203,7 @@ final class IntegrationTest extends TestCase
         self::assertSame('Historique', $db->table('prime_builder_submissions')->first()['message'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('1.0.0', $after->installedVersion);
+        self::assertSame('1.0.1', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000002_create_prime_builder_form_files')->count());
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000003_create_prime_builder_form_notifications')->count());
@@ -5228,11 +5228,11 @@ final class IntegrationTest extends TestCase
         self::assertSame(base64_encode('test'), $db->table('prime_builder_form_files')->where('submission_id', '=', $id)->first()['content_base64'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('1.0.0', $after->installedVersion);
+        self::assertSame('1.0.1', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
     }
 
-    public function testVersion012UpgradeTo100PreservesDataAndRunsNoMigrationTwice(): void
+    public function testVersion012UpgradePreservesDataAndRunsIndexMigrationOnce(): void
     {
         $app = $this->activated(null);
         $db = $this->db($app);
@@ -5245,6 +5245,9 @@ final class IntegrationTest extends TestCase
         $settings->set('plugin.prime-builder.configuration', $configuration);
         $id = $db->table('prime_builder_submissions')->insertGetId(['entry_id' => 1, 'node_id' => 'legacy', 'sender_name' => 'Nom', 'sender_email' => 'a@example.test', 'message' => 'Historique', 'created_at' => '2025-01-01 00:00:00']);
         $db->table('prime_builder_form_files')->insert(['submission_id' => $id, 'field_id' => 'f_file', 'field_label' => 'Fichier', 'filename' => 'test.txt', 'mime' => 'text/plain', 'bytes' => 4, 'content_base64' => base64_encode('test')]);
+        // Simulate the 0.1.2 ledger before the new derived-directory migration.
+        self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000004_prepare_theme_model_index')->delete());
+        $db->table('settings')->where('name', '=', 'plugin.prime-builder.theme_model_index')->delete();
         $migrationCount = $db->table('migrations')->where('source', '=', 'prime-builder')->count();
         self::assertSame(3, $migrationCount);
         $db->table('plugins')->where('slug', '=', 'prime-builder')->update(['version' => '0.1.2']);
@@ -5257,8 +5260,10 @@ final class IntegrationTest extends TestCase
         self::assertNotNull($after);
         self::assertTrue($after->isActive());
         self::assertFalse($after->needsUpdate);
-        self::assertSame('1.0.0', $after->installedVersion);
-        self::assertSame($migrationCount, $db->table('migrations')->where('source', '=', 'prime-builder')->count());
+        self::assertSame('1.0.1', $after->installedVersion);
+        self::assertSame($migrationCount + 1, $db->table('migrations')->where('source', '=', 'prime-builder')->count());
+        $manager->syncUpgradedPlugin('prime-builder', '0.1.2');
+        self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000004_prepare_theme_model_index')->count());
         self::assertSame($entry->content, $app->get(EntryRepository::class)->find(1)?->content);
         self::assertSame($entry->contentHtml, $app->get(EntryRepository::class)->find(1)?->contentHtml);
         self::assertSame($configuration, $settings->get('plugin.prime-builder.configuration'));
@@ -6278,6 +6283,140 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('no-store', (string) $response->header('Cache-Control'));
     }
 
+    public function testThemeModelDirectoryLoadsWinnersAndAuthenticatesNormalizedLayouts(): void
+    {
+        $app = $this->activated('admin');
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        $settings = $app->get(Settings::class);
+        $models = new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin);
+        $heading = static fn (string $text): array => [['id' => 'title', 'type' => 'heading', 'settings' => ['text' => $text], 'styles' => [], 'children' => []]];
+        $winner = $models->create('Winner', 'header', $heading('Winning heading'));
+        $fallback = $models->create('Fallback', 'header', $heading('Fallback heading'));
+        $other = $models->create('Other page', 'single', $heading('Unrelated model'));
+        self::assertNotNull($winner);
+        self::assertNotNull($fallback);
+        self::assertNotNull($other);
+        foreach ([$winner, $fallback, $other] as $model) {
+            $model['enabled'] = true;
+            $model['priority'] = $model['id'] === $winner['id'] ? 10 : 1;
+            self::assertTrue($models->save($model));
+        }
+        $indexRow = $this->db($app)->table('settings')->where('name', '=', 'plugin.prime-builder.theme_model_index')->first();
+        self::assertNotNull($indexRow);
+        self::assertSame(1, (int) $indexRow['autoload']);
+        $directory = $plugin->settings()->get(\PrimeBuilder\Theme\Models::INDEX);
+        self::assertIsArray($directory);
+        self::assertCount(3, $directory['items']);
+        self::assertStringNotContainsString('Winning heading', (string) json_encode($directory));
+        self::assertStringNotContainsString('elements', (string) json_encode($directory));
+        $entry = $app->get(EntryRepository::class)->find(1);
+        self::assertNotNull($entry);
+        $page = new PageContext(type: PageContext::TYPE_ENTRY, entry: $entry);
+        $settings->flushCache();
+        $models = new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin);
+        $db = $this->db($app);
+        $db->enableQueryLog();
+        $db->clearQueryLog();
+        $selected = null;
+        foreach ($models->matching('header', $page) as $candidate) {
+            $selected = $candidate;
+            break;
+        }
+        self::assertIsArray($selected);
+        self::assertSame($winner['id'], $selected['id']);
+        $bindings = [];
+        foreach ($db->queryLog() as $query) {
+            $bindings = array_merge($bindings, $query['bindings']);
+        }
+        self::assertContains('plugin.prime-builder.theme_model.' . $winner['id'], $bindings);
+        self::assertNotContains('plugin.prime-builder.theme_model.' . $fallback['id'], $bindings, 'The fallback is read only if needed');
+        self::assertNotContains('plugin.prime-builder.theme_model.' . $other['id'], $bindings, 'Unrelated layouts stay unloaded');
+
+        $registryCalls = 0;
+        $app->get(Hooks::class)->filter('prime_builder.widgets', static function (mixed $definitions) use (&$registryCalls): mixed {
+            $registryCalls++;
+            return $definitions;
+        });
+        $layout = $models->validatedLayout($selected);
+        self::assertIsArray($layout);
+        self::assertSame('Winning heading', $layout['elements'][0]['settings']['text']);
+        self::assertSame(1, $registryCalls, 'A valid seal checks the schema but does not invoke the validator');
+        $forged = $selected;
+        $forged['_validation']['normalized'] = $heading('Forged normalized content');
+        $layout = $models->validatedLayout($forged);
+        self::assertIsArray($layout);
+        self::assertSame('Winning heading', $layout['elements'][0]['settings']['text'], 'A forged normalized copy is ignored');
+        $forged = $selected;
+        $forged['elements'][0]['type'] = 'nonexistent_widget';
+        self::assertNull($models->validatedLayout($forged), 'Changed source cannot reuse a valid seal');
+        self::assertFalse($models->save($forged), 'Invalid layouts are rejected when saved');
+
+        $raw = $plugin->settings()->get('theme_model.' . $winner['id']);
+        self::assertIsArray($raw);
+        $raw['elements'][0]['type'] = 'nonexistent_widget';
+        $plugin->settings()->set('theme_model.' . $winner['id'], $raw, false);
+        $layout = (new \PrimeBuilder\Theme\Partials($plugin))->modelLayout('header', $page);
+        self::assertIsArray($layout);
+        self::assertSame('Fallback heading', $layout['elements'][0]['settings']['text'], 'A damaged winner does not hide a valid fallback');
+
+        $app->get(Hooks::class)->filter('prime_builder.widgets', static function (mixed $definitions): mixed {
+            if (is_array($definitions) && is_array($definitions['heading']['fields']['text'] ?? null)) {
+                $definitions['heading']['fields']['text']['max'] = 1;
+            }
+            return $definitions;
+        });
+        self::assertNull($models->validatedLayout($selected), 'Changed widget schemas invalidate the seal');
+    }
+
+    public function testThemeModelDirectoryMigratesLegacyRecordsAndRepairsCorruption(): void
+    {
+        $app = $this->activated('admin');
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        $settings = $app->get(Settings::class);
+        $db = $this->db($app);
+        $id = str_repeat('a', 32);
+        $legacy = [
+            'name' => 'Legacy', 'kind' => 'header', 'enabled' => true, 'priority' => 0,
+            'include' => [['type' => 'all', 'value' => '']], 'exclude' => [],
+            'elements' => [['id' => 'title', 'type' => 'heading', 'settings' => ['text' => 'Legacy <em>heading</em>'], 'styles' => [], 'children' => []]],
+            'legacy_extra' => 'preserved',
+        ];
+        $db->table('settings')->where('name', '=', 'plugin.prime-builder.theme_model_index')->delete();
+        $now = gmdate('Y-m-d H:i:s');
+        $db->statement('INSERT INTO `pc_settings` (`name`, `value`, `autoload`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?)', [
+            'plugin.prime-builder.theme_model.' . $id, json_encode($legacy, JSON_THROW_ON_ERROR), 0, $now, $now,
+        ]);
+        $migration = require __DIR__ . '/../migrations/2026_11_21_000004_prepare_theme_model_index.php';
+        $migration->up($db->schema());
+        $settings->flushCache();
+        $models = new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin);
+        $index = $models->index();
+        self::assertCount(1, $index);
+        self::assertSame($id, $index[0]['id']);
+        self::assertSame(false, $index[0]['dynamic']);
+        $stored = $plugin->settings()->get('theme_model.' . $id);
+        self::assertIsArray($stored);
+        self::assertSame($legacy['elements'], $stored['elements'], 'Backfill retains the exact original source');
+        self::assertSame('preserved', $stored['legacy_extra']);
+        self::assertIsArray($stored['_validation'] ?? null);
+        $model = $models->find($id);
+        self::assertNotNull($model);
+        $layout = $models->validatedLayout($model);
+        self::assertIsArray($layout);
+        self::assertSame('Legacy heading', $layout['elements'][0]['settings']['text']);
+
+        $plugin->settings()->set(\PrimeBuilder\Theme\Models::INDEX, ['items' => [], 'signature' => 'forged'], true);
+        $models->invalidate();
+        self::assertCount(1, $models->index(), 'An invalid directory is rebuilt rather than trusted');
+        $stored['elements'][0]['settings']['text'] = 'Hello {{user.name}}';
+        $plugin->settings()->set('theme_model.' . $id, $stored, false);
+        $models->invalidate();
+        self::assertSame(true, $models->index()[0]['dynamic'], 'Legacy settings writes refresh sensitivity before cache lookup');
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        self::assertFalse($cache->isCacheableRequest(Request::create('GET', '/legacy-index')));
+    }
+
     public function testThemeModelsAreEditableConditionalAndRestoreTheTheme(): void
     {
         $app = $this->activated('admin');
@@ -6751,6 +6890,9 @@ final class IntegrationTest extends TestCase
         $legacy = $this->editorConfig($app, 1);
         self::assertSame('#336699', $legacy['kitColors']['primary']);
         self::assertSame(1200, $legacy['tabletBreakpoint']);
+        // The directory is an independent lazy migration, not a settings-bundle write.
+        $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
+        (new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin))->index();
         /** @var \ArrayObject<int, list<mixed>> $events */
         $events = new \ArrayObject();
         $app->get(Hooks::class)->on('settings.updated', static function (string $name, mixed $old, mixed $new) use ($events): void {
