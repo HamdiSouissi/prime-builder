@@ -448,8 +448,10 @@ final class Plugin extends AbstractPlugin
         $context->api()->get('/documents/{id}/live', [$controller::class, 'live'], public: true);
         $context->api()->get('/forms/{id}/start', [$forms::class, 'start'], public: true);
         $context->api()->post('/forms/{id}/submit', [$forms::class, 'submit'], public: true);
+        $context->api()->post('/forms/{id}/submit-multipart', [$forms::class, 'submitMultipart'], public: true, options: ['body' => \Prime\Api\ApiRoute::BODY_MULTIPART]);
         $context->api()->get('/forms/models/{id}/start', [$forms::class, 'startModel'], public: true);
         $context->api()->post('/forms/models/{id}/submit', [$forms::class, 'submitModel'], public: true);
+        $context->api()->post('/forms/models/{id}/submit-multipart', [$forms::class, 'submitModelMultipart'], public: true, options: ['body' => \Prime\Api\ApiRoute::BODY_MULTIPART]);
         $context->api()->get('/templates', [$templates::class, 'index'], permission: 'prime_builder.edit');
         $context->api()->post('/templates', [$templates::class, 'create'], permission: 'prime_builder.templates');
         $context->api()->delete('/templates/{id}', [$templates::class, 'delete'], permission: 'prime_builder.templates');

@@ -101,10 +101,12 @@ final class Fields
      * Validate exactly the published schema; unknown/missing fields are rejected.
      *
      * @param list<array{id: string, type: string, label: string, required: bool, step: int, options: list<string>, value: string}> $fields
+     * @param array{file_kb: int, total_kb: int, count: int}|null $limits
      * @return array{name: string, email: string, message: string, fields_json: string, files: list<array{field_id: string, field_label: string, filename: string, mime: string, bytes: int, content_base64: string}>}|null
      */
-    public static function submitted(array $fields, mixed $input): ?array
+    public static function submitted(array $fields, mixed $input, ?array $limits = null): ?array
     {
+        $limits ??= UploadLimits::defaults();
         if (!is_array($input) || count($input) !== count($fields)) {
             return null;
         }
@@ -125,8 +127,8 @@ final class Fields
                     $display = '';
                     $value = null;
                 } else {
-                    $file = FileInput::validate($raw);
-                    if ($file === null || count($files) >= FileInput::MAX_FILES || ($fileBytes += $file['bytes']) > FileInput::MAX_BYTES) {
+                    $file = FileInput::validate($raw, $limits['file_kb'] * 1024);
+                    if ($file === null || count($files) >= $limits['count'] || ($fileBytes += $file['bytes']) > $limits['total_kb'] * 1024) {
                         return null;
                     }
                     $files[] = ['field_id' => $field['id'], 'field_label' => $field['label']] + $file;

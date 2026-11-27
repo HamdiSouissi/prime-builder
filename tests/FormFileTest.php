@@ -7,8 +7,11 @@ namespace PrimeBuilder\Tests;
 use PHPUnit\Framework\TestCase;
 use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Forms\FileInput;
+use PrimeBuilder\Forms\UploadLimits;
+use ZipArchive;
 
 require_once dirname(__DIR__) . '/src/Forms/FileInput.php';
+require_once dirname(__DIR__) . '/src/Forms/UploadLimits.php';
 require_once dirname(__DIR__) . '/src/Forms/Fields.php';
 
 final class FormFileTest extends TestCase
@@ -49,6 +52,64 @@ final class FormFileTest extends TestCase
         self::assertNotNull(FileInput::validate(['name' => 'large.txt', 'content' => base64_encode(str_repeat('a', FileInput::MAX_BYTES))]));
     }
 
+    public function testDocxMustBeABoundedNonMacroOoxmlPackage(): void
+    {
+        self::assertTrue(class_exists(ZipArchive::class));
+        $package = static function (array $extra = [], string $type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'): string {
+            $path = tempnam(sys_get_temp_dir(), 'pb-docx-');
+            self::assertIsString($path);
+            $zip = new ZipArchive();
+            self::assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+            $zip->addFromString('[Content_Types].xml', '<Types><Override ContentType="' . $type . '"/></Types>');
+            $zip->addFromString('word/document.xml', '<w:document xmlns:w="urn:test"/>');
+            foreach ($extra as $name => $contents) {
+                $zip->addFromString($name, $contents);
+            }
+            $zip->close();
+            $bytes = file_get_contents($path);
+            unlink($path);
+            self::assertIsString($bytes);
+            return $bytes;
+        };
+        $valid = $package();
+        $checked = FileInput::validate(['name' => 'document.DOCX', 'content' => base64_encode($valid)]);
+        self::assertNotNull($checked);
+        self::assertSame(FileInput::DOCX_MIME, $checked['mime']);
+        self::assertSame($valid, base64_decode($checked['content_base64'], true));
+        foreach ([
+            $package(['../escape' => 'bad']),
+            $package(['word/vbaProject.bin' => 'bad']),
+            $package([], 'application/vnd.ms-word.document.macroEnabled.main+xml'),
+            $package(['word/bomb.xml' => str_repeat('x', 33 * 1024 * 1024)]),
+            'not a zip archive',
+        ] as $bad) {
+            self::assertNull(FileInput::validate(['name' => 'document.docx', 'content' => base64_encode($bad)]));
+        }
+        $fakeUpload = ['name' => 'document.docx', 'tmp_name' => __FILE__, 'size' => 1, 'error' => UPLOAD_ERR_OK];
+        self::assertNull(FileInput::uploaded($fakeUpload, 1024), 'Only actual PHP upload temp files are accepted');
+        $fakeUpload['error'] = UPLOAD_ERR_INI_SIZE;
+        self::assertNull(FileInput::uploaded($fakeUpload, 1024));
+    }
+
+    public function testConfigurableLimitsAndServerWarnings(): void
+    {
+        self::assertSame(2097152, UploadLimits::iniBytes('2M'));
+        self::assertSame(1073741824, UploadLimits::iniBytes('1G'));
+        self::assertNull(UploadLimits::iniBytes('0'));
+        self::assertNull(UploadLimits::iniBytes('garbage'));
+        $limits = ['file_kb' => 1024, 'total_kb' => 2048, 'count' => 2];
+        $warnings = UploadLimits::warnings($limits, 1024, '512K', '2M', '1', 'Off');
+        self::assertContains('disabled', $warnings);
+        self::assertContains('upload_max', $warnings);
+        self::assertContains('post_max', $warnings);
+        self::assertContains('api_max', $warnings);
+        self::assertContains('file_count', $warnings);
+        $ok = UploadLimits::warnings($limits, 4096, '2M', '4M', '4', 'On');
+        foreach (['disabled', 'upload_max', 'post_max', 'api_max', 'file_count'] as $warning) {
+            self::assertNotContains($warning, $ok);
+        }
+    }
+
     public function testRequiredOptionalAndCombinedAttachmentLimitsAreValidated(): void
     {
         $field = static fn (string $id, bool $required = false): array => ['id' => $id, 'type' => 'file', 'label' => 'Pièce ' . $id, 'required' => $required, 'step' => 1, 'options' => [], 'value' => ''];
@@ -71,6 +132,15 @@ final class FormFileTest extends TestCase
         self::assertNull(Fields::submitted($fields, ['f_one' => $file, 'f_two' => 'notes.txt']));
         $large = ['name' => 'large.txt', 'content' => base64_encode(str_repeat('a', 300000))];
         self::assertNull(Fields::submitted($fields, ['f_one' => $large, 'f_two' => $large]));
+        $twoKiB = ['name' => 'two.txt', 'content' => base64_encode(str_repeat('a', 2048))];
+        $oneKiB = ['name' => 'one.txt', 'content' => base64_encode(str_repeat('b', 1024))];
+        $limits = ['file_kb' => 2, 'total_kb' => 3, 'count' => 2];
+        self::assertNotNull(Fields::submitted($fields, ['f_one' => $twoKiB, 'f_two' => $oneKiB], $limits));
+        self::assertNull(Fields::submitted($fields, ['f_one' => $twoKiB, 'f_two' => $twoKiB], $limits));
+        $limits['count'] = 1;
+        self::assertNull(Fields::submitted($fields, ['f_one' => $oneKiB, 'f_two' => $oneKiB], $limits));
+        $limits['file_kb'] = 1;
+        self::assertNull(Fields::submitted($fields, ['f_one' => $twoKiB, 'f_two' => null], $limits));
         self::assertNull(Fields::parse($json([$field('f_1'), $field('f_2'), $field('f_3'), $field('f_4'), $field('f_5')])));
     }
 }

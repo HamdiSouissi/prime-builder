@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PrimeBuilder\Controller;
 
+use JsonException;
 use Prime\Admin\AdminContext;
 use Prime\Api\ApiError;
 use Prime\Auth\Auth;
@@ -31,6 +32,7 @@ use PrimeBuilder\Forms\RateLimit;
 use PrimeBuilder\Forms\Submissions;
 use PrimeBuilder\Forms\Success;
 use PrimeBuilder\Forms\Tokens;
+use PrimeBuilder\Forms\UploadLimits;
 use PrimeBuilder\Popup\Options as PopupOptions;
 use PrimeBuilder\Theme\Models;
 use PrimeBuilder\Widgets\Content;
@@ -136,7 +138,8 @@ final class ContactForms
         $submissionId = self::positiveId($id);
         $fileId = self::positiveId($file);
         $stored = $submissionId !== null && $fileId !== null ? $this->submissions->file($submissionId, $fileId) : null;
-        $checked = $stored !== null ? FileInput::validate(['name' => $stored['filename'] ?? null, 'content' => $stored['content_base64'] ?? null]) : null;
+        // A later reduction of upload limits must not make older files unreadable.
+        $checked = $stored !== null ? FileInput::validate(['name' => $stored['filename'] ?? null, 'content' => $stored['content_base64'] ?? null], UploadLimits::MAX_KB * 1024) : null;
         if ($checked === null || $checked['bytes'] !== (int) ($stored['bytes'] ?? 0) || $checked['mime'] !== ($stored['mime'] ?? null)) {
             return Response::text('', 404)->withHeader('Cache-Control', 'no-store, private');
         }
@@ -195,7 +198,13 @@ final class ContactForms
         $token = $model
             ? $tokens->issueModel($id, $node, (string) $page, (string) $pageType, $request->ip(), $now)
             : $tokens->issue((int) $form['entry_id'], $node, $request->ip(), $now);
-        $data = ['token' => $token];
+        // Limits are delivered outside cacheable HTML, so settings changes apply
+        // immediately even to previously saved or cached form markup.
+        $limits = UploadLimits::fromSettings($this->plugin->settings());
+        $data = ['token' => $token, 'uploads' => $limits + [
+            'help' => t('plugin::prime-builder.forms.file_help', ['count' => $limits['count'], 'file' => $limits['file_kb'], 'total' => $limits['total_kb']]),
+            'error' => t('plugin::prime-builder.forms.file_error'),
+        ]];
         if ($request->attribute('api.user') instanceof User && $request->attribute('api.token_id') === null) {
             // A logged-in browser needs the CMS's CSRF header for its POST.
             // Deliver it only through this non-cacheable, same-origin response.
@@ -206,17 +215,30 @@ final class ContactForms
 
     public function submit(Request $request, string $id): Response
     {
-        return $this->submitForm($request, $id, false);
+        return $this->submitForm($request, $id, false, false);
+    }
+
+    public function submitMultipart(Request $request, string $id): Response
+    {
+        return $this->submitForm($request, $id, false, true);
     }
 
     public function submitModel(Request $request, string $id): Response
     {
-        return $this->submitForm($request, $id, true);
+        return $this->submitForm($request, $id, true, false);
     }
 
-    private function submitForm(Request $request, string $id, bool $model): Response
+    public function submitModelMultipart(Request $request, string $id): Response
     {
-        $body = $request->attribute('api.body');
+        return $this->submitForm($request, $id, true, true);
+    }
+
+    private function submitForm(Request $request, string $id, bool $model, bool $multipart): Response
+    {
+        $body = $multipart ? self::multipartPayload($request) : $request->attribute('api.body');
+        if ($multipart && $body === null) {
+            return $this->error($request, 'validation_failed', 422);
+        }
         $entryId = self::positiveId($id);
         $node = is_array($body) && is_string($body['node'] ?? null) ? $body['node'] : '';
         $page = is_array($body) ? ($body['page'] ?? null) : null;
@@ -243,7 +265,11 @@ final class ContactForms
         $custom = array_key_exists('form_fields', $settings);
         $fields = $custom ? Fields::parse((string) $settings['form_fields']) : null;
         $hasFile = $fields !== null && in_array('file', array_column($fields, 'type'), true);
-        if (!is_array($body) || strlen($request->rawBody()) > ($hasFile ? FileInput::MAX_BODY_BYTES : 24000)) {
+        $limits = UploadLimits::fromSettings($this->plugin->settings());
+        $maxBody = $hasFile ? (int) (4 * ceil($limits['total_kb'] * 1024 / 3)) + UploadLimits::OVERHEAD_BYTES : 24000;
+        if (!is_array($body) || ($multipart && (!$custom || !$hasFile))
+            || (!$multipart && strlen($request->rawBody()) > $maxBody)
+            || ($multipart && (int) $request->server('CONTENT_LENGTH', 0) > $limits['total_kb'] * 1024 + UploadLimits::OVERHEAD_BYTES)) {
             return $this->error($request, 'validation_failed', 422);
         }
         $allowed = $custom ? ['node', 'fields', 'website', 'token'] : ['node', 'name', 'email', 'message', 'website', 'token'];
@@ -279,9 +305,35 @@ final class ContactForms
             return $this->error($request, 'validation_failed', 422);
         }
         if ($custom) {
+            // Read real uploads only after checking the current widget and signed token.
+            // Multipart file placeholders must be null, so neither an upload nor
+            // a JSON/base64 value can override an unrelated published field.
+            if ($multipart) {
+                $fileIds = array_column(array_filter($fields, static fn (array $field): bool => $field['type'] === 'file'), 'id');
+                foreach ($fileIds as $fileId) {
+                    if (!array_key_exists($fileId, $body['fields']) || $body['fields'][$fileId] !== null) {
+                        return $this->error($request, 'validation_failed', 422);
+                    }
+                }
+                $uploads = $request->files();
+                if (count($uploads) > $limits['count']) {
+                    return $this->error($request, 'validation_failed', 422);
+                }
+                foreach ($uploads as $key => $upload) {
+                    if (preg_match('/^upload_(f_[a-z0-9]{1,24})$/D', $key, $match) !== 1
+                        || !in_array($match[1], $fileIds, true)) {
+                        return $this->error($request, 'validation_failed', 422);
+                    }
+                    $converted = FileInput::uploaded($upload, $limits['file_kb'] * 1024);
+                    if ($converted === null) {
+                        return $this->error($request, 'validation_failed', 422);
+                    }
+                    $body['fields'][$match[1]] = $converted;
+                }
+            }
             // Never accept the definition supplied by the visitor. Use the current,
             // visible, published widget again, including after a start token was issued.
-            $values = $fields !== null ? Fields::submitted($fields, $body['fields']) : null;
+            $values = $fields !== null ? Fields::submitted($fields, $body['fields'], $limits) : null;
             if ($values === null) {
                 return $this->error($request, 'validation_failed', 422);
             }
@@ -329,6 +381,21 @@ final class ContactForms
             return $this->error($request, 'conflict', 409);
         }
         return Response::json(['data' => $response], 201)->withHeader('Cache-Control', 'no-store, private');
+    }
+
+    /** @return array<string, mixed>|null */
+    private static function multipartPayload(Request $request): ?array
+    {
+        $form = $request->attribute('api.body');
+        if (!is_array($form) || count($form) !== 1 || !is_string($form['payload'] ?? null) || strlen($form['payload']) > 60000) {
+            return null;
+        }
+        try {
+            $body = json_decode($form['payload'], true, 32, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return null;
+        }
+        return is_array($body) && !array_is_list($body) ? $body : null;
     }
 
     private function canManage(Request $request): bool

@@ -4843,9 +4843,12 @@ final class IntegrationTest extends TestCase
         self::assertNotNull($model);
         $model['enabled'] = true;
         self::assertTrue($models->save($model));
+        $app->get(ContentTypeRegistry::class)->register(new ContentType(name: 'book', labels: ['singular' => 'Livre', 'plural' => 'Livres'], rewriteBase: 'livres'));
         $resolver = $app->get(UrlResolver::class);
-        $archive = $resolver->resolve(Request::create('GET', '/blog'));
-        self::assertSame(PageContext::TYPE_BLOG, $archive->type);
+        $blog = $resolver->resolve(Request::create('GET', '/blog'));
+        self::assertSame(PageContext::TYPE_BLOG, $blog->type);
+        $archive = $resolver->resolve(Request::create('GET', '/livres'));
+        self::assertSame(PageContext::TYPE_ARCHIVE, $archive->type);
         $missing = $resolver->resolve(Request::create('GET', '/form-missing-page'));
         self::assertTrue($missing->isNotFound());
         // The CMS has no resolver API for a plugin's own route; its signed proof
@@ -4853,7 +4856,7 @@ final class IntegrationTest extends TestCase
         $pluginPage = PageContext::plugin('/third-party-page', 'Third party', '');
         $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
         self::assertNotNull($tokens);
-        foreach ([[$archive, 'site'], [$missing, 'site'], [$pluginPage, 'plugin']] as $i => [$page, $pageType]) {
+        foreach ([[$blog, 'site'], [$archive, 'site'], [$missing, 'site'], [$pluginPage, 'plugin']] as $i => [$page, $pageType]) {
             $html = $app->get(Hooks::class)->apply('site.partial', null, 'header', $page);
             self::assertIsString($html);
             self::assertSame(1, preg_match('/data-pb-proof="([a-f0-9]{64})"/', $html, $matches));
@@ -4870,7 +4873,7 @@ final class IntegrationTest extends TestCase
             $body['page_type'] = $pageType === 'site' ? 'plugin' : 'site';
             self::assertSame(404, $this->formRequest($app, 'POST', $route . '/submit', $body, $ip)->status());
         }
-        self::assertSame(3, $this->db($app)->table('prime_builder_submissions')->where('entry_id', '=', 0)->count());
+        self::assertSame(4, $this->db($app)->table('prime_builder_submissions')->where('entry_id', '=', 0)->count());
     }
 
     public function testContactFormRendersAndOnlyStartsForVisiblePublishedWidgets(): void
@@ -5228,7 +5231,7 @@ final class IntegrationTest extends TestCase
         $entry = $app->get(EntryRepository::class)->find(1);
         self::assertNotNull($entry);
         self::assertStringContainsString('type="file"', $entry->contentHtml);
-        self::assertStringContainsString('accept=".pdf,.png,.jpg,.jpeg,.txt"', $entry->contentHtml);
+        self::assertStringContainsString('accept=".pdf,.png,.jpg,.jpeg,.txt,.docx"', $entry->contentHtml);
         self::assertStringNotContainsString('name="token"', $entry->contentHtml);
         $tokens = \PrimeBuilder\Forms\Tokens::fromAppKey($app->config()->get('app.key'));
         self::assertNotNull($tokens);
@@ -5238,6 +5241,29 @@ final class IntegrationTest extends TestCase
             'node' => 'upload', 'token' => $tokens->issue(1, 'upload', $ip, time() - $age), 'website' => '',
             'fields' => ['f_name' => 'Expéditeur', 'f_file' => ['name' => 'rapport <important>.txt', 'content' => base64_encode($bytes)]],
         ];
+        // The CMS gives multipart routes their own middleware; the legacy JSON
+        // endpoint remains distinct. Simulated local files must not pass as uploads.
+        $multipart = function (string $ip, array $body, array $files = [], array $extra = []) use ($app, $path): Response {
+            return $app->get(Kernel::class)->handle(Request::create(
+                'POST',
+                $path . '/submit-multipart',
+                body: ['payload' => (string) json_encode($body)] + $extra,
+                headers: ['Accept' => 'application/json', 'Content-Type' => 'multipart/form-data; boundary=test'],
+                files: $files,
+                server: ['REMOTE_ADDR' => $ip],
+            ));
+        };
+        $mp = $payload('198.51.100.168');
+        $mp['fields']['f_file'] = null;
+        $fakeUpload = ['name' => 'private.txt', 'type' => 'text/plain', 'tmp_name' => __FILE__, 'error' => UPLOAD_ERR_OK, 'size' => 4];
+        self::assertSame(422, $multipart('198.51.100.168', $mp, ['upload_f_file' => $fakeUpload])->status());
+        self::assertSame(422, $multipart('198.51.100.168', $mp, ['upload_f_unknown' => $fakeUpload])->status());
+        self::assertSame(422, $multipart('198.51.100.168', $mp, [], ['unexpected' => '1'])->status());
+        $forged = $mp;
+        $forged['fields']['f_file'] = ['name' => 'x.txt', 'content' => base64_encode('test')];
+        self::assertSame(422, $multipart('198.51.100.168', $forged)->status());
+        self::assertSame(415, $this->formRequest($app, 'POST', $path . '/submit-multipart', $mp, '198.51.100.169')->status());
+
         $early = $payload('198.51.100.160', 0);
         self::assertSame(422, $this->formRequest($app, 'POST', $path . '/submit', $early, '198.51.100.160')->status());
         $trap = $payload('198.51.100.161');
@@ -5270,6 +5296,25 @@ final class IntegrationTest extends TestCase
         self::assertSame(\PrimeBuilder\Forms\FileInput::MAX_BYTES, (int) $largeFile['bytes']);
         self::assertTrue((new \PrimeBuilder\Forms\Submissions($this->db($app)))->delete((int) $largeFile['submission_id']));
         self::assertSame(0, $this->db($app)->table('prime_builder_form_files')->count());
+
+        // Larger configured limits also apply to legacy JSON clients, subject to
+        // the CMS API limit; a smaller setting is enforced server-side.
+        $app->get(Settings::class)->set('plugin.prime-builder.upload_file_kb', 768);
+        $app->get(Settings::class)->set('plugin.prime-builder.upload_total_kb', 768);
+        $biggerIp = '198.51.100.166';
+        $bigger = $payload($biggerIp);
+        $bigger['fields']['f_file'] = ['name' => 'bigger.txt', 'content' => base64_encode(str_repeat('x', 600000))];
+        self::assertSame(201, $this->formRequest($app, 'POST', $path . '/submit', $bigger, $biggerIp)->status());
+        $biggerFile = $this->db($app)->table('prime_builder_form_files')->first();
+        self::assertNotNull($biggerFile);
+        self::assertSame(600000, (int) $biggerFile['bytes']);
+        self::assertTrue((new \PrimeBuilder\Forms\Submissions($this->db($app)))->delete((int) $biggerFile['submission_id']));
+        $app->get(Settings::class)->set('plugin.prime-builder.upload_file_kb', 1);
+        $app->get(Settings::class)->set('plugin.prime-builder.upload_total_kb', 1);
+        $smallIp = '198.51.100.167';
+        $tooBig = $payload($smallIp);
+        $tooBig['fields']['f_file'] = ['name' => 'too-big.txt', 'content' => base64_encode(str_repeat('x', 1025))];
+        self::assertSame(422, $this->formRequest($app, 'POST', $path . '/submit', $tooBig, $smallIp)->status());
 
         $ip = '198.51.100.164';
         self::assertSame(200, $this->formRequest($app, 'GET', $path . '/start?node=upload', ip: $ip)->status());
@@ -5685,17 +5730,25 @@ final class IntegrationTest extends TestCase
         $screen = $this->send($app, 'GET', '/admin/prime-builder/settings');
         self::assertSame(200, $screen->status());
         self::assertStringContainsString('name="submission_retention_days"', $screen->body());
+        self::assertStringContainsString('name="upload_file_kb"', $screen->body());
+        self::assertStringContainsString('name="upload_total_kb"', $screen->body());
+        self::assertStringContainsString('name="upload_max_files"', $screen->body());
         $fields = [
             '_csrf_token' => $app->get(Csrf::class)->token(), 'pages' => '1', 'other_types' => '',
             'breakpoint_tablet' => '1024', 'breakpoint_mobile' => '767',
             'kit_primary' => '#c9441f', 'kit_text' => '#1a1d29', 'kit_font_size' => '16',
-            'submission_retention_days' => '7',
+            'submission_retention_days' => '7', 'upload_file_kb' => '1024', 'upload_total_kb' => '2048', 'upload_max_files' => '2',
         ];
         $kernel = $app->get(Kernel::class);
         self::assertSame(419, $kernel->handle(Request::create('POST', '/admin/prime-builder/settings', body: array_diff_key($fields, ['_csrf_token' => true])))->status());
         self::assertSame(302, $kernel->handle(Request::create('POST', '/admin/prime-builder/settings', body: $fields))->status());
         $settings = $app->get(Settings::class);
         self::assertSame(7, $settings->get('plugin.prime-builder.configuration')['submission_retention_days']);
+        self::assertSame(1024, $settings->get('plugin.prime-builder.configuration')['upload_file_kb']);
+        self::assertSame(2048, $settings->get('plugin.prime-builder.configuration')['upload_total_kb']);
+        self::assertSame(2, $settings->get('plugin.prime-builder.configuration')['upload_max_files']);
+        $warningScreen = $this->send($app, 'GET', '/admin/prime-builder/settings');
+        self::assertStringContainsString('api.max_body_kb', $warningScreen->body());
         self::assertStringContainsString('plus de 7 jours', $this->send($app, 'GET', '/admin/prime-builder/submissions')->body());
         foreach (['0', '-1', '3651', '1.5', '', ['7']] as $invalid) {
             $bad = $fields;
@@ -5703,10 +5756,19 @@ final class IntegrationTest extends TestCase
             self::assertSame(422, $kernel->handle(Request::create('POST', '/admin/prime-builder/settings', body: $bad))->status());
             self::assertSame(7, $settings->get('plugin.prime-builder.configuration')['submission_retention_days']);
         }
+        foreach ([['upload_file_kb', '0'], ['upload_file_kb', '2049'], ['upload_total_kb', '8193'], ['upload_max_files', '5']] as [$key, $value]) {
+            $bad = $fields;
+            $bad[$key] = $value;
+            self::assertSame(422, $kernel->handle(Request::create('POST', '/admin/prime-builder/settings', body: $bad))->status());
+            self::assertSame(1024, $settings->get('plugin.prime-builder.configuration')['upload_file_kb']);
+        }
         $oldForm = $fields;
-        unset($oldForm['submission_retention_days']);
+        unset($oldForm['submission_retention_days'], $oldForm['upload_file_kb'], $oldForm['upload_total_kb'], $oldForm['upload_max_files']);
         self::assertSame(302, $kernel->handle(Request::create('POST', '/admin/prime-builder/settings', body: $oldForm))->status());
         self::assertSame(7, $settings->get('plugin.prime-builder.configuration')['submission_retention_days']);
+        self::assertSame(1024, $settings->get('plugin.prime-builder.configuration')['upload_file_kb']);
+        self::assertSame(2048, $settings->get('plugin.prime-builder.configuration')['upload_total_kb']);
+        self::assertSame(2, $settings->get('plugin.prime-builder.configuration')['upload_max_files']);
         $schedule = $app->get(Hooks::class)->apply('scheduler.register', new \Prime\Scheduler\Schedule());
         $purge = $schedule->get('prime-builder.purge-submissions')->closure();
         self::assertNotNull($purge);

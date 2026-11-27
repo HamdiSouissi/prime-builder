@@ -4,7 +4,7 @@
 
 - Les modèles statiques peuvent utiliser le cache anonyme du CMS ; invalidation conservatrice lors des changements pris en charge, avec contournement maintenu pour les zones enregistrées et les contenus dynamiques. Les limites des mutations directes, des requêtes concurrentes et des caches externes sont documentées.
 - Un test navigateur vérifie les vrais MISS/HIT, les modifications de modèle, widget global et menu, ainsi que l’isolation des visiteurs.
-- Version 1.0.2 en cours : formulaires d’en-tête, pied, modèle de page et popup identifiés par modèle et nœud, avec protections et revérification du contexte ; migration additive. Les nouveaux champs personnalisés conservent un JSON versionné également exporté en CSV ; le transport et le stockage des fichiers restent à faire.
+- Version 1.0.2 en cours : formulaires d’en-tête, pied, modèle de page et popup identifiés par modèle et nœud, avec protections et revérification du contexte ; migration additive. Les nouveaux champs personnalisés conservent un JSON versionné également exporté en CSV ; les fichiers utilisent le multipart avec repli JSON historique, des limites configurables et DOCX. Le stockage privé sur disque reste à faire.
 - Version 1.0.1 : index autoloadé des conditions, lecture sélective des candidats et validation authentifiée des mises en page ; migration différée des modèles existants. Les blocs Prime et données invérifiables restent revalidés.
 
 ## 1.0.0 — widgets partagés, contenu dynamique et administration

@@ -18,6 +18,7 @@ use PrimeBuilder\Dynamic\Layout as DynamicLayout;
 use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Forms\FileInput;
 use PrimeBuilder\Forms\Tokens;
+use PrimeBuilder\Forms\UploadLimits;
 use PrimeBuilder\Styles\CssClasses;
 use PrimeBuilder\Styles\Scope;
 use Throwable;
@@ -536,7 +537,7 @@ final class Renderer
                     $output .= '<label for="' . $id . '">' . $label . $suffix . '</label><textarea id="' . $id . '" name="' . $name . '" rows="5" maxlength="2000"' . $required . '></textarea>';
                 } elseif ($field['type'] === 'file') {
                     $output .= '<label for="' . $id . '">' . $label . $suffix . '</label><input id="' . $id . '" name="' . $name . '" type="file" accept="' . FileInput::ACCEPT . '" aria-describedby="' . $id . '-help"' . $required . '>'
-                        . '<p id="' . $id . '-help" class="pb-form-help">' . self::escape(t('plugin::prime-builder.forms.file_help')) . '</p>';
+                        . '<p id="' . $id . '-help" class="pb-form-help">' . self::escape(t('plugin::prime-builder.forms.file_help', ['count' => FileInput::MAX_FILES, 'file' => UploadLimits::DEFAULT_KB, 'total' => UploadLimits::DEFAULT_KB])) . '</p>';
                 } else {
                     $type = $field['type'] === 'phone' ? 'tel' : $field['type'];
                     $extra = match ($type) {

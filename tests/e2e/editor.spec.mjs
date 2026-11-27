@@ -3407,7 +3407,7 @@ test('custom fields and steps can be edited, validated and sent anonymously', as
   await row.getByLabel('Type de champ').selectOption('file');
   await row.getByLabel('Champ obligatoire').check();
   await row.getByRole('combobox', { name: 'Étape', exact: true }).selectOption('2');
-  await expect(row.getByText(/512 Kio/)).toBeVisible();
+  await expect(row.getByText(/limites d’envoi sont définies dans Réglages/)).toBeVisible();
   await expect(editor.locator('[data-pb-form-fields-error]')).toBeHidden();
   const preview = page.frameLocator('[data-pb-frame]');
   await expect(preview.locator('[data-pb-form][data-pb-custom="1"]').filter({ has: preview.getByRole('heading', { name: 'Demande personnalisée' }) }).getByLabel('Votre nom', { exact: false })).toBeVisible();
@@ -3448,17 +3448,16 @@ test('custom fields and steps can be edited, validated and sent anonymously', as
   await expect.poll(() => attachment.evaluate(input => input.validationMessage)).toContain('PDF');
   await attachment.setInputFiles({ name: 'preuve.txt', mimeType: 'text/plain', buffer: Buffer.from('Pièce privée de test.\n') });
   await expectAccessible(page);
-  const sent = page.waitForResponse(response => response.url().endsWith(`/api/prime-builder/v1/forms/${formId}/submit`) && response.request().method() === 'POST');
+  const sent = page.waitForResponse(response => response.url().endsWith(`/api/prime-builder/v1/forms/${formId}/submit-multipart`) && response.request().method() === 'POST');
   await form.getByRole('button', { name: 'Envoyer', exact: true }).click();
   const response = await sent;
   expect(response.status()).toBe(201);
   const headers = await response.request().allHeaders();
   expect(headers.cookie).toBeUndefined();
   expect(headers['x-prime-csrf']).toBeUndefined();
-  const body = response.request().postDataJSON();
-  expect(body.fields.f_name).toBe('Zoé Exemple');
-  expect(Object.values(body.fields)).toContain('site public');
-  expect(Object.values(body.fields)).toContainEqual({ name: 'preuve.txt', content: Buffer.from('Pièce privée de test.\n').toString('base64') });
+  // Chromium may omit multipart bodies containing files from DevTools; verify
+  // the transport header here and the actual received bytes via admin download below.
+  expect(headers['content-type']).toMatch(/^multipart\/form-data; boundary=/);
   expect((await response.json()).data).toMatchObject({ message: 'Merci <script>texte seulement</script> !', redirect: '/formulaire-test?envoye=1#merci' });
   await expect(form.locator('[data-pb-form-status]')).toHaveText('Merci <script>texte seulement</script> ! Redirection en cours dans quelques secondes.');
   await expect(form.locator('[data-pb-form-status] script')).toHaveCount(0);

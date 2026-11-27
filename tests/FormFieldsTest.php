@@ -7,6 +7,8 @@ namespace PrimeBuilder\Tests;
 use PHPUnit\Framework\TestCase;
 use PrimeBuilder\Forms\Fields;
 
+require_once dirname(__DIR__) . '/src/Forms/FileInput.php';
+require_once dirname(__DIR__) . '/src/Forms/UploadLimits.php';
 require_once dirname(__DIR__) . '/src/Forms/Fields.php';
 
 final class FormFieldsTest extends TestCase

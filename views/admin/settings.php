@@ -7,6 +7,7 @@ declare(strict_types=1);
 /** @var list<array{label: string, url: ?string}> $breadcrumbs */
 /** @var array<string, bool|int|float|string> $values */
 /** @var array<string, bool> $errors */
+/** @var list<string> $uploadWarnings */
 /** @var string $formAction */
 $this->layout('admin::layouts/app');
 $invalid = static fn (string $name): string => isset($errors[$name]) ? ' aria-invalid="true"' : '';
@@ -59,6 +60,19 @@ $checked = static fn (string $name): bool => in_array($values[$name] ?? false, [
                     <input class="pc-input pc-input--narrow" id="pb-submission-retention" name="submission_retention_days" type="number" min="1" max="3650" required value="<?= $this->e((string) ($values['submission_retention_days'] ?? '')) ?>" aria-describedby="pb-submission-retention-help"<?= $invalid('submission_retention_days') ?>>
                     <p class="pc-field__help" id="pb-submission-retention-help"><?= $this->e(t('plugin::prime-builder.settings.submission_retention_days_help')) ?></p>
                 </div>
+                <?php foreach (['upload_file_kb' => [1, 8192], 'upload_total_kb' => [1, 8192], 'upload_max_files' => [1, 4]] as $name => [$min, $max]): ?>
+                    <div class="pc-field">
+                        <label class="pc-label" for="pb-<?= $this->e($name) ?>"><?= $this->e(t('plugin::prime-builder.settings.' . $name)) ?></label>
+                        <input class="pc-input pc-input--narrow" id="pb-<?= $this->e($name) ?>" name="<?= $this->e($name) ?>" type="number" min="<?= $min ?>" max="<?= $max ?>" required value="<?= $this->e((string) ($values[$name] ?? '')) ?>" aria-describedby="pb-<?= $this->e($name) ?>-help"<?= $invalid($name) ?>>
+                        <p class="pc-field__help" id="pb-<?= $this->e($name) ?>-help"><?= $this->e(t('plugin::prime-builder.settings.' . $name . '_help')) ?></p>
+                    </div>
+                <?php endforeach; ?>
+                <?php if ($uploadWarnings !== []): ?>
+                    <div class="pc-alert pc-alert--warning" role="status">
+                        <strong><?= $this->e(t('plugin::prime-builder.settings.upload_warnings')) ?></strong>
+                        <ul><?php foreach ($uploadWarnings as $warning): ?><li><?= $this->e(t('plugin::prime-builder.settings.upload_warning_' . $warning)) ?></li><?php endforeach; ?></ul>
+                    </div>
+                <?php endif; ?>
                 <div class="pc-field">
                     <label class="pc-label" for="pb-editor-css"><?= $this->e(t('plugin::prime-builder.settings.editor_css')) ?></label>
                     <textarea class="pc-input" id="pb-editor-css" name="editor_css" rows="4" maxlength="512" aria-describedby="pb-editor-css-help"<?= $invalid('editor_css') ?>><?= $this->e((string) ($values['editor_css'] ?? '')) ?></textarea>

@@ -14,6 +14,7 @@ use PrimeBuilder\Configuration;
 use PrimeBuilder\Dynamic\PublicFields;
 use PrimeBuilder\Forms\NotificationSettings;
 use PrimeBuilder\Forms\Submissions;
+use PrimeBuilder\Forms\UploadLimits;
 use PrimeBuilder\Styles\EditorCss;
 use Throwable;
 
@@ -32,6 +33,9 @@ final class Settings
         'font_loading' => 'theme',
         'editor_css' => '',
         'submission_retention_days' => Submissions::RETENTION_DAYS,
+        'upload_file_kb' => UploadLimits::DEFAULT_KB,
+        'upload_total_kb' => UploadLimits::DEFAULT_KB,
+        'upload_max_files' => 4,
         'notification_email' => '',
         'public_fields' => '',
     ];
@@ -49,6 +53,10 @@ final class Settings
                 ? Submissions::retentionDays($value)
                 : (is_scalar($value) ? $value : $default);
         }
+        $uploadLimits = UploadLimits::fromSettings($this->plugin->settings());
+        $values['upload_file_kb'] = $uploadLimits['file_kb'];
+        $values['upload_total_kb'] = $uploadLimits['total_kb'];
+        $values['upload_max_files'] = $uploadLimits['count'];
         return $this->form($request, $values);
     }
 
@@ -56,8 +64,14 @@ final class Settings
     {
         $values = [];
         $errors = [];
+        $uploadLimits = UploadLimits::fromSettings($this->plugin->settings());
+        $uploadNames = ['upload_file_kb' => 'file_kb', 'upload_total_kb' => 'total_kb', 'upload_max_files' => 'count'];
         foreach (self::DEFAULTS as $name => $default) {
             $raw = $request->body($name);
+            if ($raw === null && isset($uploadNames[$name])) {
+                // A settings form opened before upgrading must not reset upload choices.
+                $raw = (string) $uploadLimits[$uploadNames[$name]];
+            }
             if (in_array($name, ['submission_retention_days', 'notification_email', 'public_fields', 'font_loading', 'editor_css'], true) && $raw === null) {
                 // Settings pages opened before an upgrade must not reset new choices.
                 $raw = Configuration::get($this->plugin->settings(), $name, $default);
@@ -116,7 +130,7 @@ final class Settings
             $values['public_fields'] = implode("\n", $publicFields);
         }
 
-        foreach (['breakpoint_tablet' => [600, 2000], 'breakpoint_mobile' => [320, 1600], 'kit_font_size' => [12, 28], 'submission_retention_days' => [1, Submissions::MAX_RETENTION_DAYS]] as $name => [$min, $max]) {
+        foreach (['breakpoint_tablet' => [600, 2000], 'breakpoint_mobile' => [320, 1600], 'kit_font_size' => [12, 28], 'submission_retention_days' => [1, Submissions::MAX_RETENTION_DAYS], 'upload_file_kb' => [1, UploadLimits::MAX_KB], 'upload_total_kb' => [1, UploadLimits::MAX_KB], 'upload_max_files' => [1, 4]] as $name => [$min, $max]) {
             $value = $values[$name];
             if (!is_string($value) || preg_match('/^[0-9]{1,4}$/D', $value) !== 1 || (int) $value < $min || (int) $value > $max) {
                 $errors[$name] = true;
@@ -126,6 +140,9 @@ final class Settings
         }
         if (!isset($errors['breakpoint_mobile']) && !isset($errors['breakpoint_tablet']) && is_int($values['breakpoint_mobile']) && is_int($values['breakpoint_tablet']) && $values['breakpoint_mobile'] >= $values['breakpoint_tablet']) {
             $errors['breakpoint_mobile'] = true;
+        }
+        if (!isset($errors['upload_file_kb']) && !isset($errors['upload_total_kb']) && is_int($values['upload_file_kb']) && is_int($values['upload_total_kb']) && $values['upload_file_kb'] > $values['upload_total_kb']) {
+            $errors['upload_file_kb'] = true;
         }
         foreach (['kit_primary', 'kit_text'] as $name) {
             $color = $values[$name];
@@ -168,6 +185,10 @@ final class Settings
             ],
             'values' => $values,
             'errors' => $errors,
+            'uploadWarnings' => UploadLimits::warnings(
+                UploadLimits::fromSettings($this->plugin->settings()),
+                $this->plugin->app()->get(\Prime\Settings\Settings::class)->getInt('api.max_body_kb', 1024),
+            ),
             'formAction' => $request->path() === '/admin/prime-builder/kit' ? '/admin/prime-builder/kit' : '/admin/prime-builder/settings',
         ]);
         if (is_array($data['adminStyles'] ?? null)) {

@@ -39,6 +39,7 @@
       let csrf = '';
       let started = 0;
       let busy = false;
+      let uploadLimits = { file_kb: 512, total_kb: 512, count: 4 };
 
       function showStep(index, focus = false) {
         step = index;
@@ -64,7 +65,7 @@
             first.setCustomValidity(valid ? '' : form.dataset.pbError);
           } else if (group.dataset.pbKind === 'file') {
             const file = first.files?.[0];
-            const valid = !file || (file.size > 0 && file.size <= 512 * 1024 && /^.+\.(pdf|png|jpe?g|txt)$/iu.test(file.name));
+            const valid = !file || (file.size > 0 && file.size <= uploadLimits.file_kb * 1024 && /^.+\.(pdf|png|jpe?g|txt|docx)$/iu.test(file.name));
             first.setCustomValidity(valid ? '' : form.dataset.pbFileError);
           }
           const invalid = controls.find(control => !control.checkValidity());
@@ -98,6 +99,16 @@
           const json = await response.json();
           if (typeof json?.data?.token !== 'string') throw new Error('invalid response');
           token = json.data.token;
+          const uploads = json.data.uploads;
+          if (uploads && Number.isInteger(uploads.file_kb) && uploads.file_kb >= 1 && uploads.file_kb <= 8192
+              && Number.isInteger(uploads.total_kb) && uploads.total_kb >= uploads.file_kb && uploads.total_kb <= 8192
+              && Number.isInteger(uploads.count) && uploads.count >= 1 && uploads.count <= 4) {
+            uploadLimits = uploads;
+            if (typeof uploads.error === 'string') form.dataset.pbFileError = uploads.error;
+            if (typeof uploads.help === 'string') form.querySelectorAll('.pb-form-help').forEach(help => { help.textContent = uploads.help; });
+            // Saved static HTML from an older version can still advertise the old list.
+            form.querySelectorAll('[data-pb-kind="file"] input[type="file"]').forEach(input => { input.accept = '.pdf,.png,.jpg,.jpeg,.txt,.docx'; });
+          }
           if (credentials === 'same-origin' && typeof json.data.csrf === 'string' && /^[a-f0-9]{64}$/.test(json.data.csrf)) csrf = json.data.csrf;
           started = performance.now();
           button.disabled = false;
@@ -114,20 +125,6 @@
         } catch { return null; }
       }
 
-      async function encodeFile(file) {
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onerror = () => reject(new Error('file read failed'));
-          reader.onload = () => {
-            const result = reader.result;
-            const comma = typeof result === 'string' ? result.indexOf(',') : -1;
-            if (comma < 0) { reject(new Error('invalid file data')); return; }
-            resolve({ name: file.name, content: result.slice(comma + 1) });
-          };
-          reader.readAsDataURL(file);
-        });
-      }
-
       form.addEventListener('submit', async event => {
         event.preventDefault();
         if (!token || busy) return;
@@ -140,7 +137,7 @@
             for (const input of steps[index].querySelectorAll('[data-pb-kind="file"] input[type="file"]')) {
               const file = input.files?.[0];
               if (file) { fileCount++; fileBytes += file.size; }
-              if (fileCount > 4 || fileBytes > 512 * 1024) {
+              if (fileCount > uploadLimits.count || fileBytes > uploadLimits.total_kb * 1024) {
                 input.setCustomValidity(form.dataset.pbFileError);
                 showStep(index); input.reportValidity(); return;
               }
@@ -156,6 +153,8 @@
           const delay = Math.max(0, 3100 - (performance.now() - started));
           if (delay) await new Promise(resolve => setTimeout(resolve, delay));
           const values = new FormData(form);
+          const files = [];
+          let hasFileField = false;
           let body;
           if (custom) {
             const fields = {};
@@ -165,8 +164,10 @@
               if (group.dataset.pbKind === 'checkbox') fields[key] = values.getAll(key);
               else if (group.dataset.pbKind === 'acceptance') fields[key] = values.has(key);
               else if (group.dataset.pbKind === 'file') {
+                hasFileField = true;
                 const file = group.querySelector('input[type="file"]')?.files?.[0];
-                fields[key] = file ? await encodeFile(file) : null;
+                fields[key] = null;
+                if (file) files.push([`upload_${key}`, file]);
               } else fields[key] = values.get(key) ?? '';
             }
             body = { node, token, fields, website: values.get('website') };
@@ -174,10 +175,19 @@
             body = { node, token, name: values.get('name'), email: values.get('email'), message: values.get('message'), website: values.get('website') };
           }
           if (model) Object.assign(body, { page, page_type: pageType, proof });
-          const response = await fetch(action, {
+          let requestBody = JSON.stringify(body);
+          const submitUrl = new URL(action.href);
+          if (hasFileField) {
+            const multipart = new FormData();
+            multipart.append('payload', requestBody);
+            files.forEach(([key, file]) => multipart.append(key, file));
+            requestBody = multipart;
+            submitUrl.pathname = submitUrl.pathname.replace(/\/submit$/, '/submit-multipart');
+          }
+          const response = await fetch(submitUrl, {
             method: 'POST', credentials, cache: 'no-store',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(csrf ? { 'X-Prime-CSRF': csrf } : {}) },
-            body: JSON.stringify(body),
+            headers: { ...(!hasFileField ? { 'Content-Type': 'application/json' } : {}), Accept: 'application/json', ...(csrf ? { 'X-Prime-CSRF': csrf } : {}) },
+            body: requestBody,
           });
           if (response.ok) {
             // Read the current published action from the non-cacheable response,
