@@ -2,11 +2,11 @@
 
 ## État actuel
 
-**A est terminé ; B est clos pour la V1 par décision du demandeur**, qui accepte les lignes encore partielles du catalogue. Les constats et résultats B conservés ci-dessous sont historiques : ils ne constituent pas une demande de rouvrir B. **C, D, E, F et G sont verts en CI**, avec les limites précisées ci-dessous. La version 1.0.0 est poussée et testée ; les points partiels restent identifiés dans le tableau. Le produit conserve des écarts à la spécification ; la version ne signifie pas une conformité totale ni une garantie de production.
+**A est terminé ; B est clos pour la V1 par décision du demandeur**, qui accepte les lignes encore partielles du catalogue. Les constats et résultats B conservés ci-dessous sont historiques : ils ne constituent pas une demande de rouvrir B. **C, D, E, F et le code des finitions G sont verts en CI**, avec les limites précisées ci-dessous. La version 1.0.0 est poussée et testée ; G ne couvre notamment pas entièrement la section 3.10 et les points partiels restent identifiés dans le tableau. Le produit conserve des écarts à la spécification ; la version ne signifie pas une conformité totale ni une garantie de production.
 
 ## 1. Dépôt et révision observée
 
-Dépôt : <https://github.com/HamdiSouissi/prime-builder> ; branche `arena/2d5ecf33-prime-builder`. La révision de code G poussée et verte est `a6065f693f842ee9b95e4c0554b2cbcec3a33953`. La présente mise à jour du rapport est distincte du code testé. Un fichier ne peut contenir son propre hash ni les résultats futurs de sa CI : après chaque nouveau push, vérifier la tête réelle avec `git ls-remote origin refs/heads/arena/2d5ecf33-prime-builder` et le run associé.
+Dépôt : <https://github.com/HamdiSouissi/prime-builder> ; branche `arena/2d5ecf33-prime-builder`. La révision de code G poussée et verte est `a6065f693f842ee9b95e4c0554b2cbcec3a33953`. La révision de rapport `9a996ed2898b37cd9e5876005176df6087493cc7` a elle aussi une CI verte. La présente mise à jour documentaire est distincte du code testé. Un fichier ne peut contenir son propre hash ni les résultats futurs de sa CI : après chaque nouveau push, vérifier la tête réelle avec `git ls-remote origin refs/heads/arena/2d5ecf33-prime-builder` et le run associé.
 
 ## 2. CI observée sur la révision de code G
 
@@ -23,7 +23,22 @@ Dépôt : <https://github.com/HamdiSouissi/prime-builder> ; branche `arena/2d5ec
 | `smoke` | `success` ; `Smoke: all routes, public content and document CSS passed.` |
 | `e2e` | `success` ; `120 passed (11.2m)` ; courses, désactivation/réactivation et désinstallation réussies |
 
-Ce run couvre G et une installation ZIP neuve sur le CMS `main` ; PHPUnit/MySQL 8 couvre aussi le CMS 1.0.1. GitHub signale le forçage d’actions Node 20 vers Node 24.
+Ce run couvre G et une installation ZIP neuve sur le CMS `main` ; PHPUnit/MySQL 8 couvre aussi le CMS 1.0.1.
+
+La révision de rapport `9a996ed2898b37cd9e5876005176df6087493cc7`, sans changement de code, a ensuite été vérifiée dans le [run 45880066140](https://github.com/HamdiSouissi/prime-builder/actions/runs/45880066140), observé `completed/success` :
+
+| Job | Résultat et ligne finale observée |
+|---|---|
+| `lint` | `success` ; `No syntax errors detected in content/plugins/prime-builder/.php-cs-fixer.dist.php` ; `[OK] No errors` |
+| `cs` | `success` ; `Found 0 of 105 files that can be fixed in 3.126 seconds, 154.45 MB memory used` |
+| `phpunit (main)` | `success` ; MySQL 8 `OK (260 tests, 7574 assertions)` |
+| `phpunit (1cef617660f8d4f7bbd9d3d659de85d284fb18e7)` | `success` ; MySQL 8 `OK (260 tests, 7578 assertions)` |
+| `js` | `success` ; `# tests 61` ; `# pass 61` ; `# fail 0` |
+| `i18n` | `success` ; `Catalogue de traduction cohérent.` |
+| `smoke` | `success` ; `Smoke: all routes, public content and document CSS passed.` |
+| `e2e` | `success` ; `120 passed (8.4m)` ; courses, désactivation/réactivation et désinstallation réussies |
+
+GitHub signale le forçage d’actions Node 20 vers Node 24 dans les deux runs.
 
 ## 3. Jalon G — finitions, CI verte et vérifications locales
 
@@ -48,6 +63,8 @@ Résultats locaux sur le code G, PHP 8.4.27 / PHPUnit 12.5.42 :
 | Cycle de vie local, CMS 1.0.1 | `Lifecycle: deactivation, theme restoration, uninstall, data cleanup and public fallback passed.` |
 
 Les 120 tests navigateur couvrent également clavier/souris, import, thème, formulaires, popups, contenu dynamique et axe sur les états exercés ; après la suite locale 1.0.1, désactivation, réactivation et désinstallation réelles ont conservé le contenu public et supprimé les données du plugin. Les parcours G vérifient les liens et états actifs, le filtre des modèles, le diagnostic, l’enregistrement et la restauration des réglages, le rejet d’une URL CSS, le rendu de la police locale dans l’iframe, le mobile et axe sans violation sérieuse ou critique pour les états contrôlés. Le premier lancement local PHPStan incluant l’outil de benchmark a échoué car sa configuration ne découvrait pas les fixtures du CMS ; après ajout de leur répertoire à la configuration **locale**, les deux analyses ci-dessus sont passées. MySQL 5.7, PHPUnit local et les analyses locales ne remplacent pas la CI MySQL 8. Les commandes de reproduction et leurs prérequis sont dans [`docs/developpement.md`](docs/developpement.md) et [`.github/workflows/ci.yml`](.github/workflows/ci.yml) ; utiliser des bases et sites jetables.
+
+Revue visuelle supplémentaire sur CMS 1.0.2, en Chromium : ouvertures et captures à **1 440 et 375 px** du tableau de bord, de la liste des modèles, de la boîte des envois, du kit, des réglages, de l’éditeur, du diagnostic système et d’une page publique ; les 16 requêtes renvoient 200 et la largeur mesurée du document correspond à celle du viewport. Dernière ligne du contrôle : `public 375: status=200 documentWidth=375 bodyWidth=375 heading="Test Prime Builder"`. Les captures ont été examinées : la liste des modèles et la boîte étaient vides et l’éditeur mobile nécessite le défilement de ses panneaux. Le diagnostic de cette fixture signale notamment l’absence de HTTPS et MySQL 5.7 non pris en charge ; ce ne sont pas des conditions de production. Le premier script de capture attendait à tort un réseau inactif dans l’éditeur et a expiré ; une autre attente de titre était ambiguë. La reprise attend le canevas de l’iframe avant la capture. Il s’agit d’images et de parcours automatisés, pas d’une inspection manuelle interactive exhaustive, d’un test de lecteur d’écran ou d’une vérification de tous les états sur tous les navigateurs.
 
 La mise à niveau 0.1.2 → 1.0.0 a été essayée par **remplacement ZIP réel** sur deux nouvelles installations MySQL 5.7, avec Prime CMS 1.0.2 et 1.0.1 : ZIP 0.1.2 du commit `40f4783cd3f6a92e7e58df01b7508f746bf3c8a0`, ZIP 1.0.0 de l’arbre de travail G (ses 158 fichiers d’exécution ont été comparés à ceux du commit `a6065f6`, sans différence), plugin actif et commande `php bin/prime plugin:install … --replace`. Dans chaque cas : `1.0.0 active; three migrations and job index exactly once; Builder content/HTML/configuration/submission/file/notification unchanged.` Une requête créée dans le vrai noyau après remplacement renvoie `Fresh public request: HTTP 200; upgraded Builder content visible.` ; ce dernier contrôle ne passe pas par un serveur réseau. Une simulation PHPUnit vérifie également la mise à niveau. Aucun téléversement ZIP par l’interface ni toutes les trajectoires de migration n’ont été testés.
 
@@ -513,7 +530,7 @@ La révision des classes `fa56b4285e825f6532bc6c8e4ad4323526b29946` est poussée
 - **D** : livré et vert dans le run indiqué en tête, sous les limites documentées.
 - **E** : livré et vert dans le run indiqué ; la purge des données et fichiers dépend du planificateur.
 - **F** : livré et vert dans le run indiqué ; limites de stockage et d’assistance précisées ci-dessus.
-- **C** : vert dans le run `45870758678`. **G** : finitions vertes dans le run `45876181109` ; les limites restantes figurent dans le tableau et le README.
+- **C** : vert dans le run `45870758678`. **G** : code des finitions vert dans le run `45876181109`, mais section 3.10 partielle ; les limites restantes figurent dans le tableau et le README.
 - **B** est clos pour la V1 ; ses limites documentées ne sont pas à reprendre dans les jalons ci-dessus.
 
 Commandes reproductibles et fixtures jetables : voir [`docs/developpement.md`](docs/developpement.md) et [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Les tests publient et suppriment des données ; ne jamais viser une base de production.
