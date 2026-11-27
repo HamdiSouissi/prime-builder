@@ -1,7 +1,15 @@
-import { test, expect } from '@playwright/test';
+import { test as base, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { isolateLoopback } from './isolated-loopback.mjs';
 
-test('model and popup forms submit independently for visitors and signed-in users', async ({ page, browser }) => {
+const test = base.extend({
+  baseURL: async ({ baseURL }, use) => {
+    const proxy = await isolateLoopback(baseURL || 'http://127.0.0.1:8080');
+    try { await use(proxy.baseURL); } finally { await proxy.close(); }
+  },
+});
+
+test('model and popup forms submit independently for visitors and signed-in users', async ({ page, browser, baseURL }) => {
   test.setTimeout(180_000);
   // Do not let an individual locator or navigation consume the entire test
   // budget: a failure must leave time for cleanup and report its real cause.
@@ -79,6 +87,7 @@ test('model and popup forms submit independently for visitors and signed-in user
       currentPage.waitForResponse(response => response.url().endsWith(`/api/prime-builder/v1/forms/${routeId}/${endpoint}`) && response.request().method() === 'POST', { timeout: 30_000 }),
       button.click(),
     ]);
+    expect(new URL(response.url()).origin).toBe(new URL(baseURL).origin);
     expect(response.status(), `Unexpected ${endpoint} status for ${routeId}`).toBe(201);
     if (hasFile) expect((await response.request().allHeaders())['content-type']).toMatch(/^multipart\/form-data; boundary=/);
     // The UI only announces success after parsing accepted=true. Reading the
@@ -99,7 +108,7 @@ test('model and popup forms submit independently for visitors and signed-in user
     const header = await createModel('header');
     const popup = await createModel('popup');
     const path = `/pb-model-form-${suffix}`;
-    visitorContext = await browser.newContext({ baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080' });
+    visitorContext = await browser.newContext({ baseURL });
     visitorContext.setDefaultTimeout(20_000);
     visitorContext.setDefaultNavigationTimeout(30_000);
     const visitor = await visitorContext.newPage();

@@ -70,7 +70,7 @@ jobs:
                       req, res = row.get('request', {}), row.get('response', {})
                       if req.get('method') != 'POST' or '/api/prime-builder/v1/forms/models/' not in req.get('url', ''):
                           continue
-                      headers = {h['name'].lower(): h['value'] for h in res.get('headers', []) if h['name'].lower() in ('content-length', 'content-type', 'connection', 'transfer-encoding')}
+                      headers = {h['name'].lower(): h['value'] for h in res.get('headers', []) if h['name'].lower() in ('content-length', 'content-type', 'connection', 'transfer-encoding', 'retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining')}
                       content = res.get('content', {})
                       print(f"{name} endpoint={req['url'].rsplit('/', 1)[-1]} status={res.get('status')} time_ms={row.get('time')} bytes={res.get('bodySize')} content={content.get('size')} headers={headers}")
                       body = content.get('_file')
