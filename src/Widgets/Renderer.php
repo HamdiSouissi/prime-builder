@@ -52,6 +52,7 @@ final class Renderer
         private readonly ?PluginContext $dynamicPlugin = null,
         private readonly ?Request $request = null,
         private readonly ?PageContext $dynamicPageContext = null,
+        private readonly ?RenderState $cacheState = null,
     ) {
     }
 
@@ -98,6 +99,9 @@ final class Renderer
 
     private function renderState(): ?RenderState
     {
+        if ($this->cacheState !== null) {
+            return $this->cacheState;
+        }
         $state = $this->dynamicPlugin?->app()->get(RenderState::class);
         return $state instanceof RenderState ? $state : null;
     }

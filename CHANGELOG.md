@@ -1,5 +1,11 @@
 # Journal des changements
 
+## 1.0.5 — suite n° 8, cache des zones
+
+- Prime CMS 1.0.3 et ultérieur purge les pages après `zone.saved` : les zones enregistrées ne déclenchent plus de lecture préalable ni de contournement global. Le minimum reste 1.0.1 ; sur 1.0.1/1.0.2, l’ancien contrôle conservateur demeure.
+- Les zones Builder rendues propagent l’état temporel : une règle de dates, même dans le repli statique d’une zone native, ou une balise `{{today}}` résolue dans une copie contextuelle empêche le stockage de la réponse concernée. Les protections des visiteurs sont inchangées.
+- Tests SQL et navigateur sur les deux générations, avec sauvegarde du pied de page et mesure de HIT avec une zone affichée ; les mutations sans événement, les rendus concurrents et les caches externes gardent leurs limites.
+
 ## 1.0.4 — suite n° 7, cache ciblé
 
 - Le filtre de cache n’exécute aucune requête SQL ; une zone déclarée enregistrée continue de contourner le cache sur tout le site, après vérification préalable.
@@ -10,7 +16,7 @@
 
 - Pièces de formulaire sur disque privé, par clé aléatoire et empreinte ; migration progressive des anciennes pièces en base, conservation des valeurs invalides et diagnostic. Verrouillage, synchronisation des fichiers/répertoires et collecte différée ; sauvegarde cohérente base + fichiers et planificateur indispensables.
 - Refus d’une troncature multipart déclarée par les clients récents et d’une réponse de succès illisible ; les anciens clients restent compatibles. Avertissement distinct lorsque la limite API suffit au multipart mais pas à l’ancien JSON/base64.
-- Comparaison `source_hash` et sauvegarde visuelle des modèles sous le même verrou ; les dernières métadonnées sont conservées. Contrôle de cohérence des widgets globaux entre instances. Les modifications concurrentes des seules métadonnées, les écritures directes et les caches externes gardent leurs limites ; voir la règle de cache 1.0.4 ci-dessus.
+- Comparaison `source_hash` et sauvegarde visuelle des modèles sous le même verrou ; les dernières métadonnées sont conservées. Contrôle de cohérence des widgets globaux entre instances. Les modifications concurrentes des seules métadonnées, les écritures directes et les caches externes gardent leurs limites ; voir la règle de cache 1.0.5 ci-dessus.
 
 ## 1.0.2 — formulaires de modèles
 
@@ -20,7 +26,7 @@
 ## 1.0.1 — index et cache des modèles
 
 - Index autoloadé des conditions, lecture sélective des candidats et validation authentifiée des mises en page ; migration différée des modèles existants. Les blocs Prime et données invérifiables restent revalidés.
-- Cache anonyme et invalidation conservatrice lors des changements pris en charge ; des tests navigateur vérifient les MISS/HIT réels, les modifications et l’isolation des visiteurs. La règle actuelle figure en 1.0.4 ; les limites des mutations directes, des requêtes concurrentes et des caches externes restent documentées.
+- Cache anonyme et invalidation conservatrice lors des changements pris en charge ; des tests navigateur vérifient les MISS/HIT réels, les modifications et l’isolation des visiteurs. La règle actuelle figure en 1.0.5 ; les limites des mutations directes, des requêtes concurrentes et des caches externes restent documentées.
 
 ## 1.0.0 — widgets partagés, contenu dynamique et administration
 

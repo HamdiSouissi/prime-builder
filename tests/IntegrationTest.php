@@ -3416,7 +3416,129 @@ final class IntegrationTest extends TestCase
         self::assertSame($firstCss, $this->send($app, 'GET', '/prime-builder/theme/' . $firstFile)->body(), 'Advertised CSS remains immutable after a zone edit');
     }
 
-    public function testSavedDeclaredZonesBypassPageCacheEvenWhenEmpty(): void
+    public function testZoneCacheGuardPreflightAndSqlAcrossCoreVersions(): void
+    {
+        $app = $this->activated(null);
+        $modern = version_compare($app->version(), '1.0.3', '>=');
+        $db = $this->db($app);
+        $db->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $app->get(\Prime\Site\Zone\ZoneRepository::class)->save('sidebar', [
+            'version' => 1, 'blocks' => [['id' => 'saved', 'type' => 'paragraph', 'data' => ['text' => 'Zone présente']]],
+        ]);
+        $guard = $app->get(\PrimeBuilder\Dynamic\CacheGuard::class);
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $cache->purgeAll();
+        // Resolve dependencies before measuring only the filter and middleware,
+        // not application boot or the artificial route handler.
+        $app->get(Session::class);
+        $app->get(\Prime\Auth\Auth::class);
+        $hooks = $app->get(Hooks::class);
+        $request = Request::create('GET', '/modern-zone-guard');
+        $response = Response::html('fixture');
+        $db->clearQueryLog();
+        $db->enableQueryLog();
+        $guard->refreshZones();
+        self::assertCount($modern ? 0 : 1, $db->queryLog(), 'Explicit refresh is SQL-free on 1.0.3+, but checks zones on older cores');
+        if (!$modern) {
+            self::assertStringContainsString('pc_zones', $db->queryLog()[0]['sql']);
+        }
+        $db->clearQueryLog();
+        foreach ([null, $response] as $candidate) {
+            self::assertSame($modern, $hooks->apply('cache.page.cacheable', true, $request, $candidate));
+            self::assertSame(false, $hooks->apply('cache.page.cacheable', false, $request, $candidate));
+            self::assertSame($modern ? null : false, $hooks->apply('cache.page.cacheable', null, $request, $candidate));
+            self::assertCount(0, $db->queryLog(), 'The cache filter must not execute SQL');
+        }
+        $renders = 0;
+        $next = static function () use (&$renders): Response {
+            return Response::html('fixture ' . ++$renders);
+        };
+        $first = $guard->process($request, $next);
+        self::assertSame($modern ? 'MISS' : null, $first->header('X-Prime-Cache'));
+        self::assertCount($modern ? 0 : 1, $db->queryLog(), 'Middleware preflight runs only on older cores');
+        $second = $guard->process($request, $next);
+        self::assertSame($modern ? 'HIT' : null, $second->header('X-Prime-Cache'));
+        self::assertSame($modern ? 'fixture 1' : 'fixture 2', $second->body());
+        self::assertSame($modern ? 1 : 2, $renders);
+        self::assertCount($modern ? 0 : 2, $db->queryLog(), 'Even a cache hit executes no SQL on CMS 1.0.3+');
+        $db->enableQueryLog(false);
+    }
+
+    public function testRenderedZoneTracksDatesAndOnlyDisplayedTodayTokens(): void
+    {
+        $app = $this->activated(null);
+        $this->db($app)->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $dynamicBlocks = $app->get(\Prime\Site\Zone\DynamicBlockRegistry::class);
+        $content = $app->get(Content::class);
+        $guard = $app->get(\PrimeBuilder\Dynamic\CacheGuard::class);
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $modern = version_compare($app->version(), '1.0.3', '>=');
+        $document = static fn (array $elements): array => [
+            'version' => 1, 'blocks' => [['id' => 'layout', 'type' => 'prime-builder/layout', 'data' => ['version' => 1, 'elements' => $elements]]],
+        ];
+        $heading = static fn (string $id, string $text, array $conditions = []): array => [
+            'id' => $id, 'type' => 'heading', 'settings' => ['text' => $text, 'level' => 2],
+            'styles' => [], 'children' => [], 'conditions' => $conditions,
+        ];
+        $dated = $document([
+            $heading('visible', 'Période active', ['start' => '2000-01-01T00:00', 'end' => '2999-01-01T00:00']),
+            $heading('future', 'Période future', ['start' => '2999-01-01T00:00']),
+        ]);
+        $saved = $zones->save('sidebar', $dated);
+        self::assertStringNotContainsString('Période active', $saved['content_html'], 'Saving keeps the safe static fallback');
+        $request = Request::create('GET', '/rendered-native-zone-date');
+        for ($i = 0; $i < 2; $i++) {
+            $response = $guard->process($request, static fn (): Response => Response::html($zones->renderLive('sidebar', $dynamicBlocks)));
+            self::assertSame($modern ? 'BYPASS' : null, $response->header('X-Prime-Cache'));
+            self::assertStringContainsString('no-store', (string) $response->header('Cache-Control'), 'A rendered native zone with dates is time-dependent, even in its static fallback');
+        }
+        $page = new PageContext(type: PageContext::TYPE_FRONT, path: '/rendered-zone-copy');
+        $request = Request::create('GET', '/rendered-zone-copy');
+        $response = $guard->process($request, static fn (): Response => Response::html($content->themeZoneInPage(['zone' => 'sidebar'], $page, $request)));
+        self::assertSame($modern ? 'BYPASS' : null, $response->header('X-Prime-Cache'));
+        self::assertStringContainsString('Période active', $response->body());
+        self::assertStringNotContainsString('Période future', $response->body());
+        self::assertStringContainsString('no-store', (string) $response->header('Cache-Control'));
+
+        $today = $document([
+            $heading('today', 'Aujourd’hui {{today}}'),
+            $heading('hidden', 'Date membre {{today}}', ['auth' => 'authenticated']),
+        ]);
+        $saved = $zones->save('sidebar', $today);
+        self::assertStringNotContainsString('{{today}}', $saved['content_html']);
+        self::assertStringNotContainsString('Date membre', $saved['content_html']);
+        $request = Request::create('GET', '/rendered-zone-today');
+        $page = new PageContext(type: PageContext::TYPE_FRONT, path: '/rendered-zone-today');
+        for ($i = 0; $i < 2; $i++) {
+            $response = $guard->process($request, static fn (): Response => Response::html($content->themeZoneInPage(['zone' => 'sidebar'], $page, $request)));
+            self::assertSame($modern ? 'BYPASS' : null, $response->header('X-Prime-Cache'));
+            self::assertStringContainsString('Aujourd’hui ', $response->body());
+            self::assertStringContainsString($app->get(\Prime\I18n\LocaleFormatter::class)->date(time()), $response->body(), 'The displayed token must resolve to a real date');
+            self::assertStringNotContainsString('{{today}}', $response->body());
+            self::assertStringNotContainsString('Date membre', $response->body());
+            self::assertStringContainsString('no-store', (string) $response->header('Cache-Control'));
+        }
+        // Outside an explicit Builder scope, native zones keep their static
+        // fallback: an undisplayed today token must not mark a different page.
+        $request = Request::create('GET', '/static-native-zone-today');
+        $response = $guard->process($request, static fn (): Response => Response::html($zones->renderLive('sidebar', $dynamicBlocks)));
+        self::assertSame($modern ? 'MISS' : null, $response->header('X-Prime-Cache'));
+        self::assertStringNotContainsString('no-store', (string) $response->header('Cache-Control'));
+        $zones->save('sidebar', $document([$heading('hidden', 'Date membre {{today}}', ['auth' => 'authenticated'])]));
+        $request = Request::create('GET', '/hidden-zone-today');
+        $page = new PageContext(type: PageContext::TYPE_FRONT, path: '/hidden-zone-today');
+        $renderHidden = static fn (): Response => Response::html($content->themeZoneInPage(['zone' => 'sidebar'], $page, $request));
+        $response = $guard->process($request, $renderHidden);
+        self::assertSame($modern ? 'MISS' : null, $response->header('X-Prime-Cache'));
+        self::assertStringNotContainsString('Date membre', $response->body());
+        self::assertStringNotContainsString('no-store', (string) $response->header('Cache-Control'));
+        self::assertSame($modern ? 'HIT' : null, $guard->process($request, $renderHidden)->header('X-Prime-Cache'));
+    }
+
+    public function testSavedDeclaredZonesFollowCoreCacheInvalidation(): void
     {
         $app = $this->activated('admin');
         $this->db($app)->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
@@ -3424,27 +3546,38 @@ final class IntegrationTest extends TestCase
         $guard = $app->get(\PrimeBuilder\Dynamic\CacheGuard::class);
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
+        $modern = version_compare($app->version(), '1.0.3', '>=');
         $request = Request::create('GET', '/zone-cache-probe');
         self::assertTrue($cache->isCacheableRequest($request));
         $cache->store($request, Response::html('old cached page'));
-        $cached = $cache->lookup($request);
-        self::assertNotNull($cached);
-        self::assertSame('HIT', $cached->header('X-Prime-Cache'));
+        self::assertSame('HIT', $cache->lookup($request)?->header('X-Prime-Cache'));
         $zones->save('not_declared', ['version' => 1, 'blocks' => []]);
         $guard->refreshZones();
-        self::assertTrue($cache->isCacheableRequest($request), 'Undeclared zones do not change the active theme');
+        self::assertTrue($cache->isCacheableRequest($request), 'Undeclared zones do not trigger the legacy preflight');
+        if ($modern) {
+            self::assertNull($cache->lookup($request), 'The CMS purges on every zone.saved event');
+            $cache->store($request, Response::html('old declared zone'));
+            self::assertNotNull($cache->lookup($request));
+        }
         $zones->save('sidebar', ['version' => 1, 'blocks' => []]);
         $guard->refreshZones();
-        self::assertFalse($cache->isCacheableRequest($request), 'A saved zone can change native output and assets without a cache-purge event');
-        self::assertNull($cache->lookup($request), 'The filter must run before reading an already cached page');
+        self::assertSame($modern, $cache->isCacheableRequest($request), 'Only older cores bypass when a declared zone is saved');
+        self::assertNull($cache->lookup($request), 'A zone save must purge or bypass the old page');
+        if ($modern) {
+            $cache->store($request, Response::html('cached empty zone'));
+        }
         $zone = ['version' => 1, 'blocks' => [['id' => 'text', 'type' => 'paragraph', 'data' => ['text' => 'Fresh zone']]]];
         $zones->save('sidebar', $zone);
         $guard->refreshZones();
-        self::assertFalse($cache->isCacheableRequest($request));
+        self::assertSame($modern, $cache->isCacheableRequest($request));
+        self::assertNull($cache->lookup($request), 'Editing a saved zone must invalidate its old page');
+        if ($modern) {
+            $cache->store($request, Response::html('cached filled zone'));
+        }
         $zones->save('sidebar', ['version' => 1, 'blocks' => []]);
         $guard->refreshZones();
-        self::assertFalse($cache->isCacheableRequest($request), 'Clearing a zone must not resurrect an older cache entry');
-        self::assertNull($cache->lookup($request));
+        self::assertSame($modern, $cache->isCacheableRequest($request));
+        self::assertNull($cache->lookup($request), 'Clearing a zone must not resurrect an older cache entry');
     }
 
     public function testSavedZonesAndPageCacheFollowRealThemeActivations(): void
@@ -3456,6 +3589,7 @@ final class IntegrationTest extends TestCase
         $guard = $app->get(\PrimeBuilder\Dynamic\CacheGuard::class);
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
+        $modern = version_compare($app->version(), '1.0.3', '>=');
         $request = Request::create('GET', '/zone-theme-cache');
         $suffix = bin2hex(random_bytes(4));
         $slug = 'pb-cache-' . $suffix;
@@ -3473,7 +3607,7 @@ final class IntegrationTest extends TestCase
             self::assertNotNull($cache->lookup($request));
             $zones->save('sidebar', ['version' => 1, 'blocks' => []]);
             $guard->refreshZones();
-            self::assertFalse($cache->isCacheableRequest($request));
+            self::assertSame($modern, $cache->isCacheableRequest($request));
 
             // A real CMS theme activation purges the old theme's page cache. A
             // different theme with no saved zones is cacheable again.
@@ -3487,7 +3621,7 @@ final class IntegrationTest extends TestCase
 
             $themes->activate('aurora');
             $guard->refreshZones();
-            self::assertFalse($cache->isCacheableRequest($request));
+            self::assertSame($modern, $cache->isCacheableRequest($request));
             $themes->activate($slug);
             $guard->refreshZones();
             self::assertTrue($cache->isCacheableRequest($request));
@@ -3498,9 +3632,10 @@ final class IntegrationTest extends TestCase
         }
     }
 
-    public function testZonePreflightNoticesAnotherInstanceWithoutAnEvent(): void
+    public function testDirectZoneWriteWithoutEventHasVersionedCacheBehavior(): void
     {
         $app = $this->activated(null);
+        $modern = version_compare($app->version(), '1.0.3', '>=');
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
         $cache->purgeAll();
@@ -3524,22 +3659,33 @@ final class IntegrationTest extends TestCase
         $zone = $this->db($app)->pdo()->prepare('INSERT INTO pc_zones (theme, slug, content, content_html, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
         $zone->execute([$app->get(\Prime\Site\Zone\ZoneRepository::class)->activeThemeSlug(), 'sidebar', '{"version":1,"blocks":[]}', '', gmdate('Y-m-d H:i:s'), gmdate('Y-m-d H:i:s')]);
         $fresh = $kernel->handle($request);
-        self::assertNotSame('HIT', $fresh->header('X-Prime-Cache'));
-        self::assertSame('render 3', $fresh->body());
-        self::assertSame('render 4', $kernel->handle($request)->body());
-        $freshPage = $kernel->handle($pageWithNewline);
-        self::assertNotSame('HIT', $freshPage->header('X-Prime-Cache'));
-        self::assertSame('render 5', $freshPage->body());
+        if ($modern) {
+            // Bypassing ZoneRepository also bypasses zone.saved: as documented,
+            // direct SQL needs a manual purge on 1.0.3+.
+            self::assertSame('HIT', $fresh->header('X-Prime-Cache'));
+            self::assertSame('render 1', $fresh->body());
+            self::assertSame('render 1', $kernel->handle($request)->body());
+            $freshPage = $kernel->handle($pageWithNewline);
+            self::assertSame('HIT', $freshPage->header('X-Prime-Cache'));
+            self::assertSame('render 2', $freshPage->body());
+        } else {
+            self::assertNotSame('HIT', $fresh->header('X-Prime-Cache'));
+            self::assertSame('render 3', $fresh->body());
+            self::assertSame('render 4', $kernel->handle($request)->body());
+            $freshPage = $kernel->handle($pageWithNewline);
+            self::assertNotSame('HIT', $freshPage->header('X-Prime-Cache'));
+            self::assertSame('render 5', $freshPage->body());
+        }
     }
 
-    public function testZoneCacheCheckFailsClosedIfZoneReadFails(): void
+    public function testZoneCacheCheckFailsClosedOnOldCoresIfZoneReadFails(): void
     {
         $app = $this->activated(null);
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
         $this->db($app)->pdo()->exec('DROP TABLE pc_zones');
         $app->get(\PrimeBuilder\Dynamic\CacheGuard::class)->refreshZones();
-        self::assertFalse($cache->isCacheableRequest(Request::create('GET', '/zone-read-failure')));
+        self::assertSame(version_compare($app->version(), '1.0.3', '>='), $cache->isCacheableRequest(Request::create('GET', '/zone-read-failure')));
     }
 
     public function testActivationPurgesCachedPagesWithoutRelyingOnNoticeSettings(): void
@@ -5727,7 +5873,7 @@ final class IntegrationTest extends TestCase
         self::assertSame('Historique', $db->table('prime_builder_submissions')->first()['message'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('1.0.4', $after->installedVersion);
+        self::assertSame('1.0.5', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000002_create_prime_builder_form_files')->count());
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000003_create_prime_builder_form_notifications')->count());
@@ -5752,7 +5898,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(base64_encode('test'), $db->table('prime_builder_form_files')->where('submission_id', '=', $id)->first()['content_base64'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('1.0.4', $after->installedVersion);
+        self::assertSame('1.0.5', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
     }
 
@@ -5786,7 +5932,7 @@ final class IntegrationTest extends TestCase
         self::assertNotNull($after);
         self::assertTrue($after->isActive());
         self::assertFalse($after->needsUpdate);
-        self::assertSame('1.0.4', $after->installedVersion);
+        self::assertSame('1.0.5', $after->installedVersion);
         self::assertSame($migrationCount + 3, $db->table('migrations')->where('source', '=', 'prime-builder')->count());
         $manager->syncUpgradedPlugin('prime-builder', '0.1.2');
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000004_prepare_theme_model_index')->count());
@@ -6505,17 +6651,18 @@ final class IntegrationTest extends TestCase
         self::assertTrue($state->isTimeDependent(), 'Nested responses may contribute to the parent');
         $state->end();
 
-        // The same zero-SQL property holds when the preflight found a zone.
+        // The filter stays SQL-free with a saved zone on both generations.
         $db->enableQueryLog(false);
         $db->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
         $app->get(\Prime\Site\Zone\ZoneRepository::class)->save('sidebar', ['version' => 1, 'blocks' => []]);
         $guard->refreshZones();
         $db->clearQueryLog();
         $db->enableQueryLog();
-        self::assertSame(false, $filter(true, $request, null));
-        self::assertSame(false, $filter(true, $request, $response));
-        self::assertSame(false, $filter(null, $request, null));
-        self::assertSame(false, $filter('allowed', $request, $response));
+        $modern = version_compare($app->version(), '1.0.3', '>=');
+        self::assertSame($modern, $filter(true, $request, null));
+        self::assertSame($modern, $filter(true, $request, $response));
+        self::assertSame($modern ? null : false, $filter(null, $request, null));
+        self::assertSame($modern ? 'allowed' : false, $filter('allowed', $request, $response));
         self::assertCount(0, $db->queryLog());
         $db->enableQueryLog(false);
     }
@@ -6916,7 +7063,7 @@ final class IntegrationTest extends TestCase
         // fallback rather than risking persistence of visitor-specific output.
         self::assertStringNotContainsString('Bonjour', $zones->renderLive('sidebar', $app->get(\Prime\Site\Zone\DynamicBlockRegistry::class)));
         $app->get(\PrimeBuilder\Dynamic\CacheGuard::class)->refreshZones();
-        self::assertFalse($cache->isCacheableRequest($cachedRequest));
+        self::assertSame(version_compare($app->version(), '1.0.3', '>='), $cache->isCacheableRequest($cachedRequest));
         $auth = $app->get(\Prime\Auth\Auth::class);
         $auth->logout();
         self::assertStringNotContainsString('Bonjour Article', $site->render($page));

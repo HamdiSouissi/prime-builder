@@ -11,26 +11,41 @@ use Prime\Http\Middleware\MiddlewareInterface;
 use Prime\Http\Request;
 use Prime\Http\Response;
 use Prime\Http\Session;
+use Prime\Kernel\Application;
 use Prime\Plugins\PluginContext;
 use PrimeBuilder\Styles\ZoneLayouts;
 use Throwable;
 
-/** Preserve the zone exception and delegate the actual cache to the CMS. */
+/** Protect visitor and temporal state, delegating the actual cache to the CMS. */
 final class CacheGuard implements MiddlewareInterface
 {
-    // No lookup is permitted until the zone state has been checked.
-    private bool $savedZone = true;
+    private readonly bool $needsZonePreflight;
+    private bool $savedZone;
 
     public function __construct(
         private readonly PluginContext $plugin,
         private readonly ZoneLayouts $zones,
         private readonly RenderState $state,
     ) {
+        // Prime 1.0.3 purges pages on zone.saved; older versions do not.
+        $this->needsZonePreflight = self::usesLegacyZonePreflight();
+        // Older cores fail closed until their declared zones have been checked.
+        $this->savedZone = $this->needsZonePreflight;
     }
 
-    /** Read the active theme's declared zones outside the cache filter. */
+    private static function usesLegacyZonePreflight(): bool
+    {
+        // Keep the decision versioned even when static analysis runs against
+        // only one CMS version; the same plugin also runs on older kernels.
+        return version_compare(Application::VERSION, '1.0.3', '<');
+    }
+
+    /** Only older cores need a fresh zone read outside the cache filter. */
     public function refreshZones(): void
     {
+        if (!$this->needsZonePreflight) {
+            return;
+        }
         try {
             $this->savedZone = $this->zones->hasSavedDeclaredZone();
         } catch (Throwable) {
@@ -74,7 +89,7 @@ final class CacheGuard implements MiddlewareInterface
             }
 
             $this->savedZone = false;
-            if ($cache instanceof PageCache && $cache->isEnabled() && !$private && $this->couldUseCache($request)) {
+            if ($this->needsZonePreflight && $cache instanceof PageCache && $cache->isEnabled() && !$private && $this->couldUseCache($request)) {
                 $this->refreshZones();
             }
             $response = $cache instanceof PageCache && !$private

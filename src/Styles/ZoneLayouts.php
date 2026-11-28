@@ -25,8 +25,8 @@ final class ZoneLayouts
         if ($slugs === []) {
             return false;
         }
-        // The CMS has no zone-save event. Read fresh, before the cache lookup,
-        // using its (theme, slug) index; the repository memoizes across reads.
+        // Prime 1.0.1/1.0.2 have no zone-save event. Read fresh before the
+        // cache lookup using the index; the repository memoizes across reads.
         return $this->db->table('zones')
             ->where('theme', '=', $this->zones->activeThemeSlug())
             ->whereIn('slug', $slugs)

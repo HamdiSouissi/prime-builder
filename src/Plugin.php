@@ -208,15 +208,15 @@ final class Plugin extends AbstractPlugin
             icon: 'layout-dashboard',
             category: 'plugins',
             validator: static fn (array $data, HtmlSanitizer $sanitizer): array => (new Validator($registry, $sanitizer, $blocks, $originals, html: $htmlContent, requireSealedHtml: true, mediaReferences: $mediaReferences))->validate($data),
-            renderer: static function (array $data, HtmlSanitizer $sanitizer, array $renderContext) use ($registry, $context, $content, $blocks, $originals, $htmlContent, $mediaReferences, $globals, $dynamicScope, $pageRequest): string {
+            renderer: static function (array $data, HtmlSanitizer $sanitizer, array $renderContext) use ($registry, $context, $content, $blocks, $originals, $htmlContent, $mediaReferences, $globals, $dynamicScope, $pageRequest, $renderState): string {
                 $entry = ($renderContext['entry'] ?? null) instanceof Entry ? $renderContext['entry'] : null;
                 // The CMS invokes this same callback while saving entries and zones.
                 // Runtime context is only supplied by our explicit zone-render scope.
                 $page = $entry === null ? $dynamicScope->page() : null;
-                // Only the dynamic resolver receives the scoped page. The zone's
-                // other widgets retain their established fallback/share behavior,
-                // and nested zone widgets cannot recursively render themselves.
-                $renderer = new Renderer($registry, $sanitizer, $context->logger(), $content, $entry, false, $blocks, $originals, $htmlContent, mediaReferences: $mediaReferences, dynamicPlugin: $page !== null ? $context : null, request: $page !== null ? ($dynamicScope->request() ?? $pageRequest->request($page)) : null, dynamicPageContext: $page);
+                // Native zones keep their safe static fallback, but a date rule
+                // still marks the current response. No dynamic values are exposed
+                // during a save; scoped copies resolve them only at render time.
+                $renderer = new Renderer($registry, $sanitizer, $context->logger(), $content, $entry, false, $blocks, $originals, $htmlContent, mediaReferences: $mediaReferences, dynamicPlugin: $page !== null ? $context : null, request: $page !== null ? ($dynamicScope->request() ?? $pageRequest->request($page)) : null, dynamicPageContext: $page, cacheState: $entry === null ? $renderState : null);
                 return $renderer->render($globals->expand($data));
             },
             // Text extraction has no entry context; it never emits HTML and still sanitizes markup.
@@ -327,10 +327,10 @@ final class Plugin extends AbstractPlugin
             $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page), dynamicPlugin: $context, request: $pageRequest->request($page));
             return '<div class="pb-theme-content">' . $renderer->render($layout) . '</div>';
         });
-        // Zone saves have no purge event. Prepare their indexed existence check
-        // before the core's page-cache middleware; the filter itself does no SQL.
-        // The wrapper also owns the render state until the core has stored (or
-        // rejected) the response, and protects custom authentication cookies.
+        // Before Prime 1.0.3, zone saves have no purge event: check them before
+        // lookup. Newer cores purge on zone.saved and need no zone preflight.
+        // The filter itself does no SQL. The wrapper owns the render state until
+        // storage is decided and protects custom authentication cookies.
         $cacheGuard = new CacheGuard($context, $zoneLayouts, $renderState);
         $context->app()->container()->instance(CacheGuard::class, $cacheGuard);
         $context->app()->get(Kernel::class)->registerMiddlewareAlias('page_cache', static fn (): CacheGuard => $cacheGuard);

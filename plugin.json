@@ -2,7 +2,7 @@
   "slug": "prime-builder",
   "name": "Prime Builder",
   "description": "plugin::prime-builder.manifest.description",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "author": { "name": "Prime Builder contributors", "url": "https://github.com/HamdiSouissi/prime-builder" },
   "license": "proprietary",
   "namespace": "PrimeBuilder\\",

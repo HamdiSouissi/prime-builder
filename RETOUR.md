@@ -2,9 +2,23 @@
 
 ## État et périmètre
 
-Branche `arena/2d5ecf33-prime-builder`. **A terminé ; B clos pour la V1 par décision du demandeur ; D, E et F acceptés, dont F2.** B n’a pas été rouvert. La suite n° 7 ne traite que la correction du cache. Manifeste **1.0.4** ; produit encore partiel, non garanti prêt pour la production et soumis à validation par Hamdi.
+Branche `arena/2d5ecf33-prime-builder`. **A terminé ; B clos pour la V1 par décision du demandeur ; D, E et F acceptés, dont F2 ; suite n° 7 acceptée.** B n’a pas été rouvert. La suite n° 8 est limitée au cache des zones. Manifeste **1.0.5**, prérequis CMS `>=1.0.1` inchangé ; produit encore partiel, non garanti prêt pour la production et soumis à validation par Hamdi.
 
-La CI 1.0.3 de référence est indiquée ci-dessous ; pour 1.0.4, consulter le run attaché au commit livré : ce fichier ne peut contenir son propre SHA ni les résultats d’une CI future. C et G avaient été revérifiés localement sur les deux CMS après F2. La suite n° 4 citée par le demandeur n’est pas présente dans ce dépôt ; sa structure exacte ne peut pas être vérifiée ici. L’ancien tableau détaillé et les runs historiques sont archivés dans [`docs/HISTORIQUE-CI.md`](docs/HISTORIQUE-CI.md).
+La CI 1.0.4 observée est indiquée ci-dessous ; pour 1.0.5, consulter le run attaché au commit livré : ce fichier ne peut contenir son propre SHA ni les résultats d’une CI future. C et G avaient été revérifiés localement sur les deux CMS après F2. La suite n° 4 citée par le demandeur n’est pas présente dans ce dépôt ; sa structure exacte ne peut pas être vérifiée ici. L’ancien tableau détaillé et les runs historiques sont archivés dans [`docs/HISTORIQUE-CI.md`](docs/HISTORIQUE-CI.md).
+
+## Suite n° 8 — cache des zones
+
+- **CMS 1.0.3+ recommandé** : le noyau purge les pages à `zone.saved` ; aucune lecture préalable de `zones` ni refus lié à leur présence. Sur 1.0.1/1.0.2, le contrôle indexé et le contournement global d’une zone déclarée enregistrée restent en place, même vidée ; si sa lecture échoue, le repli reste fermé.
+- Dépendances initialisées, les tests du rafraîchissement, du filtre et du middleware avec zone enregistrée ne comptent aucun SQL sur 1.0.3+ ; le filtre reste sans SQL sur anciens noyaux. Cookies configurés/standards et `Authorization` restent protégés avant lookup. Une condition de dates rencontrée dans une zone rendue marque la réponse, même pour le repli statique natif ; une copie contextuelle résout aussi `{{today}}` et seul un jeton affiché marque la réponse. Ces réponses sont `private, no-store`.
+- Chromium vérifie le pied de page rempli, HIT à la deuxième lecture, modification dans **Apparence › Zones**, MISS et nouveau contenu dès la requête suivante ; une zone datée n’est jamais HIT. La copie de zone vérifie dates et `{{today}}`, et une autre page reste cacheable si cette balise n’y est pas résolue. Avec cache activé, une copie personnalisée sépare le visiteur connecté et l’anonyme avant et après un HIT ; le repli statique natif n’expose pas de données de visiteur.
+
+**Vérifications locales 1.0.5**, PHP 8.4.27 / PHPUnit 12.5.42 : CMS 1.0.3 **281 tests / 8 189 assertions SQLite, 281 / 8 345 MySQL 5.7** ; CMS 1.0.2 **281 / 8 188 SQLite, 281 / 8 344 MySQL** ; CMS 1.0.1 **281 / 8 192 SQLite, 281 / 8 348 MySQL**. Chromium : **6 parcours réussis sur chacun des trois CMS**, dont isolation cache, modèles, zones, contexte dynamique, aperçu et styles. Node **63/63**, catalogues stricts cohérents, syntaxe **116 fichiers PHP**, PHP-CS-Fixer **0/116**, PHPStan niveau 8 sans erreur sur 1.0.2 et 1.0.3 (configuration locale). Des premières tentatives 1.0.2 ont échoué à créer le cache ; `/tmp` a ensuite renvoyé `Too many links` ; les suites complètes ont réussi avec des `TMPDIR` séparés.
+
+**Mesure HIT avec zone remplie** : même installation jetable, CMS `main` 1.0.3 (`5436e6c747975fed8861740d286eeea035375967`), MySQL 5.7, trois modèles actifs ; un paragraphe enregistré dans `footer_1` est inséré dans le modèle de pied et sa présence est vérifiée sur chaque réponse. Avant : plugin 1.0.4 `3684c5f0155e8236a2e1c2fddb1f7548fb0360c0` ; après : 1.0.5. Cache activé et purgé avant chaque série ; requêtes anonymes simulées par processus CLI distinct, une chauffe puis **cinq requêtes mesurées par URL**, sans mutation entre elles. Accueil **0/5 → 5/5**, article **0/5 → 5/5**, archive **0/5 → 5/5**, soit **0/15 → 15/15** ; les trois chauffes sont exclues (après correction, elles sont chacune MISS). Avec chauffes incluses : **0/18 → 15/18**. Échantillon court, pas un taux de trafic réel ; ni temps ni nombre de requêtes SQL mesurés dans ce banc.
+
+## CI 1.0.4 observée
+
+[`3684c5f0155e8236a2e1c2fddb1f7548fb0360c0` — CI 46133010356](https://github.com/HamdiSouissi/prime-builder/actions/runs/46133010356) : **9 jobs sur 9 success**. PHPUnit/MySQL 8 : `279 tests / 8297 assertions` sur CMS `main` 1.0.2 et `279 / 8301` sur 1.0.1 ; Node `63/63`, Playwright `125 passed`, courses et cycle de vie réussis.
 
 ## CI 1.0.3 observée
 
@@ -14,7 +28,7 @@ La CI 1.0.3 de référence est indiquée ci-dessous ; pour 1.0.4, consulter le r
 
 La CI suivante [46080868828](https://github.com/HamdiSouissi/prime-builder/actions/runs/46080868828) a réussi huit jobs, dont Playwright et le cycle de vie ; la préparation du CMS 1.0.1 a échoué avec le code 128 avant PHPUnit, sans cause précise accessible ici. L’API GitHub a refusé la relance ciblée avec HTTP 403. Un diagnostic de clonage a été ajouté pour de futurs échecs et testé localement sans masquer leur code de sortie.
 
-## Suite n° 7 — correction du cache
+## Suite n° 7 — correction du cache 1.0.4, historique
 
 - Une zone déclarée enregistrée du thème actif conserve son contournement global ; vérification préalable à la lecture, hors du filtre, qui ne réalise aucun SQL.
 - Sinon, les pages anonymes avec balises ordinaires ou conditions de connexion/rôle restent cacheables ; cookies de session/authentification configurés ou standards et `Authorization` contournent la lecture.
@@ -32,7 +46,7 @@ Cache activé, purge avant chaque URL et une requête anonyme d’échauffement 
 
 | Volet | Réalisation et vérification | Limites importantes |
 |---|---|---|
-| Cache | Invalidation conservatrice ; changements de modèle, widget global et menu, puis zone, vérifiés en Chromium sur les deux CMS. Les définitions globales incohérentes ne sont pas rendues ; voir les règles 1.0.4 ci-dessus. | Mutations directes sans événement, requêtes en cours et caches externes restent des limites. |
+| Cache | Invalidation conservatrice ; changements de modèle, widget global et menu, puis zone, vérifiés en Chromium sur les deux CMS. Les définitions globales incohérentes ne sont pas rendues ; voir les règles 1.0.5 ci-dessus. | Mutations directes sans événement, requêtes en cours et caches externes restent des limites. |
 | Modèles | Index autoloadé signé, sélection des candidats, validation authentifiée et reconstruction des anciens modèles. Comparaison `source_hash` et écriture visuelle atomiques sous verrou, préservant les dernières métadonnées. Courses MySQL et tests multi-instance réussis. | Deux modifications simultanées des seules métadonnées peuvent s’écraser ; écritures directes hors protocole non protégées. Les blocs Prime et données invérifiables sont revalidés. |
 | Popups | Déclencheurs automatiques directs, file d’attente, fréquence et exclusion des visiteurs connectés ; formulaire lié à son modèle/nœud. Parcours Chromium et axe sur les deux CMS. | Pas de lecteur d’écran réel ni d’audit WCAG complet ; voir les limites du cache externe. |
 | Formulaires | Formulaires d’entrée, modèle et popup ; identité et visibilité revérifiées. `fields_json` versionné et CSV, multipart, repli JSON/base64, limites configurables et DOCX. Téléchargement privé et suppression vérifiés. | Pas d’antivirus. Une preuve de page d’extension atteste un rendu antérieur sans confirmer que sa route existe encore. |
@@ -67,6 +81,6 @@ Mesure historique F2, MySQL 5.7, cache désactivé, cinq requêtes HTTP simulée
 
 ## Exploitation et documentation
 
-Les caches externes doivent contourner **avant lookup** les requêtes avec cookies de session/authentification ou en-tête d’autorisation ; une purge ne garantit pas qu’une requête en cours ne repeuple pas le cache. Prévoir sauvegardes cohérentes, contrôle des accès aux fichiers, surveillance du planificateur et du worker mail, rétention des journaux et examen des pièces dans un environnement adapté. Aucune livraison SMTP externe n’a été vérifiée. Prime CMS 1.0.2 ou ultérieur corrigé est recommandé : les limites de l’adaptateur HTTP et du chargement concurrent de 1.0.1 sont détaillées dans le README.
+Les caches externes doivent contourner **avant lookup** les requêtes avec cookies de session/authentification ou en-tête d’autorisation ; une purge ne garantit pas qu’une requête en cours ne repeuple pas le cache. Après toute mise à niveau du CMS ou du plugin, purger le cache de pages interne avant reprise du trafic, notamment en quittant 1.0.1/1.0.2. Prévoir sauvegardes cohérentes, contrôle des accès aux fichiers, surveillance du planificateur et du worker mail, rétention des journaux et examen des pièces dans un environnement adapté. Aucune livraison SMTP externe n’a été vérifiée. Prime CMS 1.0.3 ou ultérieur est recommandé pour le cache des zones ; les limites de l’adaptateur HTTP et du chargement concurrent de 1.0.1 sont détaillées dans le README.
 
 Voir [`README.md`](README.md), [`docs/developpement.md`](docs/developpement.md), [`migrations/README.md`](migrations/README.md), les tests et le [workflow CI](.github/workflows/ci.yml). Les tests et mesures modifient leurs fixtures : utiliser uniquement des installations jetables.

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-// Run on a fresh disposable CMS before 00-zone-cache: a saved declared zone
-// intentionally disables the core cache because the CMS exposes no save hook.
+// Run on a fresh disposable CMS before 00-zone-cache: on CMS 1.0.1/1.0.2,
+// any saved declared zone intentionally disables the core cache.
 test('real page cache refreshes theme and global models without sharing visitor-specific markup', async ({ page, browser }) => {
   test.setTimeout(180_000);
   const suffix = Date.now().toString(36);
