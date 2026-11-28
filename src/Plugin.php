@@ -52,6 +52,7 @@ use PrimeBuilder\Document\MediaReferences;
 use PrimeBuilder\Document\Validator;
 use PrimeBuilder\Dynamic\CacheGuard;
 use PrimeBuilder\Dynamic\RenderScope;
+use PrimeBuilder\Dynamic\RenderState;
 use PrimeBuilder\Forms\FileMaintenance;
 use PrimeBuilder\Forms\Notifications;
 use PrimeBuilder\Forms\PrivateFiles;
@@ -127,7 +128,9 @@ final class Plugin extends AbstractPlugin
         $context->app()->container()->singleton(GlobalWidgets::class, static fn (): GlobalWidgets => $globals);
         $partials = new Partials($context);
         $popups = new Popups($context);
-        $zoneLayouts = new ZoneLayouts($context->app()->get(ThemeManager::class), $context->app()->get(ZoneRepository::class));
+        $zoneLayouts = new ZoneLayouts($context->app()->get(ThemeManager::class), $context->app()->get(ZoneRepository::class), $context->db());
+        $renderState = new RenderState();
+        $context->app()->container()->instance(RenderState::class, $renderState);
         $identity = new SiteIdentity($context->app());
         $context->app()->container()->singleton(SiteIdentity::class, static fn (): SiteIdentity => $identity);
         $pageRequest = new PageRequest();
@@ -174,23 +177,10 @@ final class Plugin extends AbstractPlugin
                 $context->app()->get(\Prime\Cache\PageCache::class)->purgeAll();
             });
         }
-        // A contextual model may refer to another entry, menu, author or term.
-        // The core purges only the edited entry and some archive paths, so a
-        // broader purge is required when any active model can depend on it.
-        $purgeContextualPages = static function () use ($context, $partials): void {
-            try {
-                $needed = $partials->hasEnabledModels() || $partials->usesAnyWidget([
-                    'archive_title', 'archive_list', 'entry_title', 'entry_excerpt', 'entry_content', 'entry_featured_image',
-                    'entry_info', 'entry_navigation', 'entry_author', 'breadcrumbs', 'navigation', 'share_buttons', 'posts', 'current_content',
-                ]);
-            } catch (\Throwable) {
-                // Hook exceptions are isolated by the CMS: on failure, purge
-                // rather than silently leaving possibly sensitive old pages.
-                $needed = true;
-            }
-            if ($needed) {
-                $context->app()->get(\Prime\Cache\PageCache::class)->purgeAll();
-            }
+        // A rendered entry or model can depend on another entry, menu, author
+        // or term. Purge on mutations, without scanning layouts on page views.
+        $purgeContextualPages = static function () use ($context): void {
+            $context->app()->get(\Prime\Cache\PageCache::class)->purgeAll();
         };
         foreach (['content.saved', 'content.updated', 'content.published', 'content.deleted', 'content.trashed', 'content.restored', 'content.status_changed'] as $event) {
             $context->hooks()->on($event, static function () use ($content, $purgeContextualPages): void {
@@ -337,36 +327,16 @@ final class Plugin extends AbstractPlugin
             $renderer = new Renderer($registry, $context->app()->get(HtmlSanitizer::class), $context->logger(), $content, null, false, $blocks, $originals, $htmlContent, false, $page, $mediaReferences, allowThemeHtml: true, pageQuery: $pageRequest->query($page), dynamicPlugin: $context, request: $pageRequest->request($page));
             return '<div class="pb-theme-content">' . $renderer->render($layout) . '</div>';
         });
-        // Zone saves have no page-purge event, so bypass before lookup whenever
-        // a declared zone has been saved, including after it has been cleared.
-        // Visitor/time-dependent dynamic layouts also fail closed until the core
-        // offers a safe per-page dependency/expiry hook.
-        $cacheGuard = new CacheGuard($context, $partials, $zoneLayouts);
-        $context->hooks()->filter('cache.page.cacheable', static function (mixed $cacheable, mixed $request = null) use ($context, $cacheGuard): mixed {
-            if ($cacheable !== true) {
-                return $cacheable;
-            }
-            try {
-                if ($request instanceof Request) {
-                    // The core checks its default cookie names only. Also avoid
-                    // shared pages for deployments using custom session names.
-                    $session = $context->app()->get(\Prime\Http\Session::class)->name();
-                    $remember = $context->app()->get(Auth::class)->rememberCookieName();
-                    foreach ([$session, $remember] as $cookie) {
-                        if (($request->cookie($cookie) ?? '') !== '') {
-                            return false;
-                        }
-                    }
-                }
-                return !$cacheGuard->sensitive();
-            } catch (\Throwable) {
-                // The hook engine isolates exceptions; never authorize a stale cached response.
-                return false;
-            }
-        });
-        // The core page cache is already bypassed before lookup. Also tell reverse
-        // proxies and browsers not to share or retain visitor/time-dependent HTML.
-        $context->hooks()->filter('http.response', static function (mixed $response, mixed $request) use ($context, $cacheGuard): mixed {
+        // Zone saves have no purge event. Prepare their indexed existence check
+        // before the core's page-cache middleware; the filter itself does no SQL.
+        // The wrapper also owns the render state until the core has stored (or
+        // rejected) the response, and protects custom authentication cookies.
+        $cacheGuard = new CacheGuard($context, $zoneLayouts, $renderState);
+        $context->app()->container()->instance(CacheGuard::class, $cacheGuard);
+        $context->app()->get(Kernel::class)->registerMiddlewareAlias('page_cache', static fn (): CacheGuard => $cacheGuard);
+        $context->hooks()->filter('cache.page.cacheable', $cacheGuard->cacheable(...));
+        // Proxies must never retain HTML generated for an authenticated request.
+        $context->hooks()->filter('http.response', static function (mixed $response, mixed $request) use ($context): mixed {
             if (!$response instanceof \Prime\Http\Response || !$request instanceof Request
                 || !in_array($request->method(), ['GET', 'HEAD'], true)
                 || !str_contains(strtolower((string) $response->header('Content-Type')), 'text/html')
@@ -378,9 +348,10 @@ final class Plugin extends AbstractPlugin
                 // on an otherwise static page. Never offer that HTML to a proxy.
                 $session = $context->app()->get(\Prime\Http\Session::class)->name();
                 $remember = $context->app()->get(Auth::class)->rememberCookieName();
-                $private = $request->header('authorization') !== null
-                    || ($request->cookie($session) ?? '') !== '' || ($request->cookie($remember) ?? '') !== ''
-                    || $cacheGuard->privateResponse();
+                $private = $request->header('authorization') !== null;
+                foreach ([$session, $remember, \Prime\Http\Session::DEFAULT_NAME, 'prime_remember', 'prime_auth', 'PHPSESSID'] as $cookie) {
+                    $private = $private || ($request->cookie($cookie) ?? '') !== '';
+                }
             } catch (\Throwable) {
                 $private = true;
             }

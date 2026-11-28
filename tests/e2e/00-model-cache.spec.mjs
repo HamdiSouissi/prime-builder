@@ -102,6 +102,20 @@ test('real page cache refreshes theme and global models without sharing visitor-
     await expect(visitor.getByText('Widget global après')).toHaveCount(2);
     response = await visitor.reload();
     expect(response.headers()['x-prime-cache']).toBe('HIT');
+
+    // A referenced global is evaluated in both the header and the entry. A
+    // future start still prevents a cached page from outliving that boundary.
+    await saveModel(global, [{ ...heading('Widget programmé'), conditions: { start: '2999-01-01T00:00' } }]);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      response = await visitor.reload();
+      expect(response.headers()['x-prime-cache']).toBe('BYPASS');
+      await expect(visitor.getByText('Widget programmé')).toHaveCount(0);
+    }
+    await saveModel(global, [heading('Widget global après')]);
+    response = await visitor.reload();
+    expect(response.headers()['x-prime-cache']).toBe('MISS');
+    response = await visitor.reload();
+    expect(response.headers()['x-prime-cache']).toBe('HIT');
     await saveMenu('Menu après');
     response = await visitor.reload();
     expect(response.headers()['x-prime-cache']).toBe('MISS');
@@ -116,17 +130,34 @@ test('real page cache refreshes theme and global models without sharing visitor-
     response = await visitor.reload();
     expect(response.headers()['x-prime-cache']).toBe('HIT');
 
+    // The active header is part of this page, unlike an unrelated model.
+    const currentHeader = { ...heading('En-tête daté'), id: 'dated', conditions: { end: '2999-01-01T00:00' } };
+    await saveModel(header, [...staticHeader('En-tête après'), currentHeader]);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      response = await visitor.reload();
+      expect(response.headers()['x-prime-cache']).toBe('BYPASS');
+      await expect(visitor.getByText('En-tête daté')).toBeVisible();
+    }
+    await saveModel(header, [...staticHeader('En-tête après'), { ...heading('En-tête {{today}}'), id: 'today' }]);
+    response = await visitor.reload();
+    expect(response.headers()['x-prime-cache']).toBe('BYPASS');
+    await expect(visitor.getByText('En-tête', { exact: false }).first()).toBeVisible();
+    await saveModel(header, staticHeader('En-tête après'));
+
     const privateHeading = { ...heading('Privé {{user.name}}'), id: 'private', conditions: { auth: 'authenticated' } };
     await saveModel(header, [...staticHeader('En-tête après'), privateHeading]);
     response = await visitor.reload();
-    expect(response.headers()['x-prime-cache']).toBeUndefined();
-    expect(response.headers()['cache-control']).toContain('no-store');
+    expect(response.headers()['x-prime-cache']).toBe('MISS');
+    expect(response.headers()['cache-control'] || '').not.toContain('no-store');
     await expect(visitor.getByText('Privé', { exact: false })).toHaveCount(0);
+    response = await visitor.reload();
+    expect(response.headers()['x-prime-cache']).toBe('HIT');
     response = await page.goto(path);
+    expect(response.headers()['x-prime-cache']).not.toBe('HIT');
     expect(response.headers()['cache-control']).toContain('no-store');
     await expect(page.getByText('Privé CI Admin')).toBeVisible();
     response = await visitor.reload();
-    expect(response.headers()['x-prime-cache']).toBeUndefined();
+    expect(response.headers()['x-prime-cache']).toBe('HIT');
     await expect(visitor.getByText('Privé', { exact: false })).toHaveCount(0);
     await saveModel(header, staticHeader('En-tête après'));
 
@@ -135,15 +166,23 @@ test('real page cache refreshes theme and global models without sharing visitor-
     await enableModel(popup, true);
     response = await visitor.reload();
     expect(response.headers()['x-prime-cache']).toBe('MISS');
-    expect(response.headers()['cache-control']).toContain('no-store');
+    expect(response.headers()['cache-control'] || '').not.toContain('no-store');
     await expect(visitor.locator(`[data-pb-popup="${popup}"]`)).toHaveCount(1);
     response = await visitor.reload();
     expect(response.headers()['x-prime-cache']).toBe('HIT');
-    expect(response.headers()['cache-control']).toContain('no-store');
+    expect(response.headers()['cache-control'] || '').not.toContain('no-store');
     response = await page.goto(path);
     expect(response.headers()['x-prime-cache']).toBeUndefined();
     expect(response.headers()['cache-control']).toContain('no-store');
     await expect(page.locator(`[data-pb-popup="${popup}"]`)).toHaveCount(0);
+
+    await saveModel(popup, [{ ...heading('Popup à venir'), conditions: { start: '2999-01-01T00:00' } }]);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      response = await visitor.reload();
+      expect(response.headers()['x-prime-cache']).toBe('BYPASS');
+      await expect(visitor.locator(`[data-pb-popup="${popup}"]`)).toHaveCount(1);
+      await expect(visitor.getByText('Popup à venir')).toHaveCount(0);
+    }
   } finally {
     if (visitorContext) await visitorContext.close();
     await page.goto('/admin/prime-builder/theme');

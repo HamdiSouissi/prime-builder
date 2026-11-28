@@ -37,7 +37,7 @@ final class Layout
      * @param callable(string): string|null $resolve
      * @return list<array<string, mixed>>
      */
-    public static function prepare(array $elements, array $definitions, bool $runtime, ?User $user, ?callable $resolve): array
+    public static function prepare(array $elements, array $definitions, bool $runtime, ?User $user, ?callable $resolve, ?RenderState $state = null): array
     {
         $output = [];
         foreach ($elements as $element) {
@@ -46,6 +46,11 @@ final class Layout
             }
             if (array_key_exists('conditions', $element)) {
                 $rules = Conditions::normalize($element['conditions']);
+                if ($rules !== null && (isset($rules['start']) || isset($rules['end']))) {
+                    // Mark before testing visibility: a currently hidden element
+                    // can become visible while an otherwise cacheable page lives.
+                    $state?->markTimeDependent();
+                }
                 // Unknown or damaged conditions fail closed, including in direct renderer calls.
                 if ($rules === null || ($rules !== [] && (!$runtime || !Conditions::matches($rules, $user)))) {
                     continue;
@@ -64,7 +69,7 @@ final class Layout
                 $settings[$key] = Tags::replace($value, $runtime ? $resolve : null, $kind === 'rich');
             }
             $element['settings'] = $settings;
-            $element['children'] = self::prepare(is_array($element['children'] ?? null) ? $element['children'] : [], $definitions, $runtime, $user, $resolve);
+            $element['children'] = self::prepare(is_array($element['children'] ?? null) ? $element['children'] : [], $definitions, $runtime, $user, $resolve, $state);
             $output[] = $element;
         }
         return $output;

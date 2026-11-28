@@ -512,9 +512,8 @@ final class Models
     }
 
     /**
-     * Resolve a global definition only against the same authenticated directory
-     * used for cache-sensitivity decisions. A source changed since that snapshot
-     * must not be rendered under its previous, potentially static classification.
+     * Resolve a global definition against its authenticated directory entry.
+     * A source changed since that snapshot must not use stale routing metadata.
      *
      * @return array<string, mixed>|null
      */

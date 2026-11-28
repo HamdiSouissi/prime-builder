@@ -18,7 +18,7 @@ trait DatabaseFixture
         createApp as private createSqliteApp;
     }
 
-    /** @var list<array{server: PDO, name: string}> */
+    /** @var list<array{server: PDO, name: string, connection: ?Connection}> */
     private array $mysqlDatabases = [];
 
     protected function createApp(?string $authenticateAs): Application
@@ -40,7 +40,7 @@ trait DatabaseFixture
         $server = new PDO('mysql:host=' . $host . ';port=' . $port . ';charset=utf8mb4', $username, $password, $options);
         $name = 'prime_builder_test_' . bin2hex(random_bytes(8));
         $server->exec('CREATE DATABASE `' . $name . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
-        $this->mysqlDatabases[] = ['server' => $server, 'name' => $name];
+        $this->mysqlDatabases[] = ['server' => $server, 'name' => $name, 'connection' => null];
         $mysql = new PDO('mysql:host=' . $host . ';port=' . $port . ';dbname=' . $name . ';charset=utf8mb4', $username, $password, $options);
         $mysql->exec("SET time_zone = '+00:00'");
         $mysql->exec("SET SESSION sql_mode = 'STRICT_ALL_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,ONLY_FULL_GROUP_BY'");
@@ -75,7 +75,9 @@ trait DatabaseFixture
             }
         }
 
-        $app->container()->instance(Connection::class, new Connection(['prefix' => 'pc_'], pdo: $mysql));
+        $connection = new Connection(['prefix' => 'pc_'], pdo: $mysql);
+        $this->mysqlDatabases[count($this->mysqlDatabases) - 1]['connection'] = $connection;
+        $app->container()->instance(Connection::class, $connection);
         if ($authenticateAs !== null) {
             $app->get(Auth::class)->login($this->user($app, $authenticateAs === 'admin' ? 1 : 2));
         }
@@ -85,6 +87,9 @@ trait DatabaseFixture
     private function removeMysqlDatabases(): void
     {
         foreach ($this->mysqlDatabases as $database) {
+            // The CMS shutdown guard retains plugin containers for the process.
+            // Disconnect their fixture PDOs before the next test creates one.
+            $database['connection']?->disconnect();
             $database['server']->exec('DROP DATABASE `' . $database['name'] . '`');
         }
         $this->mysqlDatabases = [];

@@ -4,86 +4,109 @@ declare(strict_types=1);
 
 namespace PrimeBuilder\Dynamic;
 
+use Prime\Auth\Auth;
+use Prime\Cache\Http\PageCacheMiddleware;
+use Prime\Cache\PageCache;
+use Prime\Http\Middleware\MiddlewareInterface;
+use Prime\Http\Request;
+use Prime\Http\Response;
+use Prime\Http\Session;
 use Prime\Plugins\PluginContext;
-use PrimeBuilder\Popup\Options as PopupOptions;
 use PrimeBuilder\Styles\ZoneLayouts;
-use PrimeBuilder\Theme\Models;
-use PrimeBuilder\Theme\Partials;
 use Throwable;
 
-/**
- * Decide before the core page-cache lookup. Conservative site-wide bypass is
- * intentional: core cannot enumerate dependencies of theme/zone/plugin pages.
- */
-final class CacheGuard
+/** Preserve the zone exception and delegate the actual cache to the CMS. */
+final class CacheGuard implements MiddlewareInterface
 {
-    private readonly Models $models;
+    // No lookup is permitted until the zone state has been checked.
+    private bool $savedZone = true;
 
     public function __construct(
         private readonly PluginContext $plugin,
-        private readonly Partials $partials,
         private readonly ZoneLayouts $zones,
+        private readonly RenderState $state,
     ) {
-        $this->models = new Models($plugin->settings(), $plugin->app()->get(\Prime\Settings\Settings::class), $plugin);
     }
 
-    /**
-     * The core cache excludes authenticated requests, but an external proxy may
-     * not. A popup hidden from connected visitors must never be shared by one.
-     */
-    public function privateResponse(): bool
+    /** Read the active theme's declared zones outside the cache filter. */
+    public function refreshZones(): void
     {
-        if ($this->sensitive()) {
-            return true;
-        }
         try {
-            foreach ($this->models->index() as $model) {
-                if (($model['kind'] ?? null) !== 'popup' || ($model['enabled'] ?? false) !== true) {
-                    continue;
-                }
-                $options = PopupOptions::normalize($model['popup'] ?? null);
-                if ($options === null || $options['hide_logged_in']) {
-                    return true;
-                }
-            }
+            $this->savedZone = $this->zones->hasSavedDeclaredZone();
+        } catch (Throwable) {
+            // Hooks isolate exceptions: a failed zone check must not serve stale HTML.
+            $this->savedZone = true;
+        }
+    }
+
+    /** The core calls this both before lookup and before storing the response. */
+    public function cacheable(mixed $value, mixed $request = null, mixed $response = null): mixed
+    {
+        if ($value !== true) {
+            return $value;
+        }
+        if ($this->savedZone) {
             return false;
-        } catch (Throwable) {
-            return true;
+        }
+        return $response instanceof Response && $this->state->isTimeDependent() ? false : $value;
+    }
+
+    /** @param callable(Request): Response $next */
+    public function process(Request $request, callable $next): Response
+    {
+        $previousZone = $this->savedZone;
+        $this->state->begin();
+        try {
+            try {
+                $app = $this->plugin->app();
+                $cache = $app->get(PageCache::class);
+                $session = $app->get(Session::class)->name();
+                $remember = $app->get(Auth::class)->rememberCookieName();
+                // The core knows only fixed cookie names. A renamed session or
+                // remember-me cookie must also bypass before lookup.
+                $private = $request->header('authorization') !== null;
+                foreach ([$session, $remember, Session::DEFAULT_NAME, 'prime_remember', 'prime_auth', 'PHPSESSID'] as $cookie) {
+                    $private = $private || ($request->cookie($cookie) ?? '') !== '';
+                }
+            } catch (Throwable) {
+                // Do not risk sharing personalized HTML when dependencies fail.
+                $cache = null;
+                $private = true;
+            }
+
+            $this->savedZone = false;
+            if ($cache instanceof PageCache && $cache->isEnabled() && !$private && $this->couldUseCache($request)) {
+                $this->refreshZones();
+            }
+            $response = $cache instanceof PageCache && !$private
+                ? (new PageCacheMiddleware($cache))->process($request, $next)
+                : $next($request);
+
+            // The internal store has already been decided. External caches must
+            // not retain a page whose evaluated content changes with the clock.
+            if ($this->state->isTimeDependent()
+                && str_contains(strtolower((string) $response->header('Content-Type')), 'text/html')
+                && !str_contains(strtolower((string) $response->header('Cache-Control')), 'no-store')) {
+                $response = $response->withHeader('Cache-Control', 'private, no-store');
+            }
+            return $response;
+        } finally {
+            $this->savedZone = $previousZone;
+            $this->state->end();
         }
     }
 
-    public function sensitive(): bool
+    /** Avoid the zone query for methods or parameters the CMS never caches. */
+    private function couldUseCache(Request $request): bool
     {
-        try {
-            // Settings memoizes autoloaded values within the application. A
-            // separate process may have committed a sensitive model since the
-            // previous check, so refresh both before lookup and before storage.
-            $this->models->refresh();
-            if ($this->zones->hasSavedDeclaredZone()) {
-                return true;
-            }
-            $stored = $this->partials->stored();
-            foreach (['header', 'footer'] as $slot) {
-                $elements = $stored[$slot]['elements'] ?? [];
-                if (is_array($elements) && Layout::uses($elements)) {
-                    return true;
-                }
-            }
-            // Includes globals: a definition can be embedded on arbitrary pages.
-            // The signed directory records sensitivity without loading layouts.
-            foreach ($this->models->index() as $model) {
-                if (($model['dynamic'] ?? null) !== false) {
-                    return true;
-                }
-            }
-            // Entries are canonically encoded by the core. A bounded existence
-            // query avoids decoding every document and errs toward false positives.
-            return $this->plugin->db()->table('entries')->where(static function ($query): void {
-                $query->where('content', 'LIKE', '%{{%')->orWhere('content', 'LIKE', '%"conditions"%');
-            })->exists();
-        } catch (Throwable) {
-            // Hooks swallow exceptions; a failed check must not permit shared caching.
-            return true;
+        if (!in_array($request->method(), ['GET', 'HEAD'], true)) {
+            return false;
         }
+        foreach ($request->query() as $name => $value) {
+            if ((string) $name !== 'page' || !is_scalar($value) || preg_match('/^[1-9][0-9]*$/D', (string) $value) !== 1) {
+                return false;
+            }
+        }
+        return true;
     }
 }

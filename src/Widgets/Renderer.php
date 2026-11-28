@@ -15,6 +15,7 @@ use PrimeBuilder\Document\HtmlContent;
 use PrimeBuilder\Document\MediaReferences;
 use PrimeBuilder\Dynamic\Context as DynamicContext;
 use PrimeBuilder\Dynamic\Layout as DynamicLayout;
+use PrimeBuilder\Dynamic\RenderState;
 use PrimeBuilder\Forms\Fields;
 use PrimeBuilder\Forms\FileInput;
 use PrimeBuilder\Forms\Tokens;
@@ -71,10 +72,11 @@ final class Renderer
         // cookie and every later request bypasses the page cache.
         $outlineSource = is_array($styleLayout['elements'] ?? null) ? $styleLayout['elements'] : $sourceElements;
         $dynamic = DynamicLayout::uses($sourceElements) || DynamicLayout::uses($outlineSource) ? $this->dynamicContext() : null;
-        $elements = DynamicLayout::prepare($sourceElements, $definitions, $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null);
+        $state = $this->renderState();
+        $elements = DynamicLayout::prepare($sourceElements, $definitions, $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null, $state);
         // A targeted preview renders only one subtree, but its anchors and any
         // table of contents must still agree with the complete visible document.
-        $outlineElements = DynamicLayout::prepare($outlineSource, $definitions, $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null);
+        $outlineElements = DynamicLayout::prepare($outlineSource, $definitions, $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null, $state);
         $this->tableOfContents = $this->containsTableOfContents($outlineElements) ? new TableOfContents($outlineElements, $this->sanitizer) : null;
         $this->inferredImageDimensions = [];
         if ($this->mediaReferences !== null) {
@@ -92,6 +94,12 @@ final class Renderer
             ? ' data-pb-live="/api/prime-builder/v1/documents/' . $this->entry->id . '/live"'
             : '';
         return '<div class="pb-layout"' . $document . $refresh . '>' . $this->renderElements($elements, $definitions) . '</div>';
+    }
+
+    private function renderState(): ?RenderState
+    {
+        $state = $this->dynamicPlugin?->app()->get(RenderState::class);
+        return $state instanceof RenderState ? $state : null;
     }
 
     private function dynamicContext(): ?DynamicContext
@@ -292,7 +300,7 @@ final class Renderer
         };
         $source = is_array($data['elements'] ?? null) ? $data['elements'] : [];
         $dynamic = DynamicLayout::uses($source) ? $this->dynamicContext() : null;
-        $elements = DynamicLayout::prepare($source, $this->registry->all(), $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null);
+        $elements = DynamicLayout::prepare($source, $this->registry->all(), $dynamic !== null, $dynamic?->user(), $dynamic !== null ? $dynamic->value(...) : null, $this->renderState());
         $walk($elements);
         return $output;
     }

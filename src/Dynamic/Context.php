@@ -93,10 +93,11 @@ final class Context
             $identity = $app->get(SiteIdentity::class);
             return $name === 'site.title' ? $identity->rawName() : $identity->rawTagline();
         }
-        $formatter = $app->get(LocaleFormatter::class);
         if ($name === 'today') {
-            return $formatter->date(time());
+            $app->get(RenderState::class)->markTimeDependent();
+            return $app->get(LocaleFormatter::class)->date(time());
         }
+        $formatter = $app->get(LocaleFormatter::class);
         $entry = $this->entry;
         if ($entry === null) {
             return '';

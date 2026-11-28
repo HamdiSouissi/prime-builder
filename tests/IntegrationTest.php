@@ -3421,6 +3421,7 @@ final class IntegrationTest extends TestCase
         $app = $this->activated('admin');
         $this->db($app)->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
         $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $guard = $app->get(\PrimeBuilder\Dynamic\CacheGuard::class);
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
         $request = Request::create('GET', '/zone-cache-probe');
@@ -3430,14 +3431,18 @@ final class IntegrationTest extends TestCase
         self::assertNotNull($cached);
         self::assertSame('HIT', $cached->header('X-Prime-Cache'));
         $zones->save('not_declared', ['version' => 1, 'blocks' => []]);
+        $guard->refreshZones();
         self::assertTrue($cache->isCacheableRequest($request), 'Undeclared zones do not change the active theme');
         $zones->save('sidebar', ['version' => 1, 'blocks' => []]);
+        $guard->refreshZones();
         self::assertFalse($cache->isCacheableRequest($request), 'A saved zone can change native output and assets without a cache-purge event');
         self::assertNull($cache->lookup($request), 'The filter must run before reading an already cached page');
         $zone = ['version' => 1, 'blocks' => [['id' => 'text', 'type' => 'paragraph', 'data' => ['text' => 'Fresh zone']]]];
         $zones->save('sidebar', $zone);
+        $guard->refreshZones();
         self::assertFalse($cache->isCacheableRequest($request));
         $zones->save('sidebar', ['version' => 1, 'blocks' => []]);
+        $guard->refreshZones();
         self::assertFalse($cache->isCacheableRequest($request), 'Clearing a zone must not resurrect an older cache entry');
         self::assertNull($cache->lookup($request));
     }
@@ -3448,6 +3453,7 @@ final class IntegrationTest extends TestCase
         $this->db($app)->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
         $themes = $app->get(\Prime\Themes\ThemeManager::class);
         $zones = $app->get(\Prime\Site\Zone\ZoneRepository::class);
+        $guard = $app->get(\PrimeBuilder\Dynamic\CacheGuard::class);
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
         $request = Request::create('GET', '/zone-theme-cache');
@@ -3466,11 +3472,13 @@ final class IntegrationTest extends TestCase
             $cache->store($request, Response::html('cached before zone and theme switch'));
             self::assertNotNull($cache->lookup($request));
             $zones->save('sidebar', ['version' => 1, 'blocks' => []]);
+            $guard->refreshZones();
             self::assertFalse($cache->isCacheableRequest($request));
 
             // A real CMS theme activation purges the old theme's page cache. A
             // different theme with no saved zones is cacheable again.
             $themes->activate($slug);
+            $guard->refreshZones();
             self::assertSame($slug, $themes->active()->slug);
             self::assertTrue($cache->isCacheableRequest($request));
             self::assertNull($cache->lookup($request));
@@ -3478,8 +3486,10 @@ final class IntegrationTest extends TestCase
             self::assertNotNull($cache->lookup($request));
 
             $themes->activate('aurora');
+            $guard->refreshZones();
             self::assertFalse($cache->isCacheableRequest($request));
             $themes->activate($slug);
+            $guard->refreshZones();
             self::assertTrue($cache->isCacheableRequest($request));
             self::assertNull($cache->lookup($request), 'Switching back must not resurrect a cached page from the first activation');
         } finally {
@@ -3488,12 +3498,39 @@ final class IntegrationTest extends TestCase
         }
     }
 
+    public function testZonePreflightNoticesAnotherInstanceWithoutAnEvent(): void
+    {
+        $app = $this->activated(null);
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $cache->purgeAll();
+        $renders = 0;
+        $app->get(\Prime\Http\Router::class)->get('/zone-other-instance', static function () use (&$renders): Response {
+            return Response::html('render ' . ++$renders);
+        });
+        $request = Request::create('GET', '/zone-other-instance');
+        $kernel = $app->get(Kernel::class);
+        self::assertSame('MISS', $kernel->handle($request)->header('X-Prime-Cache'));
+        self::assertSame('HIT', $kernel->handle($request)->header('X-Prime-Cache'));
+        self::assertSame(1, $renders);
+
+        // A separate worker writes a declared zone directly: no local hook or
+        // repository memoization informs this already-running application.
+        $zone = $this->db($app)->pdo()->prepare('INSERT INTO pc_zones (theme, slug, content, content_html, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
+        $zone->execute([$app->get(\Prime\Site\Zone\ZoneRepository::class)->activeThemeSlug(), 'sidebar', '{"version":1,"blocks":[]}', '', gmdate('Y-m-d H:i:s'), gmdate('Y-m-d H:i:s')]);
+        $fresh = $kernel->handle($request);
+        self::assertNotSame('HIT', $fresh->header('X-Prime-Cache'));
+        self::assertSame('render 2', $fresh->body());
+        self::assertSame('render 3', $kernel->handle($request)->body());
+    }
+
     public function testZoneCacheCheckFailsClosedIfZoneReadFails(): void
     {
         $app = $this->activated(null);
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
         $this->db($app)->pdo()->exec('DROP TABLE pc_zones');
+        $app->get(\PrimeBuilder\Dynamic\CacheGuard::class)->refreshZones();
         self::assertFalse($cache->isCacheableRequest(Request::create('GET', '/zone-read-failure')));
     }
 
@@ -5682,7 +5719,7 @@ final class IntegrationTest extends TestCase
         self::assertSame('Historique', $db->table('prime_builder_submissions')->first()['message'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('1.0.3', $after->installedVersion);
+        self::assertSame('1.0.4', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000002_create_prime_builder_form_files')->count());
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000003_create_prime_builder_form_notifications')->count());
@@ -5707,7 +5744,7 @@ final class IntegrationTest extends TestCase
         self::assertSame(base64_encode('test'), $db->table('prime_builder_form_files')->where('submission_id', '=', $id)->first()['content_base64'] ?? null);
         $after = $manager->get('prime-builder', fresh: true);
         self::assertNotNull($after);
-        self::assertSame('1.0.3', $after->installedVersion);
+        self::assertSame('1.0.4', $after->installedVersion);
         self::assertFalse($after->needsUpdate);
     }
 
@@ -5741,7 +5778,7 @@ final class IntegrationTest extends TestCase
         self::assertNotNull($after);
         self::assertTrue($after->isActive());
         self::assertFalse($after->needsUpdate);
-        self::assertSame('1.0.3', $after->installedVersion);
+        self::assertSame('1.0.4', $after->installedVersion);
         self::assertSame($migrationCount + 3, $db->table('migrations')->where('source', '=', 'prime-builder')->count());
         $manager->syncUpgradedPlugin('prime-builder', '0.1.2');
         self::assertSame(1, $db->table('migrations')->where('migration', '=', 'prime-builder:2026_11_21_000004_prepare_theme_model_index')->count());
@@ -6376,6 +6413,167 @@ final class IntegrationTest extends TestCase
         self::assertSame(403, $this->send($app, 'PATCH', '/api/prime-builder/v1/theme-models/' . $id, ['content' => $document, 'source_hash' => \PrimeBuilder\Theme\Models::sourceHash([])], $unauthorized)->status());
     }
 
+    public function testPageCacheFilterUsesNoSqlAndStoresOnlyNonTemporalLayouts(): void
+    {
+        $app = $this->activated(null);
+        $guard = $app->get(\PrimeBuilder\Dynamic\CacheGuard::class);
+        $state = $app->get(\PrimeBuilder\Dynamic\RenderState::class);
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $cache->purgeAll();
+        $hooks = $app->get(Hooks::class);
+        $db = $this->db($app);
+        $definitions = ['heading' => ['fields' => ['text' => ['type' => 'text']]]];
+        $node = static fn (array $rules): array => [[
+            'id' => 'heading', 'type' => 'heading', 'settings' => ['text' => 'Hello'],
+            'styles' => [], 'children' => [], 'conditions' => $rules,
+        ]];
+        $request = Request::create('GET', '/cache-auth-condition');
+        $response = Response::html('anonymous');
+        $context = new \PrimeBuilder\Dynamic\Context($app->get(PluginManager::class)->loaded()['prime-builder'], null, null, $request);
+        $db->enableQueryLog();
+        $db->clearQueryLog();
+        $filter = static function (mixed $value, Request $request, ?Response $response) use ($hooks, $db): mixed {
+            $before = count($db->queryLog());
+            $result = $hooks->apply('cache.page.cacheable', $value, $request, $response);
+            self::assertCount($before, $db->queryLog(), 'This individual filter call must not execute SQL');
+            return $result;
+        };
+        $state->begin();
+        try {
+            \PrimeBuilder\Dynamic\Layout::prepare($node(['auth' => 'authenticated']), $definitions, true, null, null, $state);
+            self::assertFalse($state->isTimeDependent());
+            self::assertSame(true, $filter(true, $request, null));
+            self::assertSame(true, $filter(true, $request, $response));
+            self::assertSame(false, $filter(false, $request, $response));
+            self::assertNull($filter(null, $request, null));
+            self::assertSame('MISS', $cache->store($request, $response)->header('X-Prime-Cache'));
+            self::assertSame('HIT', $cache->lookup($request)?->header('X-Prime-Cache'));
+        } finally {
+            $state->end();
+        }
+
+        $timed = Request::create('GET', '/cache-date-condition');
+        $state->begin();
+        try {
+            \PrimeBuilder\Dynamic\Layout::prepare($node(['start' => '2999-01-01T00:00']), $definitions, true, null, null, $state);
+            self::assertTrue($state->isTimeDependent(), 'A currently hidden element may become visible later');
+            self::assertSame(true, $filter(true, $timed, null));
+            self::assertSame(false, $filter(true, $timed, $response));
+            self::assertSame('BYPASS', $cache->store($timed, $response)->header('X-Prime-Cache'));
+            self::assertNull($cache->lookup($timed));
+        } finally {
+            $state->end();
+        }
+        $today = $node([]);
+        $today[0]['settings']['text'] = 'Today {{today}}';
+        $state->begin();
+        try {
+            $hidden = $today;
+            $hidden[0]['conditions'] = ['auth' => 'authenticated'];
+            \PrimeBuilder\Dynamic\Layout::prepare($hidden, $definitions, true, null, $context->value(...), $state);
+            self::assertFalse($state->isTimeDependent(), 'An undisplayed today token is not resolved');
+            $rendered = \PrimeBuilder\Dynamic\Layout::prepare($today, $definitions, true, null, $context->value(...), $state);
+            self::assertStringNotContainsString('{{today}}', $rendered[0]['settings']['text']);
+            self::assertTrue($state->isTimeDependent());
+            $todayRequest = Request::create('GET', '/cache-today');
+            self::assertSame(true, $filter(true, $todayRequest, null));
+            self::assertSame(false, $filter(true, $todayRequest, $response));
+            self::assertSame('BYPASS', $cache->store($todayRequest, $response)->header('X-Prime-Cache'));
+            self::assertNull($cache->lookup($todayRequest));
+        } finally {
+            $state->end();
+        }
+        $state->begin();
+        self::assertFalse($state->isTimeDependent(), 'A later request starts with a clean state');
+        $state->begin();
+        $state->markTimeDependent();
+        $state->end();
+        self::assertTrue($state->isTimeDependent(), 'Nested responses may contribute to the parent');
+        $state->end();
+
+        // The same zero-SQL property holds when the preflight found a zone.
+        $db->enableQueryLog(false);
+        $db->pdo()->exec('CREATE TABLE pc_media_zone_usage (zone_id INTEGER, media_id INTEGER, context VARCHAR(100))');
+        $app->get(\Prime\Site\Zone\ZoneRepository::class)->save('sidebar', ['version' => 1, 'blocks' => []]);
+        $guard->refreshZones();
+        $db->clearQueryLog();
+        $db->enableQueryLog();
+        self::assertSame(false, $filter(true, $request, null));
+        self::assertSame(false, $filter(true, $request, $response));
+        self::assertCount(0, $db->queryLog());
+        $db->enableQueryLog(false);
+    }
+
+    public function testRenamedAuthenticationCookiesBypassTheCoreCacheBeforeLookup(): void
+    {
+        $app = $this->activated(null);
+        $app->config()->set('auth.remember_cookie', 'renamed_remember');
+        $session = new Session(sys_get_temp_dir(), name: 'renamed_session', useNativeSession: false);
+        $app->container()->instance(Session::class, $session);
+        self::assertSame('renamed_remember', $app->get(\Prime\Auth\Auth::class)->rememberCookieName());
+        $app->get(\Prime\Http\Router::class)->get('/renamed-cookie-probe', static fn (): Response => Response::html('fresh response'));
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $public = Request::create('GET', '/renamed-cookie-probe');
+        self::assertSame('MISS', $cache->store($public, Response::html('anonymous cached'))->header('X-Prime-Cache'));
+        foreach (['renamed_session', 'renamed_remember', Session::DEFAULT_NAME, 'prime_remember', 'prime_auth', 'PHPSESSID'] as $name) {
+            $request = Request::create('GET', '/renamed-cookie-probe', cookies: [$name => 'present']);
+            $response = $app->get(Kernel::class)->handle($request);
+            self::assertSame('fresh response', $response->body(), $name . ' must not receive the anonymous HIT');
+            self::assertNotSame('HIT', $response->header('X-Prime-Cache'));
+            self::assertStringContainsString('private, no-store', (string) $response->header('Cache-Control'));
+        }
+        $authorized = Request::create('GET', '/renamed-cookie-probe', headers: ['Authorization' => 'Bearer token']);
+        $response = $app->get(Kernel::class)->handle($authorized);
+        self::assertSame('fresh response', $response->body());
+        self::assertNotSame('HIT', $response->header('X-Prime-Cache'));
+        self::assertStringContainsString('private, no-store', (string) $response->header('Cache-Control'));
+    }
+
+    public function testCacheRenderStateSurvivesNestedHttpStorageAndIsResetAfterFailure(): void
+    {
+        $app = $this->activated(null);
+        $cache = $app->get(\Prime\Cache\PageCache::class);
+        $cache->setEnabled(true);
+        $cache->purgeAll();
+        $state = $app->get(\PrimeBuilder\Dynamic\RenderState::class);
+        $guard = $app->get(\PrimeBuilder\Dynamic\CacheGuard::class);
+        $kernel = $app->get(Kernel::class);
+        $router = $app->get(\Prime\Http\Router::class);
+        $router->get('/nested-temporal', static function () use ($state): Response {
+            $state->markTimeDependent();
+            return Response::html('inner');
+        });
+        $router->get('/parent-temporal', static function () use ($kernel): Response {
+            $inner = $kernel->handle(Request::create('GET', '/nested-temporal'));
+            self::assertSame('BYPASS', $inner->header('X-Prime-Cache'));
+            return Response::html('parent ' . $inner->body());
+        });
+        $router->get('/state-clean', static fn (): Response => Response::html('clean'));
+
+        $outer = $kernel->handle(Request::create('GET', '/parent-temporal'));
+        self::assertSame('parent inner', $outer->body());
+        self::assertSame('BYPASS', $outer->header('X-Prime-Cache'), 'Nested dependencies reach the parent before its store');
+        self::assertStringContainsString('private, no-store', (string) $outer->header('Cache-Control'));
+        self::assertFalse($state->isTimeDependent());
+        $clean = Request::create('GET', '/state-clean');
+        self::assertSame('MISS', $kernel->handle($clean)->header('X-Prime-Cache'));
+        self::assertSame('HIT', $kernel->handle($clean)->header('X-Prime-Cache'));
+
+        try {
+            $guard->process(Request::create('GET', '/state-failure'), static function () use ($state): Response {
+                $state->markTimeDependent();
+                throw new \RuntimeException('render failure');
+            });
+            self::fail('The render exception should propagate');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('render failure', $exception->getMessage());
+        }
+        self::assertFalse($state->isTimeDependent(), 'A failed response must not contaminate later requests');
+        self::assertSame('HIT', $kernel->handle($clean)->header('X-Prime-Cache'));
+    }
+
     public function testDynamicTagsAndConditionsNeverPersistOrLeakThroughThePageCache(): void
     {
         $app = $this->activated('admin');
@@ -6457,8 +6655,8 @@ final class IntegrationTest extends TestCase
             self::assertStringNotContainsString($absent, $stored->contentHtml);
             self::assertStringNotContainsString($absent, $stored->contentText);
         }
-        self::assertFalse($cache->isCacheableRequest($request));
-        self::assertNull($cache->lookup($request), 'A cache entry from before the dynamic edit is not served');
+        self::assertTrue($cache->isCacheableRequest($request), 'The rendered page decides whether dates prevent storage');
+        self::assertNull($cache->lookup($request), 'A cache entry from before the dynamic edit is purged');
         $auth = $app->get(\Prime\Auth\Auth::class);
         $getPage = static fn (): Response => $app->get(Kernel::class)->handle(Request::create('GET', $url, headers: ['Accept' => 'text/html']));
         $auth->logout();
@@ -6702,6 +6900,7 @@ final class IntegrationTest extends TestCase
         // Prime CMS has no runtime zone hook: a native zone remains a safe static
         // fallback rather than risking persistence of visitor-specific output.
         self::assertStringNotContainsString('Bonjour', $zones->renderLive('sidebar', $app->get(\Prime\Site\Zone\DynamicBlockRegistry::class)));
+        $app->get(\PrimeBuilder\Dynamic\CacheGuard::class)->refreshZones();
         self::assertFalse($cache->isCacheableRequest($cachedRequest));
         $auth = $app->get(\Prime\Auth\Auth::class);
         $auth->logout();
@@ -6754,18 +6953,18 @@ final class IntegrationTest extends TestCase
         $model['elements'][0]['settings']['text'] = 'Bonjour {{user.name}}';
         $model['elements'][0]['conditions'] = ['auth' => 'authenticated'];
         self::assertTrue($models->save($model));
-        self::assertFalse($cache->isCacheableRequest($request));
-        self::assertNull($cache->lookup($request));
-        $response = $hooks->apply('http.response', Response::html('visitor-specific'), $request);
+        self::assertTrue($cache->isCacheableRequest($request), 'Another model’s login condition does not disable the anonymous cache');
+        self::assertNull($cache->lookup($request), 'Saving the model purges earlier output');
+        $response = $hooks->apply('http.response', Response::html('anonymous'), $request);
         self::assertInstanceOf(Response::class, $response);
-        self::assertStringContainsString('no-store', (string) $response->header('Cache-Control'));
+        self::assertStringNotContainsString('no-store', (string) $response->header('Cache-Control'));
         $model['elements'] = $elements;
         self::assertTrue($models->save($model));
         self::assertTrue($cache->isCacheableRequest($request));
         self::assertNull($cache->lookup($request), 'Disabling a sensitive model must not restore an old cached page');
 
-        // A private-popup option still allows the anonymous *internal* cache;
-        // authenticated cookies bypass it, while external proxies get no-store.
+        // A private-popup option allows anonymous caching; authenticated
+        // requests bypass the internal cache and receive no-store.
         $popup = $models->create('Members excluded', 'popup', $elements);
         self::assertNotNull($popup);
         $popup['enabled'] = true;
@@ -6778,8 +6977,11 @@ final class IntegrationTest extends TestCase
         self::assertFalse($cache->isCacheableRequest(Request::create('GET', '/cache-model-test', cookies: [$remember => 'remember-me'])));
         $response = $hooks->apply('http.response', Response::html('anonymous popup'), $request);
         self::assertInstanceOf(Response::class, $response);
-        self::assertStringContainsString('private', (string) $response->header('Cache-Control'));
-        self::assertStringContainsString('no-store', (string) $response->header('Cache-Control'));
+        self::assertStringNotContainsString('no-store', (string) $response->header('Cache-Control'));
+        $authenticated = Request::create('GET', '/cache-model-test', cookies: [$session => 'a-session']);
+        $response = $hooks->apply('http.response', Response::html('member'), $authenticated);
+        self::assertInstanceOf(Response::class, $response);
+        self::assertStringContainsString('private, no-store', (string) $response->header('Cache-Control'));
     }
 
     public function testThemeModelDirectoryLoadsWinnersAndAuthenticatesNormalizedLayouts(): void
@@ -6910,13 +7112,13 @@ final class IntegrationTest extends TestCase
         $stored['elements'][0]['settings']['text'] = 'Hello {{user.name}}';
         $plugin->settings()->set('theme_model.' . $id, $stored, false);
         $models->invalidate();
-        self::assertSame(true, $models->index()[0]['dynamic'], 'Legacy settings writes refresh sensitivity before cache lookup');
+        self::assertSame(true, $models->index()[0]['dynamic'], 'Legacy settings writes refresh the directory');
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
-        self::assertFalse($cache->isCacheableRequest(Request::create('GET', '/legacy-index')));
+        self::assertTrue($cache->isCacheableRequest(Request::create('GET', '/legacy-index')), 'The index no longer disables every page');
     }
 
-    public function testThemeCacheRechecksOtherInstanceAndRejectsMismatchedGlobalSource(): void
+    public function testThemeGlobalRejectsMismatchedSourceWithoutDisablingOtherPages(): void
     {
         $app = $this->activated('admin');
         $plugin = $app->get(PluginManager::class)->loaded()['prime-builder'];
@@ -6943,13 +7145,13 @@ final class IntegrationTest extends TestCase
         $changed['elements'][0]['settings']['text'] = 'Bonjour {{user.name}}';
         self::assertTrue($writer->save($changed));
         self::assertNull($stale->findIndexed($global['id']), 'A global widget cannot use a newer dynamic source with an older static index');
-        self::assertFalse(
+        self::assertTrue(
             $cache->isCacheableResponse($request, Response::html('rendered')),
-            'The cache must recheck the current index after a different process changes it',
+            'A different model’s login-dependent markup does not disable this page',
         );
         $response = $app->get(Hooks::class)->apply('http.response', Response::html('rendered'), $request);
         self::assertInstanceOf(Response::class, $response);
-        self::assertStringContainsString('private, no-store', (string) $response->header('Cache-Control'));
+        self::assertStringNotContainsString('no-store', (string) $response->header('Cache-Control'));
         $changed['elements'][0]['settings']['text'] = 'Static again';
         self::assertTrue($writer->save($changed));
         self::assertTrue($cache->isCacheableRequest($request));
@@ -7035,7 +7237,7 @@ final class IntegrationTest extends TestCase
         self::assertNotNull($withoutKey->validatedLayout($source));
         $cache = $app->get(\Prime\Cache\PageCache::class);
         $cache->setEnabled(true);
-        self::assertFalse($cache->isCacheableRequest(Request::create('GET', '/missing-index-key')));
+        self::assertTrue($cache->isCacheableRequest(Request::create('GET', '/missing-index-key')));
 
         // Rotating the key invalidates the old directory and rebuilds it from
         // the exact source records; the new signature must differ.
@@ -7054,7 +7256,7 @@ final class IntegrationTest extends TestCase
         $plugin->settings()->set(\PrimeBuilder\Theme\Models::INDEX, ['items' => [], 'signature' => 'invalid'], true);
 
         // Simulate a database rejecting the rebuild while reads remain possible.
-        // The cache guard must bypass sharing and the source must not be lost.
+        // A cache lookup no longer reconstructs the index; the source must not be lost.
         $pdo = $db->pdo();
         if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') {
             $pdo->exec("CREATE TRIGGER pb_block_index BEFORE UPDATE ON pc_settings BEGIN SELECT RAISE(ABORT, 'blocked'); END");
@@ -7062,7 +7264,7 @@ final class IntegrationTest extends TestCase
             $pdo->exec("CREATE TRIGGER pb_block_index BEFORE UPDATE ON pc_settings FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'blocked'");
         }
         try {
-            self::assertFalse($cache->isCacheableRequest($request), 'Failed index reconstruction must bypass the shared cache');
+            self::assertTrue($cache->isCacheableRequest($request), 'The lookup does not rebuild the model index');
             $failed = false;
             try {
                 (new \PrimeBuilder\Theme\Models($plugin->settings(), $settings, $plugin))->index();
@@ -7336,7 +7538,7 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('Deuxième public', $second->body());
         self::assertStringNotContainsString('Troisième public', $second->body());
         self::assertStringNotContainsString('ne-pas-propager', $second->body());
-        $first = $kernel->handle(Request::create('GET', '/theme-plugin-page'));
+        $first = $kernel->handle(Request::create('GET', '/theme-plugin-page', cookies: [$app->get(Session::class)->name() => 'test-session']));
         self::assertSame(200, $first->status(), $first->body());
         self::assertStringContainsString('Article publié', $first->body());
         self::assertStringNotContainsString('Deuxième public', $first->body());
@@ -7350,7 +7552,7 @@ final class IntegrationTest extends TestCase
         self::assertStringContainsString('PLUGIN  / ', $guest->body());
         self::assertStringNotContainsString('Admin Prime', $guest->body());
         self::assertStringNotContainsString('EN-TÊTE MEMBRE', $guest->body());
-        self::assertStringContainsString('no-store', (string) $guest->header('Cache-Control'));
+        self::assertStringNotContainsString('no-store', (string) $guest->header('Cache-Control'));
         $assets = new ThemeAssetRegistry();
         $hooks->emit('site.assets', $assets, $page);
         self::assertStringContainsString('/assets/plugins/prime-builder/css/widgets/posts.css', $assets->renderStyles());
@@ -8925,6 +9127,8 @@ final class IntegrationTest extends TestCase
         mkdir($this->assets, 0755, true);
         $app->container()->instance(AssetPublisher::class, new AssetPublisher($this->assets, '/assets/plugins'));
         $app->get(PluginManager::class)->activate('prime-builder');
+        // Direct PageCache calls below do not pass through the HTTP preflight.
+        $app->get(\PrimeBuilder\Dynamic\CacheGuard::class)->refreshZones();
         return $app;
     }
 

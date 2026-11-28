@@ -1,10 +1,16 @@
 # Journal des changements
 
+## 1.0.4 — suite n° 7, cache ciblé
+
+- Le filtre de cache n’exécute aucune requête SQL ; une zone déclarée enregistrée continue de contourner le cache sur tout le site, après vérification préalable.
+- Une période UTC évaluée, y compris cachée, ou `{{today}}` affiché empêche le stockage de la réponse concernée et impose `private, no-store` ; les autres pages ne sont pas affectées.
+- Balises ordinaires et conditions de connexion ou de rôle restent cacheables pour les visiteurs anonymes ; cookies d’authentification et `Authorization` contournent la lecture. Les mutations prises en charge purgent le cache interne ; les caches externes et les rendus concurrents gardent leurs limites.
+
 ## 1.0.3 — suite n° 5, périmètre partiel
 
 - Pièces de formulaire sur disque privé, par clé aléatoire et empreinte ; migration progressive des anciennes pièces en base, conservation des valeurs invalides et diagnostic. Verrouillage, synchronisation des fichiers/répertoires et collecte différée ; sauvegarde cohérente base + fichiers et planificateur indispensables.
 - Refus d’une troncature multipart déclarée par les clients récents et d’une réponse de succès illisible ; les anciens clients restent compatibles. Avertissement distinct lorsque la limite API suffit au multipart mais pas à l’ancien JSON/base64.
-- Comparaison `source_hash` et sauvegarde visuelle des modèles sous le même verrou ; les dernières métadonnées sont conservées. Rafraîchissement de l’index avant les décisions de cache et contrôle de cohérence des widgets globaux entre instances. Les modifications concurrentes des seules métadonnées, les écritures directes et les caches externes gardent leurs limites.
+- Comparaison `source_hash` et sauvegarde visuelle des modèles sous le même verrou ; les dernières métadonnées sont conservées. Contrôle de cohérence des widgets globaux entre instances. Les modifications concurrentes des seules métadonnées, les écritures directes et les caches externes gardent leurs limites ; voir la règle de cache 1.0.4 ci-dessus.
 
 ## 1.0.2 — formulaires de modèles
 
@@ -14,7 +20,7 @@
 ## 1.0.1 — index et cache des modèles
 
 - Index autoloadé des conditions, lecture sélective des candidats et validation authentifiée des mises en page ; migration différée des modèles existants. Les blocs Prime et données invérifiables restent revalidés.
-- Les modèles statiques peuvent utiliser le cache anonyme du CMS ; invalidation conservatrice lors des changements pris en charge, avec contournement maintenu pour les zones enregistrées et les contenus dynamiques. Un test navigateur vérifie les MISS/HIT réels, les modifications et l’isolation des visiteurs. Les limites des mutations directes, des requêtes concurrentes et des caches externes sont documentées.
+- Cache anonyme et invalidation conservatrice lors des changements pris en charge ; des tests navigateur vérifient les MISS/HIT réels, les modifications et l’isolation des visiteurs. La règle actuelle figure en 1.0.4 ; les limites des mutations directes, des requêtes concurrentes et des caches externes restent documentées.
 
 ## 1.0.0 — widgets partagés, contenu dynamique et administration
 

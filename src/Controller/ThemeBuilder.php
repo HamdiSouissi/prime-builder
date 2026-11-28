@@ -175,7 +175,7 @@ final class ThemeBuilder
         if ($css === null) {
             // If snapshot storage is unavailable, rebuild only a currently
             // declared zone whose content-addressed CSS matches the request.
-            $zones = new ZoneLayouts($this->plugin->app()->get(ThemeManager::class), $this->plugin->app()->get(ZoneRepository::class));
+            $zones = new ZoneLayouts($this->plugin->app()->get(ThemeManager::class), $this->plugin->app()->get(ZoneRepository::class), $this->plugin->db());
             $compiler = new Compiler((int) Configuration::get($this->plugin->settings(), 'breakpoint_tablet', 1024), (int) Configuration::get($this->plugin->settings(), 'breakpoint_mobile', 767));
             foreach ($zones->all() as $layout) {
                 $layout = $this->plugin->app()->get(\PrimeBuilder\Theme\GlobalWidgets::class)->expand($layout);
