@@ -3512,7 +3512,12 @@ final class IntegrationTest extends TestCase
         $kernel = $app->get(Kernel::class);
         self::assertSame('MISS', $kernel->handle($request)->header('X-Prime-Cache'));
         self::assertSame('HIT', $kernel->handle($request)->header('X-Prime-Cache'));
-        self::assertSame(1, $renders);
+        // The current CMS also accepts a trailing newline in page. The zone
+        // preflight must be at least as permissive as the cache's whitelist.
+        $pageWithNewline = Request::create('GET', '/zone-other-instance?page=1%0A');
+        self::assertSame('MISS', $kernel->handle($pageWithNewline)->header('X-Prime-Cache'));
+        self::assertSame('HIT', $kernel->handle($pageWithNewline)->header('X-Prime-Cache'));
+        self::assertSame(2, $renders);
 
         // A separate worker writes a declared zone directly: no local hook or
         // repository memoization informs this already-running application.
@@ -3520,8 +3525,11 @@ final class IntegrationTest extends TestCase
         $zone->execute([$app->get(\Prime\Site\Zone\ZoneRepository::class)->activeThemeSlug(), 'sidebar', '{"version":1,"blocks":[]}', '', gmdate('Y-m-d H:i:s'), gmdate('Y-m-d H:i:s')]);
         $fresh = $kernel->handle($request);
         self::assertNotSame('HIT', $fresh->header('X-Prime-Cache'));
-        self::assertSame('render 2', $fresh->body());
-        self::assertSame('render 3', $kernel->handle($request)->body());
+        self::assertSame('render 3', $fresh->body());
+        self::assertSame('render 4', $kernel->handle($request)->body());
+        $freshPage = $kernel->handle($pageWithNewline);
+        self::assertNotSame('HIT', $freshPage->header('X-Prime-Cache'));
+        self::assertSame('render 5', $freshPage->body());
     }
 
     public function testZoneCacheCheckFailsClosedIfZoneReadFails(): void
@@ -6447,6 +6455,7 @@ final class IntegrationTest extends TestCase
             self::assertSame(true, $filter(true, $request, $response));
             self::assertSame(false, $filter(false, $request, $response));
             self::assertNull($filter(null, $request, null));
+            self::assertSame('allowed', $filter('allowed', $request, null));
             self::assertSame('MISS', $cache->store($request, $response)->header('X-Prime-Cache'));
             self::assertSame('HIT', $cache->lookup($request)?->header('X-Prime-Cache'));
         } finally {
@@ -6460,6 +6469,10 @@ final class IntegrationTest extends TestCase
             self::assertTrue($state->isTimeDependent(), 'A currently hidden element may become visible later');
             self::assertSame(true, $filter(true, $timed, null));
             self::assertSame(false, $filter(true, $timed, $response));
+            // The CMS treats only literal false as a refusal, even if an
+            // earlier filter supplied another non-boolean value.
+            self::assertSame(false, $filter(null, $timed, $response));
+            self::assertSame(false, $filter('allowed', $timed, $response));
             self::assertSame('BYPASS', $cache->store($timed, $response)->header('X-Prime-Cache'));
             self::assertNull($cache->lookup($timed));
         } finally {
@@ -6501,6 +6514,8 @@ final class IntegrationTest extends TestCase
         $db->enableQueryLog();
         self::assertSame(false, $filter(true, $request, null));
         self::assertSame(false, $filter(true, $request, $response));
+        self::assertSame(false, $filter(null, $request, null));
+        self::assertSame(false, $filter('allowed', $request, $response));
         self::assertCount(0, $db->queryLog());
         $db->enableQueryLog(false);
     }

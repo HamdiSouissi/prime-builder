@@ -42,13 +42,12 @@ final class CacheGuard implements MiddlewareInterface
     /** The core calls this both before lookup and before storing the response. */
     public function cacheable(mixed $value, mixed $request = null, mixed $response = null): mixed
     {
-        if ($value !== true) {
-            return $value;
-        }
-        if ($this->savedZone) {
+        if ($this->savedZone || ($response instanceof Response && $this->state->isTimeDependent())) {
+            // The CMS only interprets literal false as a refusal, including
+            // when an earlier filter returned a non-boolean value.
             return false;
         }
-        return $response instanceof Response && $this->state->isTimeDependent() ? false : $value;
+        return $value;
     }
 
     /** @param callable(Request): Response $next */
@@ -96,14 +95,14 @@ final class CacheGuard implements MiddlewareInterface
         }
     }
 
-    /** Avoid the zone query for methods or parameters the CMS never caches. */
+    /** Conservatively preflight page values; the CMS decides whether they are valid. */
     private function couldUseCache(Request $request): bool
     {
         if (!in_array($request->method(), ['GET', 'HEAD'], true)) {
             return false;
         }
-        foreach ($request->query() as $name => $value) {
-            if ((string) $name !== 'page' || !is_scalar($value) || preg_match('/^[1-9][0-9]*$/D', (string) $value) !== 1) {
+        foreach (array_keys($request->query()) as $name) {
+            if ((string) $name !== 'page') {
                 return false;
             }
         }
