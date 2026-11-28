@@ -1,0 +1,55 @@
+{
+  "kind": "section",
+  "name": "hero",
+  "version": 1,
+  "elements": [
+    {
+      "id": "hero",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12,
+          "background": "#fff4f1"
+        }
+      },
+      "children": [
+        {
+          "id": "hero-title",
+          "type": "heading",
+          "settings": {
+            "text": "@pb:templates.copy.hero_title",
+            "level": 2
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "hero-text",
+          "type": "text",
+          "settings": {
+            "text": "@pb:templates.copy.hero_text"
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "hero-button",
+          "type": "button",
+          "settings": {
+            "text": "@pb:templates.copy.hero_button",
+            "url": "#contact"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    }
+  ]
+}

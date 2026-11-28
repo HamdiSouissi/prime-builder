@@ -1,0 +1,10 @@
+.pb-testimonial_carousel [hidden]{display:none!important}
+.pb-testimonials-slides{min-width:0}
+.pb-testimonials figure{display:grid;gap:1rem;min-width:0;margin:0;padding:1.5rem;border:1px solid currentColor;border-radius:1rem;overflow-wrap:anywhere}
+.pb-testimonials blockquote,.pb-testimonials blockquote p{margin:0}
+.pb-testimonials figcaption{display:flex;align-items:center;gap:.75rem}
+.pb-testimonials figcaption img{width:3rem;height:3rem;border-radius:50%;object-fit:cover}
+.pb-testimonials figcaption cite,.pb-testimonials figcaption span span{display:block}
+.pb-testimonial_carousel .pb-carousel-controls{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.75rem}
+.pb-testimonial_carousel .pb-carousel-controls button{font:inherit;font-weight:600;padding:.65rem .8rem;border:1px solid #555;border-radius:6px;background:#fff;color:#1a1d29;cursor:pointer}
+.pb-testimonial_carousel .pb-carousel-controls button:focus-visible{outline:3px solid #ed6647;outline-offset:2px}

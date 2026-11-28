@@ -1,0 +1,3 @@
+.pb-alternate{padding:1.25rem}.pb-alternate-preview{display:block;border:1px solid #e6e4e1;border-radius:10px;background:#fff;width:100%;height:420px;margin-top:1rem}
+/* Keep the CMS top-bar avatar above AA contrast on screens hosting this editor. */
+:root:has(.pb-alternate) .pc-topbar .pc-avatar,:root:has(.pb-alternate) .pc-revisions-list a{color:#a8381a}

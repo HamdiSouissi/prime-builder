@@ -1,0 +1,8 @@
+.pb-code{min-width:0}
+.pb-code-content{box-sizing:border-box;max-width:100%;overflow:auto;margin:0;padding:1rem 1.25rem;border-radius:.625rem;background:#182230;color:#f3f4f6;font: .9rem/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:2}
+.pb-code-content:focus-visible{outline:3px solid #ed6647;outline-offset:3px}
+.pb-code-content code{font:inherit;color:inherit}
+.pb-code-token--comment{color:#c5cedb}
+.pb-code-token--string{color:#a8e6c3}
+.pb-code-token--tag,.pb-code-token--keyword{color:#b9d6ff}
+.pb-code-token--variable,.pb-code-token--number{color:#ffd29a}

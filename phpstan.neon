@@ -1,0 +1,13 @@
+parameters:
+    level: 8
+    paths:
+        - src
+        - views
+        - lang
+        - migrations
+        - tests
+        - tools
+        - .php-cs-fixer.dist.php
+    bootstrapFiles:
+        - ../../../vendor/autoload.php
+    tmpDir: ../../../.phpstan-cache/prime-builder

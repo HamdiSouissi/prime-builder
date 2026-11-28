@@ -1,0 +1,9 @@
+.pb-archive_title .pb-archive-title__text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pb-archive_title .pb-archive-preview {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

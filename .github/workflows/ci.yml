@@ -1,0 +1,486 @@
+name: Prime Builder CI
+on:
+  push:
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+      - name: Report length
+        working-directory: builder
+        run: |
+          awk 'END { if (NR > 150) { print "RETOUR.md exceeds 150 lines: " NR > "/dev/stderr"; exit 1 } }' RETOUR.md
+      - uses: ./builder/.github/actions/setup-cms
+        with:
+          install-dependencies: 'true'
+      - name: PHP syntax
+        working-directory: cms
+        run: find content/plugins/prime-builder -name '*.php' -type f -print0 | xargs -0 -n1 php -l | tee /tmp/prime-builder-php-lint.log
+      - name: PHPStan level 8
+        working-directory: cms
+        run: vendor/bin/phpstan analyse --configuration content/plugins/prime-builder/phpstan.neon --no-progress --no-ansi 2>&1 | tee /tmp/prime-builder-phpstan.log
+      - name: Report lint summaries
+        run: |
+          echo "::notice title=PHP syntax::$(tail -1 /tmp/prime-builder-php-lint.log)"
+          echo "::notice title=PHPStan::$(grep -F '[OK]' /tmp/prime-builder-phpstan.log | tail -1 | xargs)"
+      - name: Report PHPStan output on failure
+        if: failure()
+        run: if test -f /tmp/prime-builder-phpstan.log; then echo "::error title=PHPStan log (base64)::$(tail -160 /tmp/prime-builder-phpstan.log | base64 -w0)"; fi
+
+  cs:
+    name: cs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+      - uses: ./builder/.github/actions/setup-cms
+        with:
+          install-dependencies: 'true'
+      - name: PHP-CS-Fixer (CMS configuration)
+        working-directory: cms
+        run: vendor/bin/php-cs-fixer fix content/plugins/prime-builder --config .php-cs-fixer.dist.php --dry-run --diff --no-ansi 2>&1 | tee /tmp/prime-builder-fixer.log
+      - name: Report coding style summary
+        run: echo "::notice title=PHP-CS-Fixer::$(grep -E 'Found [0-9]+ of [0-9]+ files' /tmp/prime-builder-fixer.log | tail -1)"
+      - name: Report coding style output on failure
+        if: failure()
+        run: if test -f /tmp/prime-builder-fixer.log; then echo "::error title=PHP-CS-Fixer log (base64)::$(tail -160 /tmp/prime-builder-fixer.log | base64 -w0)"; fi
+
+  phpunit:
+    name: phpunit (${{ matrix.cms }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cms: [main, '1cef617660f8d4f7bbd9d3d659de85d284fb18e7']
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: prime_builder
+      DB_USERNAME: root
+      DB_PASSWORD: prime_ci_secret
+      DB_PREFIX: pc_
+      PB_TEST_MYSQL: '1'
+      PRIME_TEST_DB_HOST: 127.0.0.1
+      PRIME_TEST_DB_PORT: '3306'
+      PRIME_TEST_DB_USERNAME: root
+      PRIME_TEST_DB_PASSWORD: prime_ci_secret
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: prime_ci_secret
+          MYSQL_DATABASE: prime_builder
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -pprime_ci_secret"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+      - uses: ./builder/.github/actions/setup-cms
+        with:
+          install-dependencies: 'true'
+          cms-ref: ${{ matrix.cms }}
+      - name: Verify MySQL connection
+        run: php -r '$db = new PDO("mysql:host=" . getenv("DB_HOST") . ";port=" . getenv("DB_PORT") . ";dbname=" . getenv("DB_DATABASE"), getenv("DB_USERNAME"), getenv("DB_PASSWORD")); echo "MySQL ", $db->query("SELECT VERSION()")->fetchColumn(), PHP_EOL;'
+      - name: PHPUnit
+        working-directory: cms
+        run: vendor/bin/phpunit --colors=never --bootstrap tests/bootstrap.php content/plugins/prime-builder/tests 2>&1 | tee /tmp/prime-builder-phpunit.log
+      - name: Report PHPUnit summary
+        run: echo "::notice title=PHPUnit::$(grep -E '^OK \(' /tmp/prime-builder-phpunit.log | tail -1)"
+      - name: Report PHPUnit output on failure
+        if: failure()
+        run: if test -f /tmp/prime-builder-phpunit.log; then echo "::error title=PHPUnit log (base64)::$(tail -160 /tmp/prime-builder-phpunit.log | base64 -w0)"; fi
+
+  js:
+    name: js
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JavaScript tests
+        run: npm test 2>&1 | tee /tmp/prime-builder-node.log
+      - name: Report JavaScript summary
+        run: |
+          while IFS= read -r line; do echo "::notice title=Node tests::$line"; done < <(grep -E '^# (tests|pass|fail) ' /tmp/prime-builder-node.log)
+
+  i18n:
+    name: i18n
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: prime_ci_secret
+          MYSQL_DATABASE: prime_builder
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -pprime_ci_secret"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+      - uses: ./builder/.github/actions/setup-cms
+      - name: Install CMS and activate plugin
+        working-directory: cms
+        run: |
+          php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Cascade-Corail-900!Orbit' 2>&1 | tee /tmp/prime-install.log
+          php bin/prime plugin:activate prime-builder 2>&1 | tee -a /tmp/prime-install.log
+      - name: Translation catalogue
+        working-directory: cms
+        run: php bin/prime lang:check --strict 2>&1 | tee /tmp/prime-lang.log
+      - name: Report translation summary
+        run: echo "::notice title=Translation catalogue::$(awk 'NF {line=$0} END {print line}' /tmp/prime-lang.log)"
+      - name: Report installation or language output on failure
+        if: failure()
+        run: |
+          if test -f /tmp/prime-install.log; then echo "::error title=Install log (base64)::$(base64 -w0 /tmp/prime-install.log)"; fi
+          if test -f /tmp/prime-lang.log; then echo "::error title=Language log (base64)::$(base64 -w0 /tmp/prime-lang.log)"; fi
+
+  smoke:
+    name: smoke
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: prime_ci_secret
+          MYSQL_DATABASE: prime_builder
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -pprime_ci_secret"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+      - uses: ./builder/.github/actions/setup-cms
+      - name: Install CMS, activate plugin, and create a published page
+        working-directory: cms
+        run: |
+          php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Cascade-Corail-900!Orbit' 2>&1 | tee /tmp/prime-smoke-install.log
+          php bin/prime plugin:activate prime-builder 2>&1 | tee -a /tmp/prime-smoke-install.log
+          php bin/prime content:create --type=page --title='Smoke Prime Builder' --slug=smoke-prime-builder --status=published --body='{"version":1,"blocks":[{"id":"pb_layout","type":"prime-builder/layout","data":{"version":1,"elements":[{"id":"smoke_heading","type":"heading","settings":{"text":"Page de test Prime Builder","level":2},"styles":{"desktop":{"color":"#123456"}},"children":[]}]}}]}' 2>&1 | tee -a /tmp/prime-smoke-install.log
+          ID=$(grep -oE '#[0-9]+' /tmp/prime-smoke-install.log | tail -1 | tr -d '#')
+          test -n "$ID"
+          echo "SMOKE_ENTRY_ID=$ID" >> "$GITHUB_ENV"
+          php -S 0.0.0.0:8080 -t public public/router.php > /tmp/prime-smoke-server.log 2>&1 &
+      - name: HTTP smoke
+        run: bash builder/tests/smoke.sh 2>&1 | tee /tmp/prime-builder-smoke.log
+      - name: Report smoke summary
+        run: echo "::notice title=Smoke::$(tail -1 /tmp/prime-builder-smoke.log)"
+      - name: Report smoke output on failure
+        if: failure()
+        run: |
+          if test -f /tmp/prime-smoke-install.log; then echo "::error title=Install log (base64)::$(base64 -w0 /tmp/prime-smoke-install.log)"; fi
+          if test -f /tmp/prime-smoke-server.log; then echo "::error title=Server log (base64)::$(tail -100 /tmp/prime-smoke-server.log | base64 -w0)"; fi
+
+  benchmark:
+    name: theme benchmark (MySQL 8)
+    runs-on: ubuntu-latest
+    env:
+      PB_BENCH_DISPOSABLE: '1'
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: prime_ci_secret
+          MYSQL_DATABASE: prime_builder
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -pprime_ci_secret"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+      - uses: ./builder/.github/actions/setup-cms
+      - name: Install the pre-F2 plugin on a disposable CMS
+        run: |
+          git -C builder fetch --depth=1 origin ce7dc7264ae229a4377fbca10382cd3dec31712c
+          mkdir -p baseline
+          git -C builder archive ce7dc7264ae229a4377fbca10382cd3dec31712c | tar -xf - -C baseline
+          rsync -a --delete baseline/ cms/content/plugins/prime-builder/
+          cd cms
+          php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder benchmark' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Cascade-Corail-900!Orbit'
+          php bin/prime plugin:activate prime-builder
+      - name: Measure before and after on the same fixture
+        run: |
+          echo "CMS $(git -C cms rev-parse HEAD); PHP $(php -r 'echo PHP_VERSION;')"
+          php -r '$db = new PDO("mysql:host=127.0.0.1;dbname=prime_builder", "root", "prime_ci_secret"); echo "MySQL ", $db->query("SELECT VERSION()")->fetchColumn(), PHP_EOL;'
+          state="$GITHUB_WORKSPACE/theme-benchmark-state.json"
+          php builder/tools/benchmark-theme.php prepare "$GITHUB_WORKSPACE/cms" "$state"
+          echo 'Before: ce7dc7264ae229a4377fbca10382cd3dec31712c'
+          php builder/tools/benchmark-theme.php measure "$GITHUB_WORKSPACE/cms" "$state" > /dev/null
+          for i in {1..5}; do php builder/tools/benchmark-theme.php measure "$GITHUB_WORKSPACE/cms" "$state" | tee -a /tmp/theme-benchmark-before.log; done
+          (cd cms && php bin/prime plugin:deactivate prime-builder)
+          rsync -a --delete --exclude='.git' builder/ cms/content/plugins/prime-builder/
+          (cd cms && php bin/prime plugin:activate prime-builder)
+          echo "After: $(git -C builder rev-parse HEAD)"
+          php builder/tools/benchmark-theme.php measure "$GITHUB_WORKSPACE/cms" "$state" > /dev/null
+          for i in {1..5}; do php builder/tools/benchmark-theme.php measure "$GITHUB_WORKSPACE/cms" "$state" | tee -a /tmp/theme-benchmark-after.log; done
+          php builder/tools/benchmark-theme.php cleanup "$GITHUB_WORKSPACE/cms" "$state"
+          echo "::notice title=Theme benchmark before::$(paste -sd ';' /tmp/theme-benchmark-before.log)"
+          echo "::notice title=Theme benchmark after::$(paste -sd ';' /tmp/theme-benchmark-after.log)"
+          printf 'Before: ce7dc7264ae229a4377fbca10382cd3dec31712c\n' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/theme-benchmark-before.log >> "$GITHUB_STEP_SUMMARY"
+          printf 'After: %s\n' "$(git -C builder rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/theme-benchmark-after.log >> "$GITHUB_STEP_SUMMARY"
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: prime_builder
+      DB_USERNAME: root
+      DB_PASSWORD: prime_ci_secret
+      DB_PREFIX: pc_
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: prime_ci_secret
+          MYSQL_DATABASE: prime_builder
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -pprime_ci_secret"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, gd, exif, pdo_mysql, zip, fileinfo, openssl, intl
+          coverage: none
+      - name: Clone CMS and package plugin
+        run: |
+          git clone --depth 1 --branch main https://github.com/HamdiSouissi/prime-cms.git cms
+          git -C builder archive --format=zip --prefix=prime-builder/ HEAD -o "$GITHUB_WORKSPACE/prime-builder.zip"
+      - name: Install CMS
+        working-directory: cms
+        run: php bin/prime install --db-host=127.0.0.1 --db-port=3306 --db-name=prime_builder --db-user=root --db-password=prime_ci_secret --db-prefix=pc_ --site-name='Prime Builder CI' --site-url=http://127.0.0.1:8080 --site-locale=fr --timezone=UTC --admin-name='CI Admin' --admin-email=builder@prime.test --admin-password='Cascade-Corail-900!Orbit' 2>&1 | tee /tmp/prime-install.log
+      - name: Install ZIP, activate plugin and prepare page
+        working-directory: cms
+        run: |
+          php bin/prime plugin:install "$GITHUB_WORKSPACE/prime-builder.zip" 2>&1 | tee -a /tmp/prime-install.log
+          php bin/prime plugin:activate prime-builder 2>&1 | tee -a /tmp/prime-install.log
+          # This single disposable CMS runs 34 UI scenarios as one administrator.
+          # Keep the CMS limiter enabled but give this test fixture enough headroom;
+          # plugin form quotas are separate and covered by their own integration tests.
+          php bin/prime settings:set api.rate_limit_authenticated 10000 2>&1 | tee -a /tmp/prime-install.log
+          php bin/prime content:create --type=post --title='Grille Alpha' --slug=grille-alpha --status=published --publish-at='2020-01-01 00:00:00' --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          php bin/prime content:create --type=post --title='Grille Bêta' --slug=grille-beta --status=published --publish-at='2020-01-02 00:00:00' --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          php bin/prime content:create --type=post --title='Actualité publique' --slug=actualite-publique --status=published --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          php bin/prime content:create --type=post --title='Brouillon confidentiel' --slug=brouillon-confidentiel --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          DRAFT_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$DRAFT_ID"
+          php ../builder/tests/e2e/navigation-fixture.php "$DRAFT_ID" 2>&1 | tee -a /tmp/prime-install.log
+          php bin/prime content:create --type=page --title='Test Prime Builder' --slug=test-prime-builder --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$ID"
+          echo "E2E_ENTRY_ID=$ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Contenu existant' --slug=contenu-existant --status=published --body='{"version":1,"blocks":[{"id":"first","type":"paragraph","data":{"text":"Premier contenu"}},{"id":"middle","type":"html","data":{"html":"<p data-legacy=\"original\">Contenu original conservé</p>"}},{"id":"last","type":"heading","data":{"level":2,"text":"Troisième contenu"}}]}' 2>&1 | tee -a /tmp/prime-install.log
+          LEGACY_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$LEGACY_ID"
+          echo "E2E_LEGACY_ENTRY_ID=$LEGACY_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Bloc indisponible' --slug=bloc-indisponible --status=published --body='{"version":1,"blocks":[{"id":"first","type":"paragraph","data":{"text":"Premier contenu disponible"}},{"id":"middle","type":"html","data":{"html":"<p data-legacy=\"missing\">Bloc indisponible conservé</p>"}},{"id":"last","type":"heading","data":{"level":2,"text":"Dernier contenu disponible"}}]}' 2>&1 | tee -a /tmp/prime-install.log
+          MISSING_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$MISSING_ID"
+          php ../builder/tests/e2e/mark-block-missing.php "$MISSING_ID"
+          echo "E2E_MISSING_ENTRY_ID=$MISSING_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Blocs groupés' --slug=blocs-groupes --status=published --body='{"version":1,"blocks":[{"id":"first","type":"html","data":{"html":"<p data-legacy=\"first\">Premier bloc d’origine</p>"}},{"id":"middle","type":"paragraph","data":{"text":"Milieu conservé"}},{"id":"last","type":"html","data":{"html":"<p data-legacy=\"last\">Dernier bloc d’origine</p>"}}]}' 2>&1 | tee -a /tmp/prime-install.log
+          GROUP_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$GROUP_ID"
+          php ../builder/tests/e2e/mark-block-missing.php "$GROUP_ID" 0 2
+          echo "E2E_GROUP_ENTRY_ID=$GROUP_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Parcours souris' --slug=parcours-souris --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          MOUSE_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$MOUSE_ID"
+          echo "E2E_MOUSE_ENTRY_ID=$MOUSE_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Parcours clavier' --slug=parcours-clavier --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          KEYBOARD_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$KEYBOARD_ID"
+          echo "E2E_KEYBOARD_ENTRY_ID=$KEYBOARD_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Parcours glisser-déposer' --slug=parcours-glisser-deposer --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          DRAG_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$DRAG_ID"
+          echo "E2E_DRAG_ENTRY_ID=$DRAG_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='HTML filtré' --slug=html-filtre --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          HTML_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$HTML_ID"
+          echo "E2E_HTML_ENTRY_ID=$HTML_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Formulaire de test' --slug=formulaire-test --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          FORM_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$FORM_ID"
+          echo "E2E_FORM_ENTRY_ID=$FORM_ID" >> "$GITHUB_ENV"
+          php bin/prime content:create --type=page --title='Menu clavier' --slug=menu-clavier --status=draft --body='{"version":1,"blocks":[]}' 2>&1 | tee -a /tmp/prime-install.log
+          MENU_ID=$(grep -oE '#[0-9]+' /tmp/prime-install.log | tail -1 | tr -d '#')
+          test -n "$MENU_ID"
+          echo "E2E_MENU_ENTRY_ID=$MENU_ID" >> "$GITHUB_ENV"
+          php -S 0.0.0.0:8080 -t public public/router.php > /tmp/prime-builder-server.log 2>&1 &
+      - name: Report installation output on failure
+        if: failure()
+        run: if test -f /tmp/prime-install.log; then echo "::error title=Install log (base64)::$(base64 -w0 /tmp/prime-install.log)"; fi
+      - name: Install browser tooling
+        working-directory: builder/tests/e2e
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Playwright
+        working-directory: builder/tests/e2e
+        env:
+          E2E_CMS_ROOT: ${{ github.workspace }}/cms
+        run: npm test 2>&1 | tee /tmp/prime-builder-e2e.log
+      - name: Report Playwright summary
+        run: echo "::notice title=Playwright::$(grep -E '[0-9]+ passed' /tmp/prime-builder-e2e.log | tail -1 | xargs)"
+      # Temporary transport for media-list picker captures: GitHub caps annotations per job.
+      - name: Report media-list-editor-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-desktop 0
+      - name: Report media-list-editor-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-desktop 1
+      - name: Report media-list-editor-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-desktop 2
+      - name: Report media-list-editor-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-desktop 3
+      - name: Report media-list-editor-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-mobile 0
+      - name: Report media-list-editor-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-mobile 1
+      - name: Report media-list-editor-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-mobile 2
+      - name: Report media-list-editor-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-mobile 3
+      - name: Report media-list-editor-mobile-small capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-mobile-small 0
+      - name: Report media-list-editor-mobile-small capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-mobile-small 1
+      - name: Report media-list-editor-mobile-small capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-mobile-small 2
+      - name: Report media-list-editor-mobile-small capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-mobile-small 3
+      - name: Report media-list-editor-short capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-short 0
+      - name: Report media-list-editor-short capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-short 1
+      - name: Report media-list-editor-short capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-short 2
+      - name: Report media-list-editor-short capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-short 3
+      - name: Report media-list-editor-upload-short capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload-short 0
+      - name: Report media-list-editor-upload-short capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload-short 1
+      - name: Report media-list-editor-upload-short capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload-short 2
+      - name: Report media-list-editor-upload-short capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload-short 3
+      - name: Report media-list-editor-upload capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload 0
+      - name: Report media-list-editor-upload capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload 1
+      - name: Report media-list-editor-upload capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload 2
+      - name: Report media-list-editor-upload capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-editor-upload 3
+      - name: Report media-list-public-desktop capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-public-desktop 0
+      - name: Report media-list-public-desktop capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-public-desktop 1
+      - name: Report media-list-public-desktop capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-public-desktop 2
+      - name: Report media-list-public-desktop capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-public-desktop 3
+      - name: Report media-list-public-mobile capture part 0
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-public-mobile 0
+      - name: Report media-list-public-mobile capture part 1
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-public-mobile 1
+      - name: Report media-list-public-mobile capture part 2
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-public-mobile 2
+      - name: Report media-list-public-mobile capture part 3
+        run: bash builder/tests/e2e/visual-chunks.sh media-list-public-mobile 3
+      - name: Report browser test output on failure
+        if: failure()
+        run: |
+          if test -f /tmp/prime-builder-e2e.log; then
+            tail -c 24000 /tmp/prime-builder-e2e.log | split -b 2700 - /tmp/prime-builder-e2e-part-
+            for part in /tmp/prime-builder-e2e-part-*; do
+              echo "::error title=Browser test log $(basename "$part") (base64)::$(base64 -w0 "$part")"
+            done
+          fi
+      - name: Exercise notification races on the installed CMS
+        working-directory: cms
+        run: php ../builder/tests/e2e/notification-race.php
+      - name: Exercise private file races on the installed CMS
+        working-directory: cms
+        run: php ../builder/tests/e2e/private-file-race.php
+      - name: Exercise concurrent model edits on the installed CMS
+        working-directory: cms
+        run: php ../builder/tests/e2e/theme-model-race.php
+      - name: Fresh public requests after deactivation and reactivation
+        working-directory: cms
+        run: |
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/parcours-souris?pb-theme-active=1' > /tmp/prime-builder-theme-active.html
+          grep -F 'pb-theme-header' /tmp/prime-builder-theme-active.html
+          grep -F 'En-tête construit' /tmp/prime-builder-theme-active.html
+          php bin/prime plugin:deactivate prime-builder
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/test-prime-builder?pb-lifecycle-test=1' > /tmp/prime-builder-disabled.html
+          grep -F '<h2>Contenu conservé</h2>' /tmp/prime-builder-disabled.html
+          if grep -q '/assets/plugins/prime-builder/' /tmp/prime-builder-disabled.html; then echo 'Plugin assets appeared after deactivation'; exit 1; fi
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/parcours-souris?pb-theme-disabled=1' > /tmp/prime-builder-theme-disabled.html
+          grep -F 'class="site-header' /tmp/prime-builder-theme-disabled.html
+          if grep -q 'pb-theme-header' /tmp/prime-builder-theme-disabled.html; then echo 'Theme header appeared after deactivation'; exit 1; fi
+          php bin/prime plugin:activate prime-builder
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/parcours-souris?pb-theme-reactivated=1' > /tmp/prime-builder-theme-reactivated.html
+          grep -Fq 'pb-theme-header' /tmp/prime-builder-theme-reactivated.html
+          grep -Fq 'En-tête construit' /tmp/prime-builder-theme-reactivated.html
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/test-prime-builder?pb-reactivated=1' > /tmp/prime-builder-reactivated.html
+          grep -Fq '<h2>Contenu conservé</h2>' /tmp/prime-builder-reactivated.html
+          grep -Fq '/assets/plugins/prime-builder/' /tmp/prime-builder-reactivated.html
+      - name: Uninstall and verify data cleanup and public fallback
+        working-directory: cms
+        run: |
+          php bin/prime settings:set plugin.prime-builder.kit_primary '"#123456"'
+          php ../builder/tests/e2e/lifecycle-check.php seed
+          test -d content/plugins/prime-builder
+          test -d public/assets/plugins/prime-builder
+          test -d storage/prime-builder/styles
+          find storage/prime-builder/styles -name '*.css' -type f -print -quit | grep -q .
+          test -d storage/prime-builder/form-files
+          php bin/prime plugin:deactivate prime-builder
+          php bin/prime plugin:uninstall prime-builder
+          test ! -e content/plugins/prime-builder
+          test ! -e public/assets/plugins/prime-builder
+          test ! -e storage/prime-builder/styles
+          test ! -e storage/prime-builder/form-files
+          php ../builder/tests/e2e/lifecycle-check.php verify
+          curl --fail --silent --show-error 'http://127.0.0.1:8080/test-prime-builder?pb-uninstall-test=1' > /tmp/prime-builder-uninstalled.html
+          grep -F '<h2>Contenu conservé</h2>' /tmp/prime-builder-uninstalled.html
+          if grep -q '/assets/plugins/prime-builder/' /tmp/prime-builder-uninstalled.html; then echo 'Plugin assets appeared after uninstall'; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prime-builder-e2e-results
+          path: |
+            builder/tests/e2e/test-results
+            /tmp/prime-builder-server.log

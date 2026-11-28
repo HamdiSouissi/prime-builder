@@ -1,0 +1,421 @@
+<?php
+
+declare(strict_types=1);
+
+namespace PrimeBuilder\Document;
+
+use Prime\Editor\BlockRegistry;
+use Prime\Security\HtmlSanitizer;
+use PrimeBuilder\Dynamic\Conditions;
+use PrimeBuilder\Dynamic\Tags;
+use PrimeBuilder\Forms\Fields;
+use PrimeBuilder\Forms\NotificationSettings;
+use PrimeBuilder\Forms\Success;
+use PrimeBuilder\Styles\CssClasses;
+use PrimeBuilder\Styles\Values;
+use PrimeBuilder\Theme\GlobalWidgets;
+use PrimeBuilder\Widgets\Countdown;
+use PrimeBuilder\Widgets\Map;
+use PrimeBuilder\Widgets\MediaCarousel;
+use PrimeBuilder\Widgets\MediaDimensions;
+use PrimeBuilder\Widgets\OriginalContent;
+use PrimeBuilder\Widgets\Portfolio;
+use PrimeBuilder\Widgets\PrimeBlock;
+use PrimeBuilder\Widgets\Registry;
+use PrimeBuilder\Widgets\Slideshow;
+use PrimeBuilder\Widgets\TermIds;
+use PrimeBuilder\Widgets\Testimonials;
+
+/** Normalizes untrusted layout data, placing hard limits on size, depth and node count. */
+final class Validator
+{
+    public const MAX_BYTES = 1048576;
+    public const MAX_ELEMENTS = 500;
+    public const MAX_DEPTH = 12;
+
+    public function __construct(
+        private readonly Registry $registry,
+        private readonly HtmlSanitizer $sanitizer,
+        private readonly ?BlockRegistry $blocks = null,
+        private readonly ?OriginalContent $originals = null,
+        private readonly ?int $entryId = null,
+        private readonly ?HtmlContent $html = null,
+        private readonly bool $requireSealedHtml = false,
+        private readonly ?MediaReferences $mediaReferences = null,
+    ) {
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array{data: array<string, mixed>, errors: list<string>}
+     */
+    public function validate(array $data): array
+    {
+        $encoded = json_encode($data);
+        if (!is_string($encoded) || strlen($encoded) > self::MAX_BYTES) {
+            return ['data' => ['version' => 1, 'elements' => []], 'errors' => [t('plugin::prime-builder.validation.size')]];
+        }
+        $errors = [];
+        if (($data['version'] ?? null) !== 1 || !isset($data['elements']) || !is_array($data['elements']) || !array_is_list($data['elements'])) {
+            $errors[] = t('plugin::prime-builder.validation.structure');
+        }
+        $seen = [];
+        $mediaIds = [];
+        $count = 0;
+        $definitions = $this->registry->all();
+        $elements = is_array($data['elements'] ?? null) && array_is_list($data['elements'])
+            ? $this->elements($data['elements'], 0, $count, $seen, $errors, $definitions, $mediaIds)
+            : [];
+        $layout = ['version' => 1, 'elements' => $elements];
+        if (GlobalWidgets::countReferences($elements) > GlobalWidgets::MAX_REFERENCES) {
+            $errors[] = t('plugin::prime-builder.validation.count');
+        }
+        if ($errors === [] && $this->mediaReferences !== null) {
+            foreach ($this->mediaReferences->ids($elements, $definitions, $this->sanitizer) as $mediaId) {
+                $mediaIds[$mediaId] = $mediaId;
+            }
+        }
+        if ($mediaIds !== []) {
+            // Core's MediaUsageRepository recognizes item.mediaId on a block's
+            // data. Rebuild exclusively from authenticated fragments and resolved
+            // normalized settings, never from the client-supplied items list.
+            $layout['items'] = array_map(static fn (int $id): array => ['mediaId' => $id], array_values($mediaIds));
+        }
+
+        return ['data' => $layout, 'errors' => $errors];
+    }
+
+    /**
+     * @param list<mixed> $items
+     * @param array<string, true> $seen
+     * @param list<string> $errors
+     * @param array<string, array<string, mixed>> $definitions
+     * @param array<int, int> $mediaIds
+     * @return list<array<string, mixed>>
+     */
+    private function elements(array $items, int $depth, int &$count, array &$seen, array &$errors, array $definitions, array &$mediaIds): array
+    {
+        if ($depth > self::MAX_DEPTH) {
+            $errors[] = t('plugin::prime-builder.validation.depth');
+            return [];
+        }
+        $result = [];
+        foreach ($items as $item) {
+            $count++;
+            if ($count > self::MAX_ELEMENTS) {
+                $errors[] = t('plugin::prime-builder.validation.count');
+                break;
+            }
+            if (!is_array($item)) {
+                $errors[] = t('plugin::prime-builder.validation.structure');
+                continue;
+            }
+            $id = $item['id'] ?? null;
+            $type = $item['type'] ?? null;
+            if (!is_string($id) || preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $id) !== 1 || isset($seen[$id])) {
+                $errors[] = t('plugin::prime-builder.validation.id');
+                continue;
+            }
+            $seen[$id] = true;
+            if (!is_string($type) || !isset($definitions[$type])) {
+                $errors[] = t('plugin::prime-builder.validation.widget');
+                continue;
+            }
+            $definition = $definitions[$type];
+            $input = $item['settings'] ?? [];
+            if (!is_array($input)) {
+                $errors[] = t('plugin::prime-builder.validation.settings');
+                $input = [];
+            }
+            $settings = [];
+            foreach ($input as $key => $value) {
+                $schema = $definition['fields'][$key] ?? null;
+                if (!is_string($key) || !is_array($schema)) {
+                    $errors[] = t('plugin::prime-builder.validation.settings');
+                    continue;
+                }
+                $normalized = $this->field($value, $schema);
+                if ($normalized === null) {
+                    $errors[] = t('plugin::prime-builder.validation.settings');
+                    continue;
+                }
+                $settings[$key] = $normalized;
+            }
+            if ($type === 'form' && NotificationSettings::fromSettings($settings) === null) {
+                $errors[] = t('plugin::prime-builder.validation.settings');
+            }
+            if (in_array($type, ['gallery', 'image_carousel', 'media_carousel', 'slideshow', 'portfolio', 'testimonial_carousel'], true)
+                && (is_string($settings['images_dimensions'] ?? null) || is_string($settings['manual_dimensions'] ?? null))) {
+                // Bind both copied and manually supplied dimensions to an image
+                // URL, never to its position or to a video with the same URL.
+                $urls = [];
+                $itemLines = is_string($settings['items'] ?? null) ? $settings['items'] : '';
+                if ($type === 'media_carousel') {
+                    foreach (MediaCarousel::parse($itemLines, $this->sanitizer) ?? [] as $entry) {
+                        if ($entry['type'] === 'image') {
+                            $urls[] = $entry['url'];
+                        }
+                    }
+                } elseif (in_array($type, ['slideshow', 'portfolio', 'testimonial_carousel'], true)) {
+                    $entries = match ($type) {
+                        'slideshow' => Slideshow::parse($itemLines, $this->sanitizer),
+                        'portfolio' => Portfolio::parse($itemLines, $this->sanitizer),
+                        default => Testimonials::parse($itemLines, $this->sanitizer),
+                    };
+                    foreach ($entries ?? [] as $entry) {
+                        if ($entry['image'] !== '') {
+                            $urls[] = $entry['image'];
+                        }
+                    }
+                }
+                foreach (['images_dimensions', 'manual_dimensions'] as $key) {
+                    if (!is_string($settings[$key] ?? null)) {
+                        continue;
+                    }
+                    $rows = $key === 'manual_dimensions'
+                        ? MediaDimensions::parseManual($settings[$key], $this->sanitizer)
+                        : MediaDimensions::parse($settings[$key], $this->sanitizer);
+                    if ($rows === null || ($type !== 'portfolio' && count($rows) > MediaDimensions::STANDARD_MAX_ROWS)) {
+                        $errors[] = t('plugin::prime-builder.validation.settings');
+                        continue;
+                    }
+                    if (in_array($type, ['gallery', 'image_carousel'], true)) {
+                        $images = is_string($settings['images'] ?? null) ? $settings['images'] : '';
+                        $rows = MediaDimensions::onlyListed($rows, $images, $this->sanitizer);
+                    } else {
+                        $rows = MediaDimensions::onlyUrls($rows, $urls);
+                    }
+                    if ($rows === []) {
+                        unset($settings[$key]);
+                        continue;
+                    }
+                    $encoded = $key === 'manual_dimensions' ? MediaDimensions::serializeManual($rows) : MediaDimensions::serialize($rows);
+                    if ($encoded === null) {
+                        $errors[] = t('plugin::prime-builder.validation.settings');
+                    } else {
+                        $settings[$key] = $encoded;
+                    }
+                }
+            }
+            if ($type === 'prime_block') {
+                $blockType = is_string($settings['block_type'] ?? null) ? $settings['block_type'] : 'paragraph';
+                $blockData = is_string($settings['block_data'] ?? null) ? $settings['block_data'] : '{}';
+                $normalizedBlock = (new PrimeBlock($this->blocks ?? new BlockRegistry(), $this->sanitizer))->normalize($blockType, $blockData);
+                if ($normalizedBlock === null) {
+                    $errors[] = t('plugin::prime-builder.validation.prime_block');
+                } else {
+                    $settings['block_type'] = $blockType;
+                    $settings['block_data'] = $normalizedBlock;
+                }
+            }
+            if ($type === 'html' && $this->requireSealedHtml && !($this->html?->valid($id, $settings, $this->entryId) ?? false)) {
+                $errors[] = t('plugin::prime-builder.validation.html');
+            }
+            $isOriginal = in_array($type, ['original_content', 'original_group'], true);
+            if ($isOriginal) {
+                $payload = $settings['payload'] ?? null;
+                $original = is_string($payload) ? $this->originals?->open($payload) : null;
+                // The authenticated marker prevents relabelling a whole document as one block.
+                if (count($settings) !== 1 || $original === null || $original['grouped'] !== ($type === 'original_group')) {
+                    $errors[] = t('plugin::prime-builder.validation.settings');
+                } else {
+                    foreach ($original['media_ids'] as $mediaId) {
+                        $mediaIds[$mediaId] = $mediaId;
+                    }
+                }
+            }
+            $styles = $this->styles($item['styles'] ?? [], $errors);
+            if ($isOriginal && $styles !== []) {
+                $errors[] = t('plugin::prime-builder.validation.styles');
+            }
+            $children = $item['children'] ?? [];
+            if (!is_array($children) || !array_is_list($children) || (($definition['container'] ?? false) !== true && $children !== [])) {
+                $errors[] = t('plugin::prime-builder.validation.structure');
+                $children = [];
+            }
+            $element = ['id' => $id, 'type' => $type, 'settings' => $settings, 'styles' => $styles, 'children' => $this->elements($children, $depth + 1, $count, $seen, $errors, $definitions, $mediaIds)];
+            if (array_key_exists('classes', $item)) {
+                $classes = CssClasses::normalize($item['classes']);
+                if ($classes === null || ($isOriginal && $classes !== '')) {
+                    $errors[] = t('plugin::prime-builder.validation.classes');
+                } elseif ($classes !== '') {
+                    $element['classes'] = $classes;
+                }
+            }
+            if (array_key_exists('label', $item)) {
+                if (!is_string($item['label']) || strlen($item['label']) > 320) {
+                    $errors[] = t('plugin::prime-builder.validation.settings');
+                } else {
+                    $element['label'] = trim(strip_tags($item['label']));
+                }
+            }
+            if (array_key_exists('hidden', $item)) {
+                if (!is_bool($item['hidden'])) {
+                    $errors[] = t('plugin::prime-builder.validation.settings');
+                } else {
+                    $element['hidden'] = $item['hidden'];
+                }
+            }
+            if (array_key_exists('conditions', $item)) {
+                $conditions = Conditions::normalize($item['conditions']);
+                if ($conditions === null) {
+                    $errors[] = t('plugin::prime-builder.validation.settings');
+                } elseif ($conditions !== []) {
+                    $element['conditions'] = $conditions;
+                }
+            }
+            $result[] = $element;
+        }
+
+        return $result;
+    }
+
+    /** @param array<string, mixed> $schema */
+    private function field(mixed $value, array $schema): string|int|null
+    {
+        $type = $schema['type'] ?? '';
+        if ($type === 'integer') {
+            return is_int($value) && $value >= ($schema['min'] ?? 0) && $value <= ($schema['max'] ?? 10000) ? $value : null;
+        }
+        if (!is_string($value) || strlen($value) > (int) ($schema['max'] ?? 1000)) {
+            return null;
+        }
+        if ($type === 'protected') {
+            $original = $this->originals?->open($value);
+            return $original !== null && ($this->entryId === null || $original['entry'] === $this->entryId) ? $value : null;
+        }
+        return match ($type) {
+            // Counter affixes may intentionally contain a separating space.
+            // Keep them plain text and normalize line breaks for a single-line input.
+            'text', 'multiline' => ($schema['preserve_whitespace'] ?? false) === true
+                ? str_replace(["\r\n", "\r", "\n"], ' ', strip_tags($value))
+                : trim(strip_tags($value)),
+            // Code is data, not HTML: preserve whitespace and tags for the escaped renderer.
+            'code' => str_contains($value, "\0") ? null : $value,
+            'datetime_utc' => $value === '' || Countdown::canonical($value) !== null ? $value : null,
+            'latitude', 'longitude' => $value === '' || Map::coordinate($value, $type === 'latitude') !== null ? trim($value) : null,
+            'json_object' => is_object(json_decode($value)) ? $value : null,
+            'form_fields' => Fields::canonical($value),
+            'form_success_message' => Success::message($value),
+            'form_redirect' => Success::redirect($value),
+            'media_list' => $this->mediaList($value),
+            'media_dimensions' => ($dimensions = MediaDimensions::parse($value, $this->sanitizer)) === null ? null : MediaDimensions::serialize($dimensions),
+            'media_dimensions_manual' => ($dimensions = MediaDimensions::parseManual($value, $this->sanitizer)) === null ? null : MediaDimensions::serializeManual($dimensions),
+            'price_items' => $this->priceItems($value),
+            'media_carousel_items' => ($media = MediaCarousel::parse($value, $this->sanitizer)) === null ? null : MediaCarousel::serialize($media),
+            'slideshow_items' => ($slides = Slideshow::parse($value, $this->sanitizer)) === null ? null : Slideshow::serialize($slides),
+            'portfolio_items' => ($projects = Portfolio::parse($value, $this->sanitizer)) === null ? null : Portfolio::serialize($projects),
+            'testimonial_items' => ($rows = Testimonials::parse($value, $this->sanitizer)) === null ? null : Testimonials::serialize($rows),
+            'term_ids' => ($ids = TermIds::parse($value)) === null ? null : implode(',', $ids),
+            'rich' => $this->sanitizer->sanitizeBasic($value),
+            'href' => $value === '' ? '' : (str_contains($value, '{{') ? (Tags::urlToken($value) ? $value : null) : $this->sanitizer->sanitizeHref($value)),
+            'url' => $value === '' ? '' : (str_contains($value, '{{') ? (Tags::urlToken($value) ? $value : null) : $this->sanitizer->sanitizeResourceUrl($value)),
+            'slug' => $value === '' || preg_match('/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/', $value) === 1 ? $value : null,
+            'zone_slug' => $value === '' || preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/D', $value) === 1 ? $value : null,
+            'global_id' => $value === '' || preg_match('/^[a-f0-9]{32}$/D', $value) === 1 ? $value : null,
+            // A stale/deleted menu is valid document data; rendering falls back safely.
+            'menu_id' => $value === '' || preg_match('/^[1-9][0-9]{0,8}$/D', $value) === 1 ? $value : null,
+            'signature' => preg_match('/^[a-f0-9]{64}$/D', $value) === 1 ? $value : null,
+            'enum' => in_array($value, is_array($schema['values'] ?? null) ? $schema['values'] : [], true) ? $value : null,
+            default => null,
+        };
+    }
+
+    /** Normalize at most 30 text-only rows: name | price | optional description. */
+    private function priceItems(string $value): ?string
+    {
+        if (trim($value) === '') {
+            return '';
+        }
+        $lines = preg_split('/\R/u', trim($value));
+        if (!is_array($lines)) {
+            return null;
+        }
+        $output = [];
+        foreach ($lines as $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+            if (count($output) >= 30) {
+                return null;
+            }
+            $parts = array_map(static fn (string $part): string => trim(strip_tags($part)), explode('|', $line));
+            if (count($parts) < 2 || count($parts) > 3 || $parts[0] === '' || $parts[1] === ''
+                || strlen($parts[0]) > 300 || strlen($parts[1]) > 120 || strlen($parts[2] ?? '') > 1000) {
+                return null;
+            }
+            $output[] = implode(' | ', $parts);
+        }
+        return implode("\n", $output);
+    }
+
+    private function mediaList(string $value): ?string
+    {
+        if (trim($value) === '') {
+            return '';
+        }
+        $lines = preg_split('/\R/u', trim($value));
+        if (!is_array($lines) || count($lines) > 20) {
+            return null;
+        }
+        $output = [];
+        foreach ($lines as $line) {
+            $parts = explode('|', $line, 2);
+            $url = $this->sanitizer->sanitizeResourceUrl(trim($parts[0]));
+            $alt = trim(strip_tags($parts[1] ?? ''));
+            if ($url === null || strlen($alt) > 300) {
+                return null;
+            }
+            $output[] = $url . '|' . $alt;
+        }
+        return implode("\n", $output);
+    }
+
+    /**
+     * @param list<string> $errors
+     * @return array<string, array<string, string|int>>
+     */
+    private function styles(mixed $input, array &$errors): array
+    {
+        if (!is_array($input)) {
+            $errors[] = t('plugin::prime-builder.validation.styles');
+            return [];
+        }
+        $output = [];
+        foreach ($input as $mode => $values) {
+            if (!in_array($mode, ['desktop', 'tablet', 'mobile'], true) || !is_array($values)) {
+                $errors[] = t('plugin::prime-builder.validation.styles');
+                continue;
+            }
+            foreach ($values as $key => $value) {
+                $valid = match ($key) {
+                    'color', 'background', 'border_color' => Values::color($value) !== null,
+                    'border_width' => Values::borderWidth($value) !== null,
+                    'border_style' => Values::borderStyle($value) !== null,
+                    'box_shadow' => Values::boxShadow($value) !== null,
+                    'padding', 'padding_top', 'padding_right', 'padding_bottom', 'padding_left', 'margin', 'gap', 'font_size', 'radius', 'min_height' => Values::length($value) !== null,
+                    'margin_top', 'margin_right', 'margin_bottom', 'margin_left' => Values::offset($value) !== null,
+                    'width' => Values::length($value, true) !== null,
+                    'align' => is_string($value) && in_array($value, ['left', 'center', 'right'], true),
+                    'visibility' => is_string($value) && in_array($value, ['show', 'hide'], true),
+                    'position' => is_string($value) && in_array($value, ['static', 'relative', 'absolute', 'fixed', 'sticky'], true),
+                    'offset_top', 'offset_right', 'offset_bottom', 'offset_left' => Values::offset($value) !== null,
+                    'z_index' => Values::zIndex($value) !== null,
+                    'layout_mode' => is_string($value) && in_array($value, ['flex', 'grid'], true),
+                    'flow' => is_string($value) && in_array($value, ['row', 'column'], true),
+                    'grid_columns' => is_int($value) && $value >= 1 && $value <= 6,
+                    'wrap' => is_string($value) && in_array($value, ['wrap', 'nowrap'], true),
+                    'justify' => is_string($value) && in_array($value, ['start', 'center', 'end', 'space-between'], true),
+                    'items_align' => is_string($value) && in_array($value, ['start', 'center', 'end', 'stretch'], true),
+                    default => false,
+                };
+                if (!$valid) {
+                    $errors[] = t('plugin::prime-builder.validation.styles');
+                    continue;
+                }
+                $output[$mode][$key] = $value;
+            }
+        }
+        return $output;
+    }
+}

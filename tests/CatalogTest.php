@@ -1,0 +1,102 @@
+<?php
+
+declare(strict_types=1);
+
+namespace PrimeBuilder\Tests;
+
+use PHPUnit\Framework\TestCase;
+use Prime\Security\HtmlSanitizer;
+use PrimeBuilder\Document\Library;
+use PrimeBuilder\Document\Validator;
+use PrimeBuilder\Widgets\Registry;
+
+require_once dirname(__DIR__) . '/src/Styles/Values.php';
+require_once dirname(__DIR__) . '/src/Document/Library.php';
+require_once dirname(__DIR__) . '/src/Document/Validator.php';
+require_once dirname(__DIR__) . '/src/Widgets/PrimeBlock.php';
+require_once dirname(__DIR__) . '/src/Widgets/MediaDimensions.php';
+require_once dirname(__DIR__) . '/src/Widgets/Registry.php';
+
+final class CatalogTest extends TestCase
+{
+    public function testTranslationsHaveIdenticalKeys(): void
+    {
+        $fr = require dirname(__DIR__) . '/lang/fr/messages.php';
+        $en = require dirname(__DIR__) . '/lang/en/messages.php';
+        self::assertSame($this->keys($fr), $this->keys($en));
+        self::assertSame('Titre', $fr['ui']['title']);
+        self::assertSame('Éditeur visuel', $fr['ui']['editor_title']);
+        self::assertSame('Carrousel de médias', $fr['widgets']['media_carousel']);
+        self::assertSame('Media carousel', $en['widgets']['media_carousel']);
+        self::assertStringContainsString('landscape.svg', $fr['defaults']['media_carousel_items']);
+        self::assertStringContainsString('landscape.svg', $en['defaults']['media_carousel_items']);
+        self::assertSame('Diaporama', $fr['widgets']['slideshow']);
+        self::assertSame('Slideshow', $en['widgets']['slideshow']);
+        self::assertStringContainsString('landscape.svg', $fr['defaults']['slideshow_items']);
+        self::assertStringContainsString('landscape.svg', $en['defaults']['slideshow_items']);
+        self::assertSame('Portfolio', $fr['widgets']['portfolio']);
+        self::assertSame('Portfolio', $en['widgets']['portfolio']);
+        self::assertSame('Menu de navigation', $fr['widgets']['navigation']);
+        self::assertSame('Navigation menu', $en['widgets']['navigation']);
+        self::assertSame('Fil d’Ariane', $fr['widgets']['breadcrumbs']);
+        self::assertSame('Breadcrumbs', $en['widgets']['breadcrumbs']);
+        self::assertSame('Titre du site', $fr['widgets']['site_title']);
+        self::assertSame('Site title', $en['widgets']['site_title']);
+        self::assertSame('Logo du site', $fr['widgets']['site_logo']);
+        self::assertSame('Site logo', $en['widgets']['site_logo']);
+        self::assertSame('Titre du contenu', $fr['widgets']['entry_title']);
+        self::assertSame('Content title', $en['widgets']['entry_title']);
+        self::assertSame('Extrait du contenu', $fr['widgets']['entry_excerpt']);
+        self::assertSame('Content excerpt', $en['widgets']['entry_excerpt']);
+        self::assertSame('Contenu de l’entrée', $fr['widgets']['entry_content']);
+        self::assertSame('Entry content', $en['widgets']['entry_content']);
+        self::assertSame('Image à la une du contenu', $fr['widgets']['entry_featured_image']);
+        self::assertSame('Content featured image', $en['widgets']['entry_featured_image']);
+        self::assertSame('Informations du contenu', $fr['widgets']['entry_info']);
+        self::assertSame('Content information', $en['widgets']['entry_info']);
+        self::assertSame('Navigation entre contenus', $fr['widgets']['entry_navigation']);
+        self::assertSame('Content navigation', $en['widgets']['entry_navigation']);
+        self::assertSame('Boîte auteur', $fr['widgets']['entry_author']);
+        self::assertSame('Author box', $en['widgets']['entry_author']);
+        self::assertSame('Titre d’archive', $fr['widgets']['archive_title']);
+        self::assertSame('Archive title', $en['widgets']['archive_title']);
+        self::assertSame('Liste d’archive', $fr['widgets']['archive_list']);
+        self::assertSame('Archive list', $en['widgets']['archive_list']);
+        self::assertSame('Boutons de partage', $fr['widgets']['share_buttons']);
+        self::assertSame('Share buttons', $en['widgets']['share_buttons']);
+        self::assertSame('Sommaire automatique', $fr['widgets']['table_of_contents']);
+        self::assertSame('Table of contents', $en['widgets']['table_of_contents']);
+        self::assertStringContainsString('landscape.svg', $fr['defaults']['portfolio_items']);
+        self::assertStringContainsString('landscape.svg', $en['defaults']['portfolio_items']);
+    }
+
+    public function testAllShippedTemplatesValidate(): void
+    {
+        $library = new Library(dirname(__DIR__) . '/templates');
+        $templates = $library->all();
+        self::assertSame(9, count($templates));
+        $validator = new Validator(new Registry(), new HtmlSanitizer());
+        foreach ($templates as $template) {
+            self::assertSame([], $validator->validate(['version' => 1, 'elements' => $template['elements']])['errors'], (string) $template['name']);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $tree
+     * @return list<string>
+     */
+    private function keys(array $tree, string $prefix = ''): array
+    {
+        $result = [];
+        foreach ($tree as $key => $value) {
+            $path = $prefix . (string) $key;
+            if (is_array($value)) {
+                $result = array_merge($result, $this->keys($value, $path . '.'));
+            } else {
+                $result[] = $path;
+            }
+        }
+        sort($result);
+        return $result;
+    }
+}

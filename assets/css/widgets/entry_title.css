@@ -1,0 +1,8 @@
+.pb-entry_title .pb-entry-title__text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pb-entry_title .pb-entry-title__text a {
+  color: inherit;
+}

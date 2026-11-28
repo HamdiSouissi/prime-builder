@@ -1,0 +1,10 @@
+.pb-flip-box{display:grid;gap:.75rem;overflow-wrap:anywhere}
+.pb-flip-face:not([hidden]){display:grid;align-content:start;gap:.75rem;min-width:0;padding:1.5rem;border:1px solid currentColor;border-radius:1rem}
+.pb-flip-face[hidden]{display:none!important}
+.pb-flip-face :where(h2,h3,h4,h5,h6,p){margin:0}
+.pb-flip-face.pb-flip-back{border-style:dashed}
+.pb-flip-control,.pb-flip-link{justify-self:start;display:inline-block;box-sizing:border-box;max-width:100%;padding:.7rem 1.1rem;border:1px solid #a93619;border-radius:.625rem;background:#a93619;color:#fff;font:inherit;text-decoration:none;cursor:pointer}
+.pb-flip-control:focus-visible,.pb-flip-link:focus-visible{outline:3px solid #ed6647;outline-offset:3px}
+.pb-flip-face[data-pb-flip-activated]:not([hidden]){animation:pb-flip-appear .24s ease-out}
+@keyframes pb-flip-appear{from{opacity:.65;transform:perspective(600px) rotateY(-12deg)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.pb-flip-face[data-pb-flip-activated]:not([hidden]){animation:none}}

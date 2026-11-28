@@ -1,0 +1,190 @@
+{
+  "kind": "page",
+  "name": "home",
+  "version": 1,
+  "elements": [
+    {
+      "id": "hero",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12,
+          "background": "#fff4f1"
+        }
+      },
+      "children": [
+        {
+          "id": "hero-title",
+          "type": "heading",
+          "settings": {
+            "text": "@pb:templates.copy.hero_title",
+            "level": 2
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "hero-text",
+          "type": "text",
+          "settings": {
+            "text": "@pb:templates.copy.hero_text"
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "hero-button",
+          "type": "button",
+          "settings": {
+            "text": "@pb:templates.copy.hero_button",
+            "url": "#contact"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "feature",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12,
+          "background": "#f3f1ee"
+        }
+      },
+      "children": [
+        {
+          "id": "feature-title",
+          "type": "heading",
+          "settings": {
+            "text": "@pb:templates.copy.feature_title",
+            "level": 2
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "feature-text",
+          "type": "text",
+          "settings": {
+            "text": "@pb:templates.copy.feature_text"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "image-text",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12
+        }
+      },
+      "children": [
+        {
+          "id": "image-text-art",
+          "type": "image",
+          "settings": {
+            "url": "/assets/plugins/prime-builder/images/landscape.svg",
+            "alt": "@pb:templates.copy.image_alt",
+            "width": 960,
+            "height": 640
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "image-text-title",
+          "type": "heading",
+          "settings": {
+            "text": "@pb:templates.copy.about_title",
+            "level": 2
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "image-text-copy",
+          "type": "text",
+          "settings": {
+            "text": "@pb:templates.copy.about_text"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "cta",
+      "type": "container",
+      "settings": {
+        "layout": "flex",
+        "direction": "column",
+        "columns": 1
+      },
+      "styles": {
+        "desktop": {
+          "padding": 32,
+          "gap": 16,
+          "radius": 12,
+          "background": "#f3f1ee"
+        }
+      },
+      "children": [
+        {
+          "id": "cta-title",
+          "type": "heading",
+          "settings": {
+            "text": "@pb:templates.copy.cta_title",
+            "level": 2
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "cta-text",
+          "type": "text",
+          "settings": {
+            "text": "@pb:templates.copy.cta_text"
+          },
+          "styles": {},
+          "children": []
+        },
+        {
+          "id": "cta-button",
+          "type": "button",
+          "settings": {
+            "text": "@pb:templates.copy.cta_button",
+            "url": "#contact"
+          },
+          "styles": {},
+          "children": []
+        }
+      ]
+    }
+  ]
+}

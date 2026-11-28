@@ -1,0 +1,7 @@
+.pb-countdown-widget{overflow-wrap:anywhere}
+.pb-countdown-date{margin:.5rem 0 1rem}
+.pb-countdown-values:not([hidden]){display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,7.5rem),1fr));gap:.75rem;max-width:36rem}
+.pb-countdown-unit{min-width:0;padding:.7rem .9rem;border:1px solid currentColor;border-radius:.35rem;text-align:center}
+.pb-countdown-unit strong,.pb-countdown-unit span{display:block}
+.pb-countdown-unit strong{font-size:1.75rem;line-height:1.2;font-variant-numeric:tabular-nums}
+.pb-countdown-status:empty{margin:0}

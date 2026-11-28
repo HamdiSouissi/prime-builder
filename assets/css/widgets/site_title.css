@@ -1,0 +1,8 @@
+.pb-site_title .pb-site-title__text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pb-site_title .pb-site-title__text a {
+  color: inherit;
+}
