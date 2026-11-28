@@ -5389,7 +5389,9 @@ test('theme navigation renders current public menus with keyboard and no-JavaScr
   page.setDefaultTimeout(12_000);
   await login(page);
   let csrf = null, templateId = null, createdMenuId = null, originalTheme = null, originalCache = null, originalBreakpoints = null;
+  let pageCacheAvailable = false;
   const pages = [];
+  const expectPageCache = (response, expected) => expect(response.headers()['x-prime-cache']).toBe(pageCacheAvailable ? expected : undefined);
   const api = (url, method, body) => page.evaluate(async ({ url, method, body, csrf }) => {
     const response = await fetch(url, {
       // The REST API and the CMS administration routes use different CSRF headers.
@@ -5462,9 +5464,8 @@ test('theme navigation renders current public menus with keyboard and no-JavaScr
       footer: await page.getByLabel('Pied de page', { exact: true }).inputValue(),
       exclude: await page.getByLabel('Contenus exclus', { exact: true }).inputValue(),
     };
-    // A preceding zone scenario may have saved a declared zone. In that case
-    // this fixture bypasses the page cache even after the zone was cleared;
-    // the isolated PHPUnit test verifies the partial's own cache decision.
+    // A preceding zone scenario may have saved a declared zone. CMS 1.0.3+
+    // still caches; older cores bypass when a declared zone has been saved.
     await page.getByLabel('En-tête', { exact: true }).selectOption('');
     await page.getByLabel('Pied de page', { exact: true }).selectOption('');
     await page.getByLabel('Contenus exclus', { exact: true }).fill('');
@@ -5476,7 +5477,14 @@ test('theme navigation renders current public menus with keyboard and no-JavaScr
       const probePage = await cacheProbe.newPage();
       await probePage.goto('/blog/actualite-publique');
       const cached = await probePage.reload();
-      expect([undefined, 'HIT']).toContain(cached.headers()['x-prime-cache']);
+      const header = cached.headers()['x-prime-cache'];
+      if (process.env.E2E_EXPECT_LEGACY_ZONE_CACHE === '1') {
+        // A standalone run on an old core may not have saved a zone yet.
+        expect([undefined, 'HIT']).toContain(header);
+      } else {
+        expect(header).toBe('HIT');
+      }
+      pageCacheAvailable = header === 'HIT';
     } finally { await cacheProbe.close(); }
     await page.getByLabel('En-tête', { exact: true }).selectOption(templateId);
     await page.getByLabel('Pied de page', { exact: true }).selectOption(templateId);
@@ -5692,11 +5700,11 @@ test('theme navigation renders current public menus with keyboard and no-JavaScr
     try {
       const publicPage = await noJs.newPage();
       let response = await publicPage.goto('/blog/actualite-publique');
-      // PageCacheMiddleware returns directly for uncacheable requests, without
-      // an X-Prime-Cache header (the PHPUnit test checks the hook itself).
-      expect(response.headers()['x-prime-cache']).toBeUndefined();
+      // The breakpoint edit purged the cache. With a modern core, verify a
+      // fresh MISS then HIT; legacy cores may bypass due to an earlier zone.
+      expectPageCache(response, 'MISS');
       response = await publicPage.reload();
-      expect(response.headers()['x-prime-cache']).toBeUndefined();
+      expectPageCache(response, 'HIT');
       const publicHeader = publicPage.locator('header.pb-theme-header').getByRole('navigation', { name: 'Explorer le site' });
       const publicFooter = publicPage.locator('footer.pb-theme-footer').getByRole('navigation', { name: 'Explorer le site' });
       await expect(publicHeader.getByRole('link', { name: 'Détails' })).toBeVisible();
@@ -5705,18 +5713,27 @@ test('theme navigation renders current public menus with keyboard and no-JavaScr
       result = await api(`/api/v1/content/page/${pages[0].id}`, 'PATCH', { status: 'draft' });
       expect(result.status, result.body).toBe(200);
       response = await publicPage.reload();
-      expect(response.headers()['x-prime-cache']).toBeUndefined();
+      expectPageCache(response, 'MISS');
       await expect(publicHeader.getByText('Enfant du menu')).toHaveCount(0);
       await expect(publicFooter.getByText('Enfant du menu')).toHaveCount(0);
       expect(await publicPage.locator('header.pb-theme-header').innerHTML()).not.toContain('pb-parent-menu');
+      response = await publicPage.reload();
+      expectPageCache(response, 'HIT');
+      await expect(publicHeader.getByText('Enfant du menu')).toHaveCount(0);
       result = await saveMenu([...items, { type: 'url', url: '/nouveau-menu', label: 'Lien actualisé' }]);
       expect(result.status, result.body).toBe(200);
-      await publicPage.reload();
+      response = await publicPage.reload();
+      expectPageCache(response, 'MISS');
       await expect(publicHeader.getByRole('link', { name: 'Lien actualisé' })).toHaveAttribute('href', '/nouveau-menu');
+      response = await publicPage.reload();
+      expectPageCache(response, 'HIT');
       result = await api(`/api/v1/content/page/${pages[0].id}`, 'PATCH', { status: 'published', slug: 'pb-parent-menu-renomme' });
       expect(result.status, result.body).toBe(200);
-      await publicPage.reload();
+      response = await publicPage.reload();
+      expectPageCache(response, 'MISS');
       await expect(publicHeader.getByRole('link', { name: 'Enfant du menu' })).toHaveAttribute('href', '/pb-parent-menu-renomme/pb-enfant-menu');
+      response = await publicPage.reload();
+      expectPageCache(response, 'HIT');
       await publicPage.goto('/page-introuvable-pb');
       await expect(publicFooter.getByRole('link', { name: 'Détails' })).toBeVisible();
       await publicFooter.getByRole('link', { name: 'Accueil' }).focus();
@@ -5823,8 +5840,8 @@ test('theme search forms use the current search URL without JavaScript or duplic
       const publicPage = await noJs.newPage();
       await publicPage.goto('/blog/actualite-publique');
       const cached = await publicPage.reload();
-      // A saved zone can bypass the cache; PHPUnit separately exercises the
-      // cached-search-form setting change in an isolated fixture without zones.
+      // A saved zone can bypass the cache on CMS 1.0.1/1.0.2; PHPUnit also
+      // exercises the cached-search-form setting change in an isolated fixture.
       expect([undefined, 'HIT']).toContain(cached.headers()['x-prime-cache']);
       await expect(publicPage.locator('header.pb-theme-header form')).toHaveAttribute('action', '/recherche');
       const changed = await api('/api/v1/settings', 'PATCH', { 'permalinks.search_base': 'trouver-theme' });
